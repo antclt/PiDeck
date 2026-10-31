@@ -4,6 +4,7 @@ import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
 
 import { cn } from "@/lib/utils";
 import { floatingWheelGuardRef } from "@/lib/floatingWheelGuard";
+import { titlebarCollisionPadding } from "@/lib/titlebarInset";
 
 function DropdownMenu({ ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
 	return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />;
@@ -17,13 +18,15 @@ function DropdownMenuTrigger({ ...props }: React.ComponentProps<typeof DropdownM
 	return <DropdownMenuPrimitive.Trigger data-slot="dropdown-menu-trigger" {...props} />;
 }
 
-function DropdownMenuContent({ className, sideOffset = 4, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
+function DropdownMenuContent({ className, sideOffset = 4, collisionPadding, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
 	return (
 		<DropdownMenuPrimitive.Portal>
 			<DropdownMenuPrimitive.Content
 				ref={floatingWheelGuardRef}
 				data-slot="dropdown-menu-content"
 				sideOffset={sideOffset}
+				// 显式传入者优先；默认让开标题栏拖拽热区（见 lib/titlebarInset.ts）
+				collisionPadding={collisionPadding ?? titlebarCollisionPadding()}
 				className={cn(
 					"z-(--z-popover) max-h-(--radix-dropdown-menu-content-available-height) min-w-[8rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-[var(--shadow-popover)] duration-base ease-out-quint data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:ease-in data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 dropdown-stagger",
 					className,
