@@ -1,4 +1,5 @@
 import { agentEventTags } from "../../shared/ipc";
+import { reasoningText } from "../../shared/reasoningText";
 import type { ThinkingUpdate } from "../../shared/types";
 import { LatestByKeyEmitter } from "./LatestByKeyEmitter";
 import { stripAnsi } from "./agentUtils";
@@ -15,6 +16,10 @@ import { stripAnsi } from "./agentUtils";
  * 增量推送治理（两条通道同策略）：正常 append 只发 delta；非 append（重置/ANSI
  * 变化）或距上次全量超过 50 次推送（≈2.5s）时改发全量快照，兜底渲染层 HHR/晚绑定
  * 丢失的增量。
+ *
+ * 思考展示净化：供应商把思维签名（`<signature>…</signature>`）拼在推理正文开头，
+ * 累积文本保留原文，下发前统一跑 `shared/reasoningText` 并在净化后的文本上做增量
+ * 比对——否则拿原始累积做前缀比对，签名未闭合期间每一帧都会被当成非 append 走全量。
  */
 export interface LiveStreamChannelHost {
 	emit(channel: string, payload: unknown): void;
@@ -227,7 +232,7 @@ export class LiveStreamChannel {
 	/** 发 done 并清 live 思考通道；须在 finalizeThinkingIntoMessage + flushMessageEmit 之后调用。 */
 	finishThinkingChannel(agentId: string) {
 		const segment = this.thinkingSegmentByAgent.get(agentId);
-		const text = stripAnsi(this.streamingThinking.get(agentId) ?? "");
+		const text = reasoningText(stripAnsi(this.streamingThinking.get(agentId) ?? ""));
 		this.thinkingEmitter.cancel(agentId);
 		this.lastSentThinkingByAgent.delete(agentId);
 		this.thinkingPushCountByAgent.delete(agentId);
@@ -251,10 +256,10 @@ export class LiveStreamChannel {
 		const segment = this.thinkingSegmentByAgent.get(agentId);
 		if (!segment) return;
 		// 与正文通道同策略：ANSI 剥离只在 emit（每 100ms 一次）发生
-		this.pushThinkingStream(agentId, segment, stripAnsi(rawText), false);
+		this.pushThinkingStream(agentId, segment, reasoningText(stripAnsi(rawText)), false);
 	}
 
-	/** 思考通道的实际发送：forceFull=true 时忽略增量基准，整段下发（可见性补帧用）。 */
+	/** 思考通道发送：入参须已做展示净化；forceFull 时忽略基准整段下发（补帧用）。 */
 	private pushThinkingStream(agentId: string, segment: ThinkingSegmentRecord, text: string, forceFull: boolean) {
 		// 增量推送（同正文通道治理）：只发上次快照之后的新字符；非 append
 		// （重置/ANSI 变化）或距上次快照超过 50 次推送（≈2.5s）时补一次全量，
@@ -279,9 +284,9 @@ export class LiveStreamChannel {
 	emitThinkingSnapshot(agentId: string): void {
 		const segment = this.thinkingSegmentByAgent.get(agentId);
 		if (!segment) return;
-		const text = this.streamingThinking.get(agentId);
-		if (text === undefined || text.length === 0) return;
-		this.pushThinkingStream(agentId, segment, stripAnsi(text), true);
+		const text = reasoningText(stripAnsi(this.streamingThinking.get(agentId) ?? ""));
+		if (!text) return;
+		this.pushThinkingStream(agentId, segment, text, true);
 	}
 
 	// ── 生命周期清理 ───────────────────────────────────────────

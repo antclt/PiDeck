@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui-shadcn/tabs";
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui-shadcn/alert-dialog";
 import { cn } from "../../lib/utils";
+import { WORKBENCH_DIALOG_SIZE_CLASS } from "../common/workbenchDialogSize";
 import { deepClone } from "../../utils/deepEqual";
 import { buttonVariants } from "../ui-shadcn/button";
 import { useVisionBridgeDraft } from "./settings/visionDraft.ts";
@@ -157,7 +158,7 @@ type SettingsModalProps = {
  */
 // 小窗口保留外边距，避免设置页完全压住工作区；821px 以上恢复桌面弹框尺寸。
 // DialogContent 默认带 sm:max-w-lg，必须显式覆盖它，否则小窗口会变成窄高条。
-const settingsModalSizeClass = "w-[80vw] max-w-[80vw] h-[80vh] max-h-[80vh] sm:max-w-[min(1300px,80vw)]";
+const settingsModalSizeClass = WORKBENCH_DIALOG_SIZE_CLASS;
 
 class SettingsModalErrorBoundary extends Component<{ onClose: () => void; children: ReactNode }, { error: Error | null }> {
 	override state = { error: null as Error | null };
@@ -356,7 +357,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 	const [shortcutsInvalid, setShortcutsInvalid] = useState(false);
 	const handleShortcutsInvalidChange = useCallback((invalid: boolean) => setShortcutsInvalid(invalid), []);
 	// 左侧导航黄点来源：与关闭确认同一套字段目录，避免两处口径不一致
-	const dirtyTabIds = useMemo(() => dirtySettingsTabIds({ dirtyFields, visionDirty: visionDraft.dirty, imageGenDirty, acpDirty }), [dirtyFields, visionDraft.dirty, imageGenDirty, acpDirty]);
+	const dirtyTabIds = useMemo(() => dirtySettingsTabIds({ dirtyFields, visionDirty: visionDraft.dirty, imageGenDirty, videoGenDirty, acpDirty }), [dirtyFields, visionDraft.dirty, imageGenDirty, videoGenDirty, acpDirty]);
 	/** 各 tab 的局部编辑态（WSL 输入/Web 端口/宠物预览模式）在取消时通过递增信号重置 */
 	const [devTabResetKey, setDevTabResetKey] = useState(0);
 	const [webTabResetKey, setWebTabResetKey] = useState(0);
@@ -501,8 +502,11 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 	/** 关闭弹框：系统设置草稿与配置管理草稿任一有未保存变化都统一弹确认（不再按分区委托），
 	 *  配置分区的脏状态由 ConfigPane 上报（onStateChange.hasDirty）；无任何脏直接关闭。 */
+	/** 关闭/安装前检查的全部独立草稿脏源（系统设置字段 + 视觉桥/生图/生视频/ACP）。
+	 *  videoGenDirty/acpDirty 此前漏算：改了生视频供应商或 ACP 工具表后直接关弹窗不会弹确认，草稿静默丢失。 */
+	const hasIndependentDraftsDirty = visionDraft.dirty || imageGenDirty || videoGenDirty || acpDirty;
 	const handleClose = () => {
-		const settingsDirty = dirtyFields.size > 0 || visionDraft.dirty || imageGenDirty;
+		const settingsDirty = dirtyFields.size > 0 || hasIndependentDraftsDirty;
 		if (settingsDirty || configPaneState.hasDirty) {
 			setCloseConfirmOpen(true);
 		} else {
@@ -512,7 +516,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 
 	/** 保存关闭/安装前的全部脏来源；任一来源失败时保留弹窗和草稿供用户重试。 */
 	const savePendingChanges = async (): Promise<boolean> => {
-		const settingsDirty = dirtyFields.size > 0 || visionDraft.dirty || imageGenDirty;
+		const settingsDirty = dirtyFields.size > 0 || hasIndependentDraftsDirty;
 		const settingsOk = settingsDirty ? await saveAll() : true;
 		const configOk = configPaneState.hasDirty ? ((await configPaneRef.current?.saveAllDirty()) ?? false) : true;
 		return settingsOk && configOk;
@@ -545,7 +549,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 			props.onInstallUpdate();
 			return;
 		}
-		const settingsDirty = dirtyFields.size > 0 || visionDraft.dirty || imageGenDirty;
+		const settingsDirty = dirtyFields.size > 0 || hasIndependentDraftsDirty;
 		if (settingsDirty || configPaneState.hasDirty) {
 			setInstallConfirmOpen(true);
 			return;
@@ -672,9 +676,10 @@ function SettingsModalContent(props: SettingsModalProps) {
 				dirtyFields,
 				visionDirty: visionDraft.dirty,
 				imageGenDirty,
+				videoGenDirty,
 				acpDirty,
 			}),
-		[dirtyFields, visionDraft.dirty, imageGenDirty, acpDirty],
+		[dirtyFields, visionDraft.dirty, imageGenDirty, videoGenDirty, acpDirty],
 	);
 	const unsavedCloseMessage = useMemo(() => formatSettingsUnsavedMessage(unsavedSummary, t), [unsavedSummary]);
 	// 关闭确认清单 = 系统设置 + 配置管理两区未保存项合并（配置项由 ConfigPane 上报）

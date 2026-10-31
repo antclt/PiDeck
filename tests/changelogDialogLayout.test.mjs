@@ -7,7 +7,8 @@ import assert from "node:assert/strict";
 // 这两个都是「代码看着对、界面是坏的」类问题，纯靠读代码发现不了，必须靠断言把
 // 结论钉住，否则下次改样式时极易回潮。
 
-const DIALOG_SRC = "src/renderer/src/components/app/settings/ChangelogDialog.tsx";
+// Wave 2 §5.3 起两条塌陷回归的载体是共享壳 ChangelogReaderDialog（ChangelogDialog/PiChangelogDialog 同源）。
+const DIALOG_SRC = "src/renderer/src/components/app/settings/ChangelogReaderDialog.tsx";
 
 /**
  * 回归一：DialogContent 基础类自带 `sm:max-w-lg`，而 tailwind-merge 只消解**同断点前缀**

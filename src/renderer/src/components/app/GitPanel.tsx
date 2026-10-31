@@ -1284,7 +1284,8 @@ export function GitPanel(props: GitPanelProps) {
 			bottom: placement.bottom,
 			width: placement.width,
 			maxHeight: placement.maxHeight,
-			zIndex: 9999,
+			// z 层级走语义 token（foundation.css）：下拉是 popover 语义，不再写死 9999 旁路（Wave 2 §5）。
+			zIndex: "var(--z-popover)",
 		});
 	}, []);
 

@@ -8,7 +8,7 @@ import { replaceExpandedRefBlocksWithLabels } from "./composer/quoteChip";
 import { showNotice } from "../../utils/notice";
 import { Button } from "../ui-shadcn/button";
 import { ConfirmDialog } from "../ui-shadcn/ConfirmDialog";
-import { Dialog, DialogContent } from "../ui-shadcn/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
 import { Input } from "../ui-shadcn/input";
 import { Progress } from "../ui-shadcn/progress";
 
@@ -23,6 +23,9 @@ export function DshAgentToolsPanel(props: { sessionId: string; agentId: string; 
 	return (
 		<Dialog open onOpenChange={(next) => !next && props.onClose()}>
 			<DialogContent showCloseButton className="sm:max-w-lg">
+				<DialogHeader className="sr-only">
+					<DialogTitle>{t("dshTools.title")}</DialogTitle>
+				</DialogHeader>
 				<div className="flex gap-1 border-b border-border-subtle pb-2">
 					<Button variant={tab === "goals" ? "secondary" : "ghost"} size="sm" className="gap-1.5" onClick={() => setTab("goals")}>
 						<Target size={14} aria-hidden="true" />

@@ -40,6 +40,9 @@ const timeline = compile("src/renderer/src/hooks/useSessionTimelineController.ts
 	// sessionHistoryAvailability 是纯函数（只有 type import），照 browsePin 的做法编译真模块。
 	// 两个都必须在 stub 表里：缺失时 loader 回落到以 tests/ 为基准的 nodeRequire，解析 .ts 必失败。
 	"../i18n": { t: (key) => key },
+	// showNotice 是 Wave 1（feec43b90）从 sonner toast 迁移过来的单通道通知；拉真模块会
+	// 带起 sonner 依赖，这里给最小 stub（跳转失败 toast 在控制器测试里不在断言范围）。
+	"../utils/notice": { showNotice: () => undefined },
 	"../utils/sessionHistoryAvailability": compile("src/renderer/src/utils/sessionHistoryAvailability.ts"),
 	// 磁盘页游标归一（dev 引入）：纯函数，无内部 import，直接编译真模块。
 	"../utils/sessionDiskPageCursor": compile("src/renderer/src/utils/sessionDiskPageCursor.ts"),
@@ -57,6 +60,8 @@ const timeline = compile("src/renderer/src/hooks/useSessionTimelineController.ts
 	"../components/session/timeline/jumpWindowPolicy": compile("src/renderer/src/components/session/timeline/jumpWindowPolicy.ts", { "./turnRenderWindow": { TIMELINE_WINDOW_EXPAND_STEP: 3 } }),
 	// 会话内查找落位归一（1055e794b 引入）：纯函数 + DOM 兜底，无内部 import。
 	"../components/session/timeline/jumpTarget": compile("src/renderer/src/components/session/timeline/jumpTarget.ts"),
+	// 子代理首屏分页读取（dev 引入）：控制器只调用 readSessionFirstScreenPage，stub 成空实现。
+	"../components/session/sessionSubagentTranscript": { readSessionFirstScreenPage: () => undefined },
 	"./timeline/browsePin": browsePin,
 	// SendScrollPositioner（612bb51c1 从 controller 迁出）：真实模块自身只依赖
 	// ../../lib/pinTurnScroll，与 ../lib/pinTurnScroll 同名 mock 共享即可。

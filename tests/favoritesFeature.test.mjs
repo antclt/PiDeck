@@ -85,9 +85,10 @@ test("收藏页展示收藏时间、筛选与删除确认，复用统一视觉�
 	assert.match(favoritesWorkspace, /<ConfirmDialog/);
 	assert.match(favoritesWorkspace, /writeClipboard\(entry\.text\)/);
 	assert.match(favoritesWorkspace, /favorites\.emptyTitle/);
-	// 页面排版与智能体页一致：同一边距/分隔线/标题字号
-	assert.match(favoritesWorkspace, /border-b border-border\/40 px-5 py-3/);
-	assert.match(favoritesWorkspace, /<h1 className="truncate text-base font-semibold text-foreground">/);
+	// 页面排版与智能体页一致：Wave 2 起结构收敛到共享 PageHeader（同一边距/分隔线/标题字号）
+	assert.match(favoritesWorkspace, /<PageHeader[\s\S]*?icon=\{Star\}/);
+	assert.match(readFileSync("src/renderer/src/components/common/PageHeader.tsx", "utf8"), /border-b border-border\/40 px-5 py-3/);
+	assert.match(readFileSync("src/renderer/src/components/common/PageHeader.tsx", "utf8"), /truncate text-base font-semibold text-foreground/);
 });
 
 test("两条收藏入口：消息右键菜单 + 划选浮层 + 回合动作条，均写同一条快照链路", () => {

@@ -54,6 +54,7 @@ import { approvalUiRequest, buildDshRejectValue, buildDshRespondValue, parseDshA
 import { assembleDshHistoryEntries, countDshUserMessages, DSH_HISTORY_DEFAULT_TURN_PAGE_SIZE, dshRuntimeWindowFields, normalizeDshTurnPageSize, planDshHistoryRounds, resolveDshHistoryWindow, trimToOldestTurnStart } from "./dshHistoryPagePlan";
 import { DSH_SESSION_FIND_MAX_MATCHES, findDshSessionMatches, type DshSessionFindResult } from "./dshSessionFind";
 import { isContextOverflowError } from "../../shared/contextOverflow";
+import { reasoningText } from "../../shared/reasoningText";
 import { parseDshTeamProjection } from "./dshTeamProjection";
 import type { DshTeamState } from "../../shared/types/agent";
 import type { RpcLogEntry } from "../../shared/types/rpcLog";
@@ -886,7 +887,7 @@ export class DshAgentManager implements SessionAgentGateway {
 		if (!runtime || runtime.tab.status === "closed" || runtime.tab.status === "error") return;
 		const text = runtime.projection.pendingAssistantText ?? "";
 		if (text) this.emit(agentEventTags.agentsTextStream, { agentId, text, done: false });
-		const thinking = runtime.projection.pendingAssistantThinking;
+		const thinking = reasoningText(runtime.projection.pendingAssistantThinking);
 		if (runtime.thinkingId && thinking) {
 			this.emit(agentEventTags.agentsThinking, {
 				agentId,
@@ -2636,7 +2637,8 @@ export class DshAgentManager implements SessionAgentGateway {
 			this.emit(agentEventTags.agentsThinking, {
 				agentId: runtime.tab.id,
 				id: runtime.thinkingId,
-				text: p.pendingAssistantThinking,
+				// 累积文本保留签名，下发前跑展示净化（未闭合的签名块下发空串，行自然隐藏）。
+				text: reasoningText(p.pendingAssistantThinking),
 				startedAt: runtime.thinkingStartedAt,
 				done: false,
 			});

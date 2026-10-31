@@ -10,7 +10,13 @@
  * - OpenCode:`opencode acp`(opencode.ai/v2/docs/cli/acp);npm `opencode-ai`(需先 `opencode auth login`)
  * - Cursor Agent:`agent acp`(cursor.com/docs/cli/acp);官方安装走 curl 脚本(不进 npm),标记 manual
  * - CodeBuddy:`npx -y @tencent-ai/codebuddy-code --acp`(codebuddy.ai/docs/cli/acp;腾讯 Cloud 上沉淀的 codebuddy-code npm 包)
+ * - GitHub Copilot CLI:`copilot --acp`(github.com/github/copilot-cli;npm `@github/copilot`,
+ *   启动参数取自 ACP 官方注册表,`--acp` 打开 stdio ACP server)
+ * - Kilo Code:`kilo acp`(github.com/Kilo-Org/kilocode;npm `@kilocode/cli`,registry 同款参数)
+ * - Cline:`cline --acp`(github.com/cline/cline;npm `cline`,registry 同款参数)
  * - MiniMax:`npx -y @minimax-ai/code acp`(agent.minimax.io/docs/cli/integrations;region cn/global 自适配)
+ * - MiMo Code:`mimo acp`(github.com/XiaomiMiMo/MiMo-Code 的 packages/cli/src/cli/cmd/acp.ts;
+ *   OpenCode 派生的终端 CLI,npm `@mimo-ai/cli`,需先在终端 `mimo auth login` 登录小米账号)
  * - Qoder:`qodercli --acp`(docs.qoder.com/cli/acp;`--acp` 是全局 flag 而非 `acp` 子命令,
  *   官方推荐官网脚本安装,故标记 manual。命令名取 `qodercli`:官网安装脚本(2026-10 实测)解出
  *   的二进制就叫 `qodercli`,即所有安装形态都保证有它;`qoder` 是 V1.1.18 起新增的主命令别名,
@@ -31,7 +37,7 @@
  * install 元数据只被设置页的「检测/安装/卸载」消费:安装命令来自内置表而非用户输入,
  * IPC 层按 presetId 枚举收口,不接受任意命令串。
  */
-export type AcpToolPresetId = "gemini" | "claude-agent" | "codex" | "kimi" | "qwen" | "opencode" | "cursor-agent" | "codebuddy" | "minimax" | "qoder" | "qoder-cn";
+export type AcpToolPresetId = "gemini" | "claude-agent" | "codex" | "kimi" | "qwen" | "opencode" | "cursor-agent" | "codebuddy" | "minimax" | "mimo" | "copilot" | "kilo" | "cline" | "qoder" | "qoder-cn";
 
 /** 安装来源:npm 全局包(可经 PiDeck 一键安装/卸载)或手动(官网脚本,只检测与引导)。 */
 export type AcpToolInstall = { kind: "npm"; package: string } | { kind: "manual" };
@@ -63,6 +69,10 @@ export const ACP_TOOL_PRESETS: readonly AcpToolPreset[] = [
 	{ id: "cursor-agent", name: "Cursor Agent", command: "agent", args: ["acp"], homepage: "https://cursor.com/docs/cli/acp", install: { kind: "manual" } },
 	{ id: "codebuddy", name: "CodeBuddy", command: "npx", args: ["-y", "@tencent-ai/codebuddy-code", "--acp"], homepage: "https://codebuddy.ai/docs/cli/acp" },
 	{ id: "minimax", name: "MiniMax Code", command: "npx", args: ["-y", "@minimax-ai/code", "acp"], homepage: "https://agent.minimax.io/docs/cli/integrations" },
+	{ id: "mimo", name: "MiMo Code", command: "mimo", args: ["acp"], homepage: "https://github.com/XiaomiMiMo/MiMo-Code", install: { kind: "npm", package: "@mimo-ai/cli" } },
+	{ id: "copilot", name: "Copilot CLI", command: "copilot", args: ["--acp"], homepage: "https://github.com/github/copilot-cli", install: { kind: "npm", package: "@github/copilot" } },
+	{ id: "kilo", name: "Kilo Code", command: "kilo", args: ["acp"], homepage: "https://github.com/Kilo-Org/kilocode", install: { kind: "npm", package: "@kilocode/cli" } },
+	{ id: "cline", name: "Cline", command: "cline", args: ["--acp"], homepage: "https://github.com/cline/cline", install: { kind: "npm", package: "cline" } },
 	{ id: "qoder", name: "Qoder CLI", command: "qodercli", args: ["--acp", "--permission-mode", "bypass_permissions"], homepage: "https://docs.qoder.com/cli/acp", install: { kind: "manual" } },
 	{ id: "qoder-cn", name: "Qoder CLI CN", command: "qoderclicn", args: ["--acp", "--permission-mode", "bypass_permissions"], homepage: "https://docs.qoder.cn/cli/acp", install: { kind: "manual" } },
 ];

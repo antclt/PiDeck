@@ -265,7 +265,7 @@ export function SessionHistoryModal(props: {
 		<Dialog open onOpenChange={(next) => !next && props.onClose()}>
 			<DialogContent showCloseButton={false} className={cn("flex max-h-[min(680px,calc(100vh-80px))] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(800px,calc(100vw-48px))]")}>
 				<DialogHeader className="flex-row items-center justify-between px-4 py-3">
-					<DialogTitle></DialogTitle>
+					<DialogTitle>{t("drawer.historyTitle")}</DialogTitle>
 					<DialogClose asChild>
 						<Button variant="ghost" size="icon" aria-label={t("common.close")} title={t("common.close")}>
 							<X size={18} strokeWidth={2.2} aria-hidden="true" />

@@ -1073,6 +1073,28 @@ test("configOptions:session/new 返回的枚举可查询;set_config_option 用�
 	assert.equal(lastProc().methodFrames("session/set_config_option").length, 1);
 });
 
+test("configOptions:boolean 项写入必须带 agent 声明的 type（CodeBuddy 2.178.1 否则 -32602）", async (t) => {
+	// issue #451：{configId, value} 会被服务端按 string 分支校验，boolean 值直接
+	// "Invalid input: expected string, received boolean"；带 type:"boolean" 才走 boolean 分支。
+	const booleanOption = { id: "multitask", name: "Multitask", type: "boolean", currentValue: false };
+	let applied;
+	const { manager, createAgent } = harness(t, {
+		handler: (frame) => {
+			if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: false } };
+			if (frame.method === "session/new") return { sessionId: "sess-bool", configOptions: [booleanOption] };
+			if (frame.method === "session/set_config_option") {
+				applied = frame.params;
+				return { configOptions: [{ ...booleanOption, currentValue: true }] };
+			}
+			return {};
+		},
+	});
+	const tab = await createAgent();
+	const updated = await manager.applyConfigOption(tab.id, "multitask", true);
+	assert.deepEqual(applied, { sessionId: "sess-bool", configId: "multitask", type: "boolean", value: true });
+	assert.equal(updated[0].currentValue, true);
+});
+
 test("configOptions:拒绝时把 error.data.details 拼进错误文案（渲染层提示要用它）", async (t) => {
 	// Qoder CLI 把 "Bypass Permissions"(yolo) 列进 configOptions，但 set_config_option 回
 	// -32603 且原因只写在 data.details；IPC 只透传 message，不拼进去用户只看到 "Internal error"。
@@ -1168,7 +1190,17 @@ test("configOptions:启动参数已定档 bypass 时，记忆里的旧模式不�
 			{ value: "yolo", name: "Bypass Permissions" },
 		],
 	};
-	const effortOption = { id: "effort", name: "Reasoning effort", category: "thought_level", type: "select", currentValue: "medium", options: [{ value: "medium", name: "Medium" }, { value: "high", name: "High" }] };
+	const effortOption = {
+		id: "effort",
+		name: "Reasoning effort",
+		category: "thought_level",
+		type: "select",
+		currentValue: "medium",
+		options: [
+			{ value: "medium", name: "Medium" },
+			{ value: "high", name: "High" },
+		],
+	};
 	const { manager, createAgent, lastProc } = harness(
 		t,
 		{
@@ -1249,6 +1281,162 @@ test("configOptions:新建会话重放思考档,模型与失效项不重放,重�
 	assert.equal(lastProc().methodFrames("session/set_config_option").length, 1);
 	// 重放是恢复历史选择,不能反过来再写一次设置
 	assert.deepEqual(remembered, []);
+});
+
+test("configOptions:历史会话恢复(session/load)后仍按工具开关补回 bypass 权限档", async (t) => {
+	// 现场：agent 不持久化权限模式，session/load 回来的是新进程默认档（auto）；若恢复路径不补，
+	// 用户明明开了「Bypass 权限」，历史会话却一重开就掉回 auto。只在当前档位不是 bypass 时下发。
+	const modeOption = {
+		id: "mode",
+		name: "Mode",
+		category: "mode",
+		type: "select",
+		currentValue: "auto",
+		options: [
+			{ value: "auto", name: "Auto" },
+			{ value: "fullAccess", name: "Full access" },
+		],
+	};
+	const { manager, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: true } };
+				if (frame.method === "session/load") return { sessionId: "sess-old", configOptions: [modeOption] };
+				if (frame.method === "session/set_config_option") return { configOptions: [{ ...modeOption, currentValue: frame.params.value }] };
+				return {};
+			},
+		},
+		{ getTools: () => [{ id: "codebuddy", name: "CodeBuddy", command: "codebuddy", args: ["--acp"], enabled: true, bypassPermissions: true }] },
+	);
+	const tab = await manager.create({ projectId: "p1", title: "t", deckSessionId: "deck-1", backend: "acp", agentPreset: "codebuddy", acpSessionId: "sess-old" });
+	assert.equal(lastProc().methodFrames("session/new").length, 0, "load 成功不得回退新建");
+	const frames = lastProc().methodFrames("session/set_config_option");
+	assert.equal(JSON.stringify(frames.map((frame) => frame.params)), JSON.stringify([{ sessionId: "sess-old", configId: "mode", value: "fullAccess" }]));
+	assert.equal(manager.getSessionConfigOptions(tab.id)?.find((option) => option.id === "mode")?.currentValue, "fullAccess");
+});
+
+test("configOptions:历史会话恢复时，记忆里的 bypass 档同样补回（工具开关未开）", async (t) => {
+	// 用户没勾工具级开关，但是在会话里手动选过 bypass：set_config_option 成功后写进记忆，
+	// 恢复历史会话时 agent 回 auto，必须按记忆补回，否则「上次选过 full/bypass」的历史会话重开就丢。
+	const modeOption = {
+		id: "mode",
+		name: "Mode",
+		category: "mode",
+		type: "select",
+		currentValue: "auto",
+		options: [
+			{ value: "auto", name: "Auto" },
+			{ value: "bypassPermissions", name: "Bypass permissions" },
+		],
+	};
+	const { manager, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: true } };
+				if (frame.method === "session/load") return { sessionId: "sess-old", configOptions: [modeOption] };
+				if (frame.method === "session/set_config_option") return { configOptions: [{ ...modeOption, currentValue: frame.params.value }] };
+				return {};
+			},
+		},
+		{ getToolConfigDefaults: () => ({ mode: "bypassPermissions" }) },
+	);
+	const tab = await manager.create({ projectId: "p1", title: "t", deckSessionId: "deck-1", backend: "acp", agentPreset: "gemini", acpSessionId: "sess-old" });
+	const frames = lastProc().methodFrames("session/set_config_option");
+	assert.equal(JSON.stringify(frames.map((frame) => frame.params)), JSON.stringify([{ sessionId: "sess-old", configId: "mode", value: "bypassPermissions" }]));
+	assert.equal(manager.getSessionConfigOptions(tab.id)?.find((option) => option.id === "mode")?.currentValue, "bypassPermissions");
+});
+
+test("configOptions:历史会话恢复时，记忆里的非 bypass 模式不得覆盖 agent 恢复出的模式", async (t) => {
+	const modeOption = {
+		id: "mode",
+		name: "Mode",
+		category: "mode",
+		type: "select",
+		currentValue: "plan",
+		options: [
+			{ value: "plan", name: "Plan" },
+			{ value: "auto", name: "Auto" },
+			{ value: "bypassPermissions", name: "Bypass permissions" },
+		],
+	};
+	const { manager, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: true } };
+				if (frame.method === "session/load") return { sessionId: "sess-old", configOptions: [modeOption] };
+				return {};
+			},
+		},
+		{ getToolConfigDefaults: () => ({ mode: "auto", effort: "high" }) },
+	);
+	const tab = await manager.create({ projectId: "p1", title: "t", deckSessionId: "deck-1", backend: "acp", agentPreset: "gemini", acpSessionId: "sess-old" });
+	assert.equal(lastProc().methodFrames("session/set_config_option").length, 0, "恢复会话既不降级模式，也不全量重放");
+	assert.equal(manager.getSessionConfigOptions(tab.id)?.find((option) => option.id === "mode")?.currentValue, "plan");
+});
+
+test("configOptions:历史会话恢复出的已是更强 bypass 档时，不按记忆降级", async (t) => {
+	// CodeBuddy 的 fullAccess 强于 Claude 的 bypassPermissions：agent 已恢复 fullAccess 时，
+	// 记忆里的弱档不得把它覆盖回 bypassPermissions。
+	const modeOption = {
+		id: "mode",
+		name: "Mode",
+		category: "mode",
+		type: "select",
+		currentValue: "fullAccess",
+		options: [
+			{ value: "auto", name: "Auto" },
+			{ value: "bypassPermissions", name: "Bypass permissions" },
+			{ value: "fullAccess", name: "Full access" },
+		],
+	};
+	const { manager, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: true } };
+				if (frame.method === "session/load") return { sessionId: "sess-old", configOptions: [modeOption] };
+				return {};
+			},
+		},
+		{ getToolConfigDefaults: () => ({ mode: "bypassPermissions" }) },
+	);
+	const tab = await manager.create({ projectId: "p1", title: "t", deckSessionId: "deck-1", backend: "acp", agentPreset: "gemini", acpSessionId: "sess-old" });
+	assert.equal(lastProc().methodFrames("session/set_config_option").length, 0, "已是更强 bypass 档时不得下发");
+	assert.equal(manager.getSessionConfigOptions(tab.id)?.find((option) => option.id === "mode")?.currentValue, "fullAccess");
+});
+
+test("configOptions:历史会话已由启动参数定档 bypass 时，恢复不再下发（Qoder 拒绝运行期写）", async (t) => {
+	const modeOption = {
+		id: "mode",
+		name: "Mode",
+		category: "mode",
+		type: "select",
+		currentValue: "yolo",
+		options: [
+			{ value: "auto", name: "Auto" },
+			{ value: "yolo", name: "Bypass Permissions" },
+		],
+	};
+	const { manager, lastProc } = harness(
+		t,
+		{
+			handler: (frame) => {
+				if (frame.method === "initialize") return { protocolVersion: 1, agentCapabilities: { loadSession: true } };
+				if (frame.method === "session/load") return { sessionId: "sess-old", configOptions: [modeOption] };
+				return {};
+			},
+		},
+		{
+			getTools: () => [{ id: "qoder", name: "Qoder CLI", command: "qodercli", args: ["--acp", "--permission-mode", "bypass_permissions"], enabled: true, bypassPermissions: true }],
+			getToolConfigDefaults: () => ({ mode: "auto" }),
+		},
+	);
+	const tab = await manager.create({ projectId: "p1", title: "t", deckSessionId: "deck-1", backend: "acp", agentPreset: "qoder", acpSessionId: "sess-old" });
+	assert.equal(lastProc().methodFrames("session/set_config_option").length, 0, "已定档 bypass：既不得重放旧模式，也不得再试注定被拒的下发");
+	assert.equal(manager.getSessionConfigOptions(tab.id)?.find((option) => option.id === "mode")?.currentValue, "yolo");
 });
 
 test("configOptions:session/load 恢复的会话不重放工具记忆", async (t) => {

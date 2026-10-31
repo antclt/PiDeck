@@ -3,6 +3,7 @@ import type { RemoteEntryKind } from "../../../../shared/types/remoteFiles";
 import { t } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui-shadcn/alert-dialog";
 import { Input } from "../ui-shadcn/input";
 import { Label } from "../ui-shadcn/label";
 
@@ -26,6 +27,8 @@ export type RemoteProjectEntryDialogsProps = {
  *
  * 只做呈现与事件转发：业务状态（busy/error/unknown）由 useRemoteProjectEntries 与面板拥有，
  * 成功后是否关闭、失败后是否保留输入都在面板决定（§10.3 的「失败按稳定码决定」）。
+ * 删除/清空回收站是不可逆危险动作：走 AlertDialog 模板（与其它域的危险确认一致，
+ * Esc/外点只做取消语义，不携带任何确认路径），busy 期间锁全部关闭与提交入口。
  */
 export function RemoteProjectEntryDialogs(props: RemoteProjectEntryDialogsProps) {
 	const { dialog, busy, errorText } = props;
@@ -102,54 +105,62 @@ export function RemoteProjectEntryDialogs(props: RemoteProjectEntryDialogsProps)
 			) : null}
 
 			{dialog.kind === "delete" ? (
-				<Dialog
+				<AlertDialog
 					open
 					onOpenChange={(next) => {
-						if (!next) props.onClose();
+						if (!next && !busy) props.onClose();
 					}}
 				>
-					<DialogContent data-testid="remote-file-delete-dialog">
-						<DialogHeader>
-							<DialogTitle>{dialog.entryKind === "file" ? t("remoteFileEntry.deleteTitleFile") : t("remoteFileEntry.deleteTitleFolder")}</DialogTitle>
-							<DialogDescription>{dialog.entryKind === "file" ? t("remoteFileEntry.deleteBody") : t("remoteFileEntry.deleteBodyFolder")}</DialogDescription>
-						</DialogHeader>
+					<AlertDialogContent data-testid="remote-file-delete-dialog">
+						<AlertDialogHeader>
+							<AlertDialogTitle>{dialog.entryKind === "file" ? t("remoteFileEntry.deleteTitleFile") : t("remoteFileEntry.deleteTitleFolder")}</AlertDialogTitle>
+							<AlertDialogDescription>{dialog.entryKind === "file" ? t("remoteFileEntry.deleteBody") : t("remoteFileEntry.deleteBodyFolder")}</AlertDialogDescription>
+						</AlertDialogHeader>
 						<p className="break-all font-mono text-label">{dialog.path}</p>
-						{errorText !== null ? <p className="text-label text-destructive">{errorText}</p> : null}
-						<DialogFooter>
-							<Button variant="ghost" data-testid="remote-file-delete-cancel" disabled={busy} onClick={props.onClose}>
+						{errorText !== null ? (
+							<p className="text-label text-destructive" role="alert">
+								{errorText}
+							</p>
+						) : null}
+						<AlertDialogFooter>
+							<AlertDialogCancel data-testid="remote-file-delete-cancel" disabled={busy} onClick={props.onClose}>
 								{t("common.cancel")}
-							</Button>
-							<Button variant="destructive" data-testid="remote-file-delete-confirm" disabled={busy} onClick={() => props.onDelete(dialog.path)}>
+							</AlertDialogCancel>
+							<AlertDialogAction data-testid="remote-file-delete-confirm" disabled={busy} className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => props.onDelete(dialog.path)}>
 								{t("remoteFileEntry.deleteAction")}
-							</Button>
-						</DialogFooter>
-					</DialogContent>
-				</Dialog>
+							</AlertDialogAction>
+						</AlertDialogFooter>
+					</AlertDialogContent>
+				</AlertDialog>
 			) : null}
 
 			{dialog.kind === "prune" ? (
-				<Dialog
+				<AlertDialog
 					open
 					onOpenChange={(next) => {
-						if (!next) props.onClose();
+						if (!next && !busy) props.onClose();
 					}}
 				>
-					<DialogContent data-testid="remote-trash-prune-dialog">
-						<DialogHeader>
-							<DialogTitle>{t("remoteTrash.pruneConfirmTitle")}</DialogTitle>
-							<DialogDescription>{t("remoteTrash.pruneConfirmBody")}</DialogDescription>
-						</DialogHeader>
-						{errorText !== null ? <p className="text-label text-destructive">{errorText}</p> : null}
-						<DialogFooter>
-							<Button variant="ghost" data-testid="remote-trash-prune-cancel" disabled={busy} onClick={props.onClose}>
+					<AlertDialogContent data-testid="remote-trash-prune-dialog">
+						<AlertDialogHeader>
+							<AlertDialogTitle>{t("remoteTrash.pruneConfirmTitle")}</AlertDialogTitle>
+							<AlertDialogDescription>{t("remoteTrash.pruneConfirmBody")}</AlertDialogDescription>
+						</AlertDialogHeader>
+						{errorText !== null ? (
+							<p className="text-label text-destructive" role="alert">
+								{errorText}
+							</p>
+						) : null}
+						<AlertDialogFooter>
+							<AlertDialogCancel data-testid="remote-trash-prune-cancel" disabled={busy} onClick={props.onClose}>
 								{t("common.cancel")}
-							</Button>
-							<Button variant="destructive" data-testid="remote-trash-prune-confirm" disabled={busy} onClick={() => props.onPrune(dialog.ids)}>
+							</AlertDialogCancel>
+							<AlertDialogAction data-testid="remote-trash-prune-confirm" disabled={busy} className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => props.onPrune(dialog.ids)}>
 								{t("remoteTrash.pruneAction")}
-							</Button>
-						</DialogFooter>
-					</DialogContent>
-				</Dialog>
+							</AlertDialogAction>
+						</AlertDialogFooter>
+					</AlertDialogContent>
+				</AlertDialog>
 			) : null}
 			<span className="hidden" aria-hidden="true" data-dialog-kind={dialogKey} />
 		</>

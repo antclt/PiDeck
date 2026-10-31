@@ -90,7 +90,7 @@ test("codec fallback: video error → preview image → no wallpaper", () => {
 test("codec wiring: layer handles <video> error with a toast + preview, settings marks unsupported items", async () => {
 	const { readFileSync } = await import("node:fs");
 	const layer = readFileSync("src/renderer/src/components/app/wallpaper/WallpaperVideoLayer.tsx", "utf8");
-	assert.match(layer, /onError=\{\(\) => \{\s*setFailedSrc\(src\);\s*toast\.warning\(t\("settings\.wallpaperEnginePlaybackFailed"\)\);/);
+	assert.match(layer, /onError=\{\(\) => \{\s*setFailedSrc\(src\);\s*(?:toast\.warning\(t\("settings\.wallpaperEnginePlaybackFailed"\)\)|showNotice\(t\("settings\.wallpaperEnginePlaybackFailed"\), undefined, "warning"\));/);
 	assert.match(layer, /<img key=\{src\} src=\{wallpaperEnginePreviewUrl\(settings\.weWallpaperId\)\} alt="" onError=\{\(\) => setPreviewFailedSrc\(src\)\}/);
 	const section = readFileSync("src/renderer/src/components/app/settings/WallpaperEngineSection.tsx", "utf8");
 	assert.match(section, /wallpaperEnginePlayability\(item\.file, canPlayType\) === "unsupported"/);

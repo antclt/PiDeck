@@ -11,7 +11,7 @@ test("shared SectionHeading defines one title and description hierarchy", () => 
 	// 字号走 token（text-control / text-caption）而非裸 text-sm / text-xs：
 	// 与全应用正文字号体系同源，改「界面字号」设置时一起联动。
 	assert.match(heading, /text-control font-semibold leading-5 text-foreground/);
-	assert.match(heading, /text-caption font-normal leading-4 text-muted-foreground/);
+	assert.match(heading, /text-caption font-normal text-muted-foreground/);
 	assert.match(heading, /props\.description/);
 });
 

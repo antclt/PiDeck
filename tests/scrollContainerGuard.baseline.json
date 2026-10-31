@@ -85,7 +85,7 @@
 		"src/renderer/src/components/sidebar/AnnouncementCenter.tsx :: className=\"markdown-body min-h-0 flex-1 overflow-y-auto px-5 py-4\"",
 		"src/renderer/src/components/sidebar/SessionHoverCard.tsx :: <div className=\"max-h-48 overflow-y-auto select-text\">",
 		"src/renderer/src/components/sidebar/SidebarComponents.tsx :: <div className=\"flex-1 overflow-y-auto bg-bg-muted [scrollbar-gutter:stable]\">",
-		"src/renderer/src/components/sidebar/SidebarContent.tsx :: <section className=\"conversation-list min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]\">",
+		"src/renderer/src/components/sidebar/SidebarContent.tsx :: <section ref={conversationListRef} className=\"conversation-list min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]\">",
 		"src/renderer/src/components/ui-shadcn/command.tsx :: return <CommandPrimitive.List data-slot=\"command-list\" className={cn(\"max-h-[min(420px,50vh)] scroll-py-1 overflow-x-hidden overflow-y-auto\", className)} {...pr",
 		"src/renderer/src/components/ui-shadcn/dropdown-menu.tsx :: \"z-(--z-popover) max-h-(--radix-dropdown-menu-content-available-height) min-w-[8rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden o",
 		"src/renderer/src/components/ui-shadcn/notice-details-dialog.tsx :: <div className=\"markdown-body mt-1.5 max-h-[52vh] overflow-y-auto text-xs text-text-secondary\">",

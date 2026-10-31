@@ -103,8 +103,12 @@ test("list 语义不被包装层破坏：DshPluginSection 的条目仍是 <li>",
 
 test("ProxyTab 的表格行刻意不迁移（包装 div 会破坏表格结构）", () => {
 	const source = read("components/app/settings/ProxyTab.tsx");
-	// TableRow 是 <tr>：塞 <div> 进表格会破坏语义与列宽计算，故保留纯淡入
-	assert.doesNotMatch(source, /<Collapsible/, "表格行不应引入 Collapsible 包装（会生成 div 嵌套在表格里）");
+	// TableRow 是 <tr>：塞 <div> 进表格会破坏语义与列宽计算，故表格行内保留纯淡入。
+	// 页面其它位置（如「按模型走代理」折叠区）用 Collapsible 是允许的，只钉表格行内部。
+	const tableRows = source.match(/<TableRow[\s\S]*?<\/TableRow>/g) ?? [];
+	for (const row of tableRows) {
+		assert.doesNotMatch(row, /<Collapsible/, "表格行不应引入 Collapsible 包装（会生成 div 嵌套在表格里）");
+	}
 });
 
 test("LogViewer 的表格行同 ProxyTab 刻意不迁移", () => {

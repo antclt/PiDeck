@@ -70,8 +70,13 @@ const KEYWORD_PHRASES: ReadonlyArray<readonly [keyword: string, verb: string, lo
 	["type", "输入", "正在输入"],
 	["navigate", "打开页面", "正在打开页面"],
 	["goto", "跳转", "正在跳转"],
+	// 「屏幕捕捉」只认带 screen/screenshot 的写法。裸 `capture` 不能进词典：
+	// 抓包/代理类 MCP 工具（reqable、mitmproxy）的工具名同样含 capture，
+	// 命中后会把一次「读取抓包记录」说成「截屏」（2026-10 用户反馈）。
 	["screenshot", "截图", "正在截图"],
-	["capture", "截屏", "正在截屏"],
+	["screen_capture", "截图", "正在截图"],
+	["capture_screen", "截图", "正在截图"],
+	["cua_capture", "截图", "正在截图"],
 	["snapshot", "获取快照", "正在获取快照"],
 	["scroll", "滚动", "正在滚动"],
 	["wait", "等待", "正在等待"],

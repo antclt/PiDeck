@@ -183,7 +183,7 @@ export function useProjectFileTreeController({ files, setFiles, refreshFiles, be
 				} catch (error) {
 					console.error("[Files] restore expand failed", directory, error);
 					if (!isFileTreeRequestCurrent(generation, projectId)) return true;
-					setFiles((tree) => markFileTreeLoadFailed(tree, directory));
+					setFiles((tree) => markFileTreeLoadFailed(tree, directory, error));
 				}
 			}
 			return true;
@@ -206,10 +206,10 @@ export function useProjectFileTreeController({ files, setFiles, refreshFiles, be
 			try {
 				// 与 restoreExpandedDirs 同口径：target 节点直接以 target 为第一参。
 				children = await listSubdirectory(projectId, findDirectoryNodeByPath(filesRef.current, current)?.target ?? current);
-			} catch {
-				// 超大目录 / 权限问题：标记当前层「加载失败」，避免展开占位「加载中...」永久盖住文件名；
-				// 保留已加载部分（已 merge 的上层不受影响），用户重新点开可自然重试。
-				setFiles((tree) => markFileTreeLoadFailed(tree, current));
+			} catch (error) {
+				// 超大目录 / 权限问题：标记当前层「加载失败」（带错误信息，渲染层区分空目录并给重试），
+				// 避免展开占位「加载中...」永久盖住文件名；保留已加载部分，用户重新点开可自然重试。
+				setFiles((tree) => markFileTreeLoadFailed(tree, current, error));
 				break;
 			}
 			if (activeProjectIdRef.current !== projectId) return;
@@ -270,7 +270,7 @@ export function useProjectFileTreeController({ files, setFiles, refreshFiles, be
 				// console.error 在这里属于异步回调，不是 setState updater 副作用，保留。
 				console.error("[Files] expand failed", error);
 				if (activeProjectIdRef.current !== projectId) return;
-				setFiles((tree) => markFileTreeLoadFailed(tree, path));
+				setFiles((tree) => markFileTreeLoadFailed(tree, path, error));
 			});
 	}
 

@@ -86,8 +86,7 @@ test("ensureWindowsPathFresh:把注册表新增目录补进 env.PATH 并回报 a
 		env,
 		now: () => now,
 		onAdded: (directories) => added.push(...directories),
-		readRegistryPath: async (hive) =>
-			hive === "user" ? "%USERPROFILE%\\.qoder-cn\\bin;C:\\existing" : "C:\\Windows\\System32;C:\\Program Files\\nodejs",
+		readRegistryPath: async (hive) => (hive === "user" ? "%USERPROFILE%\\.qoder-cn\\bin;C:\\existing" : "C:\\Windows\\System32;C:\\Program Files\\nodejs"),
 	});
 	// 去重按整条路径做（不按父子目录），所以 machine 里的 System32 确实算新增
 	assert.deepEqual(list(result), ["C:\\Users\\张三\\.qoder-cn\\bin", "C:\\Windows\\System32", "C:\\Program Files\\nodejs"]);

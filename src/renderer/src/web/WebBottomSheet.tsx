@@ -10,7 +10,7 @@
  * - Escape 关闭、遮罩点击关闭；挂 body 渲染避免被父级 overflow 裁剪
  * - 未来 UWP(WebView2)/Capacitor 手机壳直接复用：同一组件两形态
  */
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { t } from "@/i18n";
@@ -18,19 +18,56 @@ import { cn } from "@/lib/utils";
 
 export function WebBottomSheet(props: { open: boolean; onOpenChange: (open: boolean) => void /** 面板标题（可访问性 + 宽屏卡片头）；窄屏隐藏由样式控制 */; title?: string; children: ReactNode /** 面板附加类（如 max-w）；两形态都生效 */; className?: string }) {
 	const { open, onOpenChange } = props;
+	// 焦点圈定：面板挂载后把焦点移入，关闭时归还给打开前的活跃元素
+	const panelRef = useRef<HTMLDivElement>(null);
 
 	// Escape 关闭 + 打开时锁背景滚动（移动端弹层惯例，关闭即恢复）
 	useEffect(() => {
 		if (!open) return;
+		const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		// portal 首帧后移入焦点（面板已在 body 下、可聚焦）
+		const raf = requestAnimationFrame(() => {
+			const panel = panelRef.current;
+			if (!panel) return;
+			panel.tabIndex = -1;
+			panel.focus({ preventScroll: true });
+		});
 		const onKey = (event: KeyboardEvent) => {
 			if (event.key === "Escape") onOpenChange(false);
+			// Tab 圈定：焦点不逃出面板（modal 语义），首尾循环
+			if (event.key === "Tab") {
+				const panel = panelRef.current;
+				if (!panel) return;
+				const focusables = panel.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])');
+				if (focusables.length === 0) {
+					event.preventDefault();
+					panel.focus({ preventScroll: true });
+					return;
+				}
+				const first = focusables[0]!;
+				const last = focusables[focusables.length - 1]!;
+				const active = document.activeElement;
+				if (event.shiftKey && (active === first || active === panel)) {
+					event.preventDefault();
+					last.focus();
+				} else if (!event.shiftKey && (active === last || active === panel)) {
+					event.preventDefault();
+					first.focus();
+				} else if (!panel.contains(active)) {
+					event.preventDefault();
+					first.focus();
+				}
+			}
 		};
 		document.addEventListener("keydown", onKey);
 		const previousOverflow = document.body.style.overflow;
 		document.body.style.overflow = "hidden";
 		return () => {
+			cancelAnimationFrame(raf);
 			document.removeEventListener("keydown", onKey);
 			document.body.style.overflow = previousOverflow;
+			// 关闭/卸载时把焦点还给打开弹层的触发元素
+			previouslyFocused?.isConnected && previouslyFocused.focus({ preventScroll: true });
 		};
 	}, [open, onOpenChange]);
 
@@ -41,9 +78,11 @@ export function WebBottomSheet(props: { open: boolean; onOpenChange: (open: bool
 	// 且被裁剪；portal 到 body 保证两形态都相对视口定位。
 	return createPortal(
 		<div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label={props.title}>
+			{/* 面板引用挂在这层（真正的面板容器在下一层）：焦点圈定按面板容器计算 */}
 			{/* 遮罩：点击关闭；进场 fade */}
 			<button type="button" aria-label={t("common.close")} className="absolute inset-0 h-full w-full cursor-default bg-black/50 animate-in fade-in duration-150" onClick={() => onOpenChange(false)} />
 			<div
+				ref={panelRef}
 				className={cn(
 					"relative flex max-h-[85dvh] w-full min-w-0 flex-col overflow-hidden border border-border bg-card text-card-foreground shadow-xl",
 					// 窄屏：底部滑出圆角顶；宽屏：居中卡片

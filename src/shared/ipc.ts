@@ -507,15 +507,15 @@ export const ipcChannels = {
 	webServiceRotateToken: "web:rotate-token",
 	/** 手动设置 Web 服务令牌/过期策略（热生效不重启），返回新状态 */
 	webServiceSetToken: "web:set-token",
-	/** 外网访问：查询 cloudflare 隧道 + tailscale 组网聚合状态 */
+	/** 外网访问：查询 cloudflare 隧道 + tailscale 组网 + EasyTier 只读渠道的聚合状态 */
 	webRemoteAccessState: "web:remote-access-state",
 	/** 外网访问状态变化推送（主进程 → 渲染层） */
 	webRemoteAccessChanged: "web:remote-access-changed",
-	/** 外网访问：启动指定渠道（cloudflare 隧道 / tailscale serve） */
+	/** 外网访问：启动指定渠道（cloudflare 隧道 / tailscale serve；EasyTier 只读不启停） */
 	webRemoteAccessStart: "web:remote-access-start",
 	/** 外网访问：停用指定渠道 */
 	webRemoteAccessStop: "web:remote-access-stop",
-	/** 外网访问：重新检测本机 cloudflared / tailscale 安装与登录状态 */
+	/** 外网访问：重新检测本机 cloudflared / tailscale / easytier-cli 状态 */
 	webRemoteAccessRefresh: "web:remote-access-refresh",
 	settingsTestPiProxy: "settings:test-pi-proxy",
 	settingsApplyWindow: "settings:apply-window",

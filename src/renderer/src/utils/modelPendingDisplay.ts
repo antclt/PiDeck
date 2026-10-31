@@ -23,6 +23,16 @@ export function formatModelRef(ref: Pick<ModelPendingRef, "provider" | "modelId"
 	return ref.provider ? `${ref.provider}/${name}` : name;
 }
 
+/**
+ * 底栏芯片用：只展示模型名。
+ *
+ * 供应商前缀把标签拉得很长（provider/modelName 叠起来），而底栏还要放思考档位、
+ * 分支、安全等级等控件；供应商改由 title 悬停提示承载，芯片本身只留最可识别的一段。
+ */
+export function formatModelName(ref: Pick<ModelPendingRef, "modelId" | "modelName">): string {
+	return ref.modelName || ref.modelId || "-";
+}
+
 export type ModelDisplayResult = {
 	from?: ModelPendingRef;
 	to?: ModelPendingRef;

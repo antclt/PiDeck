@@ -146,6 +146,35 @@ function describeNetworkFailure(detail: string, translate: (key: MainProcessTran
 	return undefined;
 }
 
+/**
+ * 保存路径的 cost 归一化（#458）：pi ModelCostSchema 要求 input/output/cacheRead/cacheWrite
+ * 四键全备（Number 非 Optional），部分对象（如只有 input）会让 pi 整文件 schema 校验失败。
+ * 语义：缺的费率补 0（与计费弹框「打开即补 0」一致）；四键全无的空对象 → undefined（删键，
+ * 缺省合法）；tiers 是数组则逐档同样补齐（每档还需 inputTokensAbove，缺失则丢档）。
+ * 非对象输入由调用方规避（cost !== undefined 才进入）。纯函数便于 vm 测试替身直接调用。
+ */
+function normalizeModelCostForPi(cost: NonNullable<PiModelItem["cost"]> & { tiers?: unknown }): NonNullable<PiModelItem["cost"]> | undefined {
+	const RATE_KEYS = ["input", "output", "cacheRead", "cacheWrite"] as const;
+	if (!RATE_KEYS.some((key) => typeof cost[key] === "number")) return undefined;
+	const rates = Object.fromEntries(RATE_KEYS.map((key) => [key, typeof cost[key] === "number" ? (cost[key] as number) : 0])) as Record<(typeof RATE_KEYS)[number], number>;
+	const normalized: NonNullable<PiModelItem["cost"]> & { tiers?: unknown } = { ...rates };
+	if (Array.isArray(cost.tiers)) {
+		const tiers = cost.tiers
+			.filter((tier): tier is Record<string, unknown> => typeof tier === "object" && tier !== null)
+			.map((tier) => {
+				// pi ModelCostTierSchema 每档需 inputTokensAbove + 四费率全备；缺费率补 0
+				// （与计费弹框 applyTiers 的「打开即补 0」同一语义，保留用户分档意图）；
+				// inputTokensAbove 缺失/非数则无法定义档位，只能丢档。
+				if (typeof tier.inputTokensAbove !== "number") return null;
+				const tierRates = Object.fromEntries(RATE_KEYS.map((key) => [key, typeof tier[key] === "number" ? tier[key] : 0])) as Record<(typeof RATE_KEYS)[number], number>;
+				return { inputTokensAbove: tier.inputTokensAbove, ...tierRates };
+			})
+			.filter((tier): tier is { inputTokensAbove: number } & Record<(typeof RATE_KEYS)[number], number> => tier !== null);
+		if (tiers.length > 0) normalized.tiers = tiers;
+	}
+	return normalized;
+}
+
 export type PiModelItem = {
 	id: string;
 	name?: string;
@@ -435,8 +464,11 @@ export class ConfigManager {
 					error: this.translate("mainConfig.providerModelsRequired", { provider: providerName }),
 				};
 			}
-			// baseUrl 若填写则禁止控制字符（换行等），防止配置被篡改破坏 JSON 语义。
-			if (typeof config.baseUrl === "string" && hasControlChar(config.baseUrl)) {
+			// baseUrl 若填写则禁止控制字符（换行等），防止配置被注入换行破坏 JSON 语义。
+			// tab 属于控制字符但不是注入向量，且是「空串清洗」的前置形态（normalizeModelsForPi
+			// 会把 trim 后为空的 baseUrl 删键）；这里放行 tab/空串，只拦真正的换行注入，
+			// 避免空 baseUrl 在清洗前就被拒（#458：清洗的职责是「回缺省合法态」而非报错）。
+			if (typeof config.baseUrl === "string" && /[^\t]/.test(config.baseUrl) && hasControlChar(config.baseUrl)) {
 				return {
 					valid: false,
 					error: this.translate("mainConfig.baseUrlInvalid", { provider: providerName }),
@@ -798,6 +830,17 @@ export class ConfigManager {
 					const providerApi = this.normalizeApiForSave(provider.api);
 					if (providerApi !== undefined) normalizedProvider.api = providerApi;
 					else delete normalizedProvider.api;
+					// pi schema 对 name/baseUrl/apiKey 同样要求 minLength:1（可选但非空）。
+					// 展开卡片/编辑页对这三个字段的内联编辑是「清空输入框 = 写空串」
+					// （不经 addProviderDraft 的 trim/删键路径），一旦落盘 pi 就整文件拒绝
+					// （所有自定义供应商从列表消失，#458 的形态）。空串一律删键回到缺省合法态；
+					// 纯空白字符串 trim 后为空，同罪处理。
+					for (const field of ["name", "baseUrl", "apiKey"] as const) {
+						const value = normalizedProvider[field];
+						if (typeof value === "string" && value.trim().length === 0) {
+							delete normalizedProvider[field];
+						}
+					}
 					normalizedProvider.models = provider.models.map((model) => {
 						const normalized: PiModelItem = { ...model };
 						const modelApi = this.normalizeApiForSave(model.api);
@@ -808,6 +851,30 @@ export class ConfigManager {
 						// 就删掉该键（可选字段缺省反而合法），避免手动新增模型留空时写坏文件。
 						if (typeof normalized.name === "string" && normalized.name.length === 0) {
 							delete normalized.name;
+						}
+						// contextWindow/maxTokens 是 exclusiveMinimum:0（pi 默认 128e3/16384）。
+						// 数字输入框可输负数/0（UI 未设 min），输入瞬间 onChange 就把负值写进草稿，
+						// 一旦保存 pi 整文件拒绝。非正数删键 = 交给 pi 默认，与「清空输入框 =
+						// undefined = 缺省」同一语义，不会静默丢弃用户配置（正数值原样保留）。
+						for (const field of ["contextWindow", "maxTokens"] as const) {
+							const value = normalized[field];
+							if (typeof value === "number" && (!Number.isFinite(value) || value <= 0)) {
+								delete normalized[field];
+							}
+						}
+						// pi ModelCostSchema 要求 input/output/cacheRead/cacheWrite 四键全备才算合法 cost；
+						// 部分对象（如只有 input）会让 pi 整文件拒绝。补齐缺失费率为 0（与计费弹框
+						// 「打开即补 0」的行为一致）；四键全无的空对象删键（缺省合法）。tiers 同规则逐档补齐。
+						if (normalized.cost !== undefined) {
+							normalized.cost = normalizeModelCostForPi(normalized.cost);
+						}
+						// input 枚举只认 "text"/"image"（pi ModelDefinitionSchema Enum）。目录/启发式
+						// 补全只写合法值，但手改 JSON 或旧版本写入的非法值（如 "audio"）会让 pi 整文件
+						// 拒绝；过滤非法项，全过滤后删键（缺省 = text-only，pi 默认行为）。
+						if (Array.isArray(normalized.input)) {
+							const legalInput = normalized.input.filter((item): item is "text" | "image" => item === "text" || item === "image");
+							if (legalInput.length === 0) delete normalized.input;
+							else if (legalInput.length !== normalized.input.length) normalized.input = legalInput;
 						}
 						return normalized;
 					});

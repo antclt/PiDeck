@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { atom, useAtomValue, useSetAtom, useStore } from "jotai";
-import { toast } from "sonner";
+import { showNotice } from "../utils/notice";
 import { latestUserMessageId, SendScrollPositioner } from "./timeline/sendScroll";
 import { ROOT_ROW_SELECTOR, useVisibleTimelineRows, type VisibleTimelineRow } from "./timeline/useVisibleTimelineRows";
 import { selectAtom } from "jotai/utils";
@@ -1930,7 +1930,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 			}
 			// 静默放弃会被当成「点了没反应」（本次 bug 的原始反馈）：补页/扩窗都到上限时
 			// 必须给一句反馈，要么历史太远加载不到，要么这条已被 context_edit 移出展示。
-			toast(t("sessionFind.jumpFailed"));
+			showNotice(t("sessionFind.jumpFailed"));
 			return;
 		}
 		if (action.kind === "wait") return;

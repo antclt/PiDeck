@@ -16,7 +16,7 @@ import { Badge } from "../../ui-shadcn/badge";
 import { Textarea } from "../../ui-shadcn/textarea";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../../ui-shadcn/dialog";
 import { AlertTriangle, BookOpenText, Check, Copy, Pencil, Plus, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { showNotice } from "../../../utils/notice";
 import { cn } from "@/lib/utils";
 
 type CustomThemeSectionProps = {
@@ -89,7 +89,7 @@ export function CustomThemeSection({ draft, updateDraft }: CustomThemeSectionPro
 			themeStyle: item.base ?? draft.themeStyle,
 			customTheme: { id: item.id, name: item.name, ...(item.base ? { base: item.base } : {}), light: item.tokens.light, dark: item.tokens.dark },
 		});
-		toast(t("settings.customThemesAppliedToast"));
+		showNotice(t("settings.customThemesAppliedToast"));
 	};
 
 	const unapplyTheme = () => {
@@ -115,12 +115,12 @@ export function CustomThemeSection({ draft, updateDraft }: CustomThemeSectionPro
 	const handleEdit = async (item: CustomThemeListItem) => {
 		// 内置示例不在磁盘上、也无法就地保存，其入口是工具栏「复制示例」
 		if (!item.fileId) {
-			toast.error(t("settings.customThemesReadFailed"));
+			showNotice(t("settings.customThemesReadFailed"), undefined, "error");
 			return;
 		}
 		const raw = await desktopApi.customThemes.read(item.fileId);
 		if (raw === null) {
-			toast.error(t("settings.customThemesReadFailed"));
+			showNotice(t("settings.customThemesReadFailed"), undefined, "error");
 			void refresh();
 			return;
 		}
@@ -149,7 +149,7 @@ export function CustomThemeSection({ draft, updateDraft }: CustomThemeSectionPro
 						customTheme: { id: updated.id, name: updated.name, ...(updated.base ? { base: updated.base } : {}), light: updated.tokens.light, dark: updated.tokens.dark },
 					});
 			}
-			toast(t("settings.customThemesSavedToast", { id: result.id }));
+			showNotice(t("settings.customThemesSavedToast", { id: result.id }));
 		} finally {
 			setSaving(false);
 		}
@@ -171,20 +171,20 @@ export function CustomThemeSection({ draft, updateDraft }: CustomThemeSectionPro
 			await desktopApi.customThemes.remove(fileId);
 		} catch {
 			// 删除失败（文件已被外部移除、回收站不可用）必须显式报错：不能弹「已删除」却什么都没删
-			toast.error(t("settings.customThemesDeleteFailed", { id: item.name }));
+			showNotice(t("settings.customThemesDeleteFailed", { id: item.name }), undefined, "error");
 			await refresh();
 			return;
 		}
 		await refresh();
-		toast(t("settings.customThemesDeletedToast", { id: item.id }));
+		showNotice(t("settings.customThemesDeletedToast", { id: item.id }));
 	};
 
 	const handleGuide = async () => {
 		try {
 			const path = await desktopApi.customThemes.writeGuide(getI18nLocale() === "en-US" ? "en-US" : "zh-CN");
-			toast(t("settings.customThemesGuideToast", { path }));
+			showNotice(t("settings.customThemesGuideToast", { path }));
 		} catch {
-			toast.error(t("settings.customThemesGuideFailed"));
+			showNotice(t("settings.customThemesGuideFailed"), undefined, "error");
 		}
 	};
 
@@ -192,9 +192,9 @@ export function CustomThemeSection({ draft, updateDraft }: CustomThemeSectionPro
 		if (!dir) return;
 		try {
 			await navigator.clipboard.writeText(dir);
-			toast(t("settings.customThemesDirCopiedToast"));
+			showNotice(t("settings.customThemesDirCopiedToast"));
 		} catch {
-			toast.error(dir);
+			showNotice(dir, undefined, "error");
 		}
 	};
 

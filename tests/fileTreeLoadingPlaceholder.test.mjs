@@ -67,12 +67,13 @@ test("打标后重新 merge 成功结果可恢复（重试入口语义）", () =
 test("接线：toggleDirectory / drillCompactChain 失败路径调用 markFileTreeLoadFailed", () => {
 	// 文件树域已迁入 useProjectFileTreeController（App 只接线）
 	const app = readFileSync("src/renderer/src/hooks/files/useProjectFileTreeController.ts", "utf8");
-	// toggleDirectory 的 catch：打标 + 保留代次校验（切项目后不得写入）。
-	const toggleCatch = app.match(/\.catch\(\(error\) => \{[\s\S]{0,400}?markFileTreeLoadFailed\(tree, path\)[\s\S]{0,200}?\}\);/);
+	// toggleDirectory 的 catch：打标 + 保留代次校验（切项目后不得写入）。第三参 error 是
+	// Wave 1（feec43b90）加的失败原因透传，正则容忍它存在。
+	const toggleCatch = app.match(/\.catch\(\(error\) => \{[\s\S]{0,400}?markFileTreeLoadFailed\(tree, path(?:, error)?\)[\s\S]{0,200}?\}\);/);
 	assert.ok(toggleCatch, "toggleDirectory expand failure should mark the directory");
 	assert.match(toggleCatch[0], /activeProjectIdRef\.current !== projectId/);
-	// drillCompactChain 的 catch：打标当前层而不是静默 break。
-	const drillCatch = app.match(/} catch \{\s*\n[\s\S]{0,300}?markFileTreeLoadFailed\(tree, current\)\);\s*\n\s*break;/);
+	// drillCompactChain 的 catch：打标当前层而不是静默 break（catch 形态从裸 catch 改为带 error）。
+	const drillCatch = app.match(/} catch (?:\{\s*\n|\(error\) \{[\s\S]{0,300})?markFileTreeLoadFailed\(tree, current(?:, error)?\)\);\s*\n\s*break;/);
 	assert.ok(drillCatch, "drillCompactChain failure should mark the current layer");
 });
 
@@ -93,8 +94,8 @@ test("接线：restoreExpandedDirs 只补拉「已展开 + 无 children + 未标
 	assert.match(body, /sort\(\(left, right\) => left\.length - right\.length\)/);
 	// 补拉过程带代次校验，切项目后不得写入。
 	assert.match(body, /isFileTreeRequestCurrent\(generation, projectId\)/);
-	// 失败打标：补拉本身失败也不能留下永久占位。
-	assert.match(body, /markFileTreeLoadFailed\(tree, directory\)/);
+	// 失败打标：补拉本身失败也不能留下永久占位（第三参 error 为 Wave 1 透传，可缺席）。
+	assert.match(body, /markFileTreeLoadFailed\(tree, directory(?:, error)?\)/);
 });
 
 test("接线：打开文件抽屉先自愈，无待修复目录才静默 refreshFiles", () => {

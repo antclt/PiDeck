@@ -95,6 +95,11 @@ export type WebServiceDependencies = {
 	 * Web 端后端选择器据此列出 ACP 入口；未注入或为空即完全不提供 ACP 选项。
 	 */
 	listAcpTools?: () => WebAcpToolInfo[];
+	/**
+	 * EasyTier 托管配置的 TOML 文本（手机端「导入配置」用）。
+	 * 未配置托管网络时返回空串，路由据此返回 404；文件含网络密钥，因此只在 /api/* 鉴权链之后暴露。
+	 */
+	getEasyTierConfigToml?: () => string;
 	/** agentId → sessionId 路由，用于把 pi 事件导向对应 session 的 SSE 连接。 */
 	getSessionIdForAgent: (agentId: string) => string | undefined;
 	listProjects: () => Project[];

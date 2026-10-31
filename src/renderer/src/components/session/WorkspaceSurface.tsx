@@ -78,6 +78,8 @@ export function DrawerContent(props: {
 	onPasteFiles?: (targetDir: string) => void;
 	/** 文件树内部拖拽移动文件/目录到目标目录 */
 	onMoveFiles?: (sourcePaths: string[], targetDir: string) => void;
+	/** 目录 listing 失败后的重试入口（关-开重拉） */
+	onRetryDirectory?: (path: string) => void;
 }) {
 	const title = props.panel === "files" ? null : props.project ? t("drawer.projectSessions", { name: props.project.name }) : t("drawer.historyTitle");
 	return (
@@ -110,6 +112,7 @@ export function DrawerContent(props: {
 					onDropFiles={props.onDropFiles}
 					onMoveFiles={props.onMoveFiles}
 					onPasteFiles={props.onPasteFiles}
+					onRetryDirectory={props.onRetryDirectory}
 				/>
 			)}
 			{props.panel === "sessions" && <SessionsPanel sessions={props.sessions} onRefresh={props.onRefreshSessions} onOpen={props.onOpenSession} onRename={props.onRenameSession} onCopy={props.onCopySession} onExport={props.onExportSession} onDelete={props.onDeleteSession} />}
@@ -141,6 +144,8 @@ function FilesPanel(props: {
 	onPasteFiles?: (targetDir: string) => void;
 	/** 文件树内部拖拽移动文件/目录到目标目录 */
 	onMoveFiles?: (sourcePaths: string[], targetDir: string) => void;
+	/** 目录 listing 失败后的重试入口（关-开重拉） */
+	onRetryDirectory?: (path: string) => void;
 }) {
 	// 排序维度/方向持久化到 localStorage：文件树排序是用户偏好，跨会话保留
 	const FILE_SORT_KEY = "pi-desktop:file-sort";
@@ -197,6 +202,12 @@ function FilesPanel(props: {
 	const latestPropsRef = useRef(props);
 	latestPropsRef.current = props;
 	const stableToggleDirectory = useCallback((path: string) => latestPropsRef.current.onToggleDirectory(path), []);
+	// 重试 = 关-开目录（toggleDirectory 展开未加载目录会重新拉取，失败标记随 merge 被覆盖）
+	const stableRetryDirectory = useCallback((path: string) => {
+		const retry = latestPropsRef.current.onRetryDirectory;
+		if (retry) retry(path);
+		else latestPropsRef.current.onToggleDirectory(path);
+	}, []);
 	const stableFileContextMenu = useCallback((node: FileTreeNode, x: number, y: number) => latestPropsRef.current.onFileContextMenu(node, x, y), []);
 	const stableOpenFile = useCallback((path: string | ProjectFileTarget) => latestPropsRef.current.onOpenFile?.(path), []);
 	const stableViewFile = useCallback((path: string | ProjectFileTarget, openMode?: "preview" | "permanent") => latestPropsRef.current.onViewFile?.(path, openMode), []);
@@ -377,6 +388,7 @@ function FilesPanel(props: {
 							expandedDirs={props.expandedDirs}
 							activeEditorFile={activeEditorFile}
 							onToggleDirectory={stableToggleDirectory}
+							onRetryDirectory={stableRetryDirectory}
 							onFileContextMenu={stableFileContextMenu}
 							onOpenFile={stableOpenFile}
 							onViewFile={stableViewFile}
