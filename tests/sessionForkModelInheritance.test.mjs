@@ -85,21 +85,22 @@ test("重发/编辑 fork 与静态复制都向 ensureRuntimeTarget 传递源会�
 	assert.match(indexSource, /model:\s*entry\.model,\s*thinkingLevel:\s*entry\.thinkingLevel,/);
 });
 
-/** 源码契约：重发/编辑覆盖层按动作命名，不再暴露内部 fork 术语（显式 fork 动作除外）。 */
-test("重发/编辑 overlay 文案按动作称呼，fork 术语只留给显式 fork 动作", () => {
+/**
+ * 源码契约：fork 化重发/编辑不得再挂全屏遮罩。
+ *
+ * 2027-03 用户反馈：热会话 fork 只要约 0.3s，却先糊一层「正在编辑消息…」，看起来像在重启
+ * 应用。fork 全程不停进程、不改原文件，这层遮罩没有保护任何东西，反而制造误解。
+ * 冷会话的 activating 遮罩保留（那段确实在拉起进程）。
+ */
+test("fork 化重发/编辑不再显示全屏遮罩，fork 术语只留给显式 fork 动作", () => {
 	const mutations = readFileSync("src/renderer/src/hooks/useSessionHistoryMutations.ts", "utf8");
-	assert.match(mutations, /showOverlay\(sessionId, kind === "edit" \? "editing" : "resending"\);/);
+	assert.doesNotMatch(mutations, /showOverlay\(sessionId, kind === "edit"/, "runForkMutation 不得再按 edit/resend 挂遮罩");
+	assert.doesNotMatch(mutations, /"editing"|"resending"/, "editing/resending 遮罩类型已删除，不得复活");
+	// 冷会话激活仍要反馈
+	assert.match(mutations, /showOverlay\(sessionId, "activating"\);/);
 	const forkingCalls = mutations.match(/showOverlay\(sessionId, "forking"\);/g) ?? [];
 	assert.equal(forkingCalls.length, 1, "runForkMutation 不得再用 forking 文案，只保留 forkFromUserMessage 一处");
 
 	const stage = readFileSync("src/renderer/src/components/session/SessionSurfaceStage.tsx", "utf8");
-	assert.match(stage, /editing:\s*"message\.historyOverlay\.editing"/);
-	assert.match(stage, /resending:\s*"message\.historyOverlay\.resending"/);
-
-	const zh = readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8");
-	const en = readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8");
-	assert.match(zh, /"message\.historyOverlay\.editing":\s*"[^"]+"/);
-	assert.match(zh, /"message\.historyOverlay\.resending":\s*"[^"]+"/);
-	assert.match(en, /"message\.historyOverlay\.editing":\s*"[^"]+"/);
-	assert.match(en, /"message\.historyOverlay\.resending":\s*"[^"]+"/);
+	assert.doesNotMatch(stage, /message\.historyOverlay\.(editing|resending)/);
 });

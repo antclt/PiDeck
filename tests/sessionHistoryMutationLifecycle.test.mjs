@@ -154,11 +154,8 @@ for (const kind of ["resend", "edit"]) {
 			h.calls.find(([operation]) => operation === "send"),
 			["send", "fork-source-a", kind === "edit" ? "edited text" : message.text, message.images, { requireAppliedModel: true }],
 		);
-		// 弹窗已去但遮罩仍在：showOverlay(editing/resending) + finally 清空，各一次。
-		assert.deepEqual(h.overlays, [
-			{ sessionId: "source-a", kind: kind === "edit" ? "editing" : "resending" },
-			{ sessionId: "source-a", kind: null },
-		]);
+		// 热会话不再挂全屏遮罩：只剩 finally 的清空调用（冷会话的 activating 另有覆盖）。
+		assert.deepEqual(h.overlays, [{ sessionId: "source-a", kind: null }]);
 		assert.equal(h.toasts.length, 0);
 	});
 }
