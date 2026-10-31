@@ -4,7 +4,7 @@ import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
 import { quickMessageHookHost } from "./helpers/quickMessageHookHost.mjs";
 
 /** Run the real controller, geometry and rAF animation without Electron or a model request. */
-function sendScrollHarness({ height = 2800, viewportHeight = 600, latestTop = height - 140, startLoading = false, startWithOptimistic = false } = {}) {
+function sendScrollHarness({ height = 2800, viewportHeight = 600, latestTop = height - 140, startLoading = false, startWithOptimistic = false, startWithAnchor = false } = {}) {
 	const host = quickMessageHookHost();
 	let now = 0;
 	let nextFrame = 0;
@@ -94,6 +94,7 @@ function sendScrollHarness({ height = 2800, viewportHeight = 600, latestTop = he
 			if (key === "send") return { [sessionId]: sendStatus };
 			if (key === "record") return { id: sessionId, projectId: "p1", status: "active", filePath: "/tmp/s1.jsonl", messageCount: messages.length };
 			if (key === "sendPinAnimating") return sendPinAnimating;
+			if (key === "anchors") return startWithAnchor && sessionId === "s1" ? { s1: { messageId: "optimistic-uuid", offsetTop: 96, windowTurns: 3 } } : {};
 			return {};
 		},
 	};
@@ -385,6 +386,19 @@ test("a pane mounted with an in-flight optimistic message still gets send positi
 		h.releaseLoad();
 		h.finish();
 		assert.ok(Math.abs(h.rowGap("optimistic-uuid") - 24) <= 1, `gap=${h.rowGap("optimistic-uuid")}`);
+	} finally {
+		h.unmount();
+	}
+});
+
+test("returning to an in-flight send restores its history anchor without replaying send positioning", () => {
+	const h = sendScrollHarness({ startLoading: true, startWithOptimistic: true, startWithAnchor: true, latestTop: 1000 });
+	try {
+		h.releaseLoad();
+		h.finish();
+		assert.ok(Math.abs(h.rowGap("optimistic-uuid") - 96) <= 1, `restored gap=${h.rowGap("optimistic-uuid")}`);
+		assert.equal(h.controller.autoScroll, false);
+		assert.equal(h.controller.showScrollToBottom, true);
 	} finally {
 		h.unmount();
 	}
