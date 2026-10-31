@@ -8,7 +8,7 @@ import { replaceExpandedRefBlocksWithLabels } from "./composer/quoteChip";
 import type { PastedTextFile } from "../../atoms";
 import type { QueuedPromptSnapshot } from "../../utils/queuedPromptQueue";
 import { resolveComposerSendButtonState } from "../../utils/composerSendButton";
-import { canChangeQueuedPromptBehavior, canDiscardQueuedPrompt, canRetractQueuedPromptToInput, discardControlHint, retractControlHint } from "../../utils/queuedPromptQueue";
+import { canChangeQueuedPromptBehavior, canDiscardQueuedPrompt, canRetractQueuedPromptToInput, discardControlHint, retractControlHint, visibleQueuedPrompts } from "../../utils/queuedPromptQueue";
 import { t } from "../../i18n";
 import { desktopApi } from "../../desktopApi";
 import { writeClipboard } from "../../utils/clipboard";
@@ -258,9 +258,12 @@ export function QueuedPromptPanel(props: {
 	const agentBusy = isSessionRuntimeBusy(runtime?.status, runtime?.state, backend === "acp" ? "acp" : undefined);
 	// runtime 优先于 record（record 未及回写时 runtime 已生效）；ACP 无 steer 通道。
 	const steerSupported = (runtime?.backend ?? sessionRecord?.backend) !== "acp";
-	if (!sessionId || !props.prompts.length) return null;
+	// 已 claim（sending）的行派发时就上屏了，不再算排队内容；ACP 的投递确认要等回合结算，
+	// 若继续展示，队首会在整轮里显示成「发送中」，看起来像队列没清空。
+	const visiblePrompts = visibleQueuedPrompts(props.prompts);
+	if (!sessionId || !visiblePrompts.length) return null;
 
-	const multiple = props.prompts.length > 1;
+	const multiple = visiblePrompts.length > 1;
 	const listVisible = !multiple || !collapsed;
 
 	const sendAsk = (prompt: QueuedPromptSnapshot) => {
@@ -285,7 +288,7 @@ export function QueuedPromptPanel(props: {
 			{multiple ? (
 				<button type="button" className="flex h-9 w-full items-center gap-2.5 px-3 text-left" aria-controls={listId} aria-expanded={listVisible} onClick={toggleCollapsed}>
 					<ListOrdered size={14} aria-hidden="true" className="shrink-0 text-text-tertiary" />
-					<span className="min-w-0 flex-1 truncate text-control font-medium leading-6 text-foreground">{t("sessionQueue.count", { n: props.prompts.length })}</span>
+					<span className="min-w-0 flex-1 truncate text-control font-medium leading-6 text-foreground">{t("sessionQueue.count", { n: visiblePrompts.length })}</span>
 					<span className="shrink-0 text-text-tertiary" aria-hidden="true">
 						{listVisible ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
 					</span>
@@ -301,7 +304,7 @@ export function QueuedPromptPanel(props: {
 			) : null}
 			{listVisible ? (
 				<ul id={listId} className={multiple ? "mb-1 flex max-h-[180px] flex-col overflow-y-auto overscroll-contain [contain:layout_paint]" : "flex flex-col"}>
-					{props.prompts.map((prompt, index) => (
+					{visiblePrompts.map((prompt, index) => (
 						<QueuedPromptRow key={prompt.id} prompt={prompt} index={index} showQueueGlyph={!multiple} sessionId={sessionId} agentBusy={agentBusy} steerSupported={steerSupported} onRetract={props.onRetract} onDiscard={props.onDiscard} onChangeBehavior={props.onChangeBehavior} onSendAsk={sendAsk} />
 					))}
 				</ul>

@@ -64,6 +64,16 @@ export function canDiscardQueuedPrompt(status?: QueuedPromptStatus): boolean {
 /** 矩阵项的可用性提示：disabled=false 可操作；disabled=true 时给出禁用原因，供 UI 渲染 tooltip/aria。 */
 export type QueueControlHint = { disabled: false; reason?: undefined } | { disabled: true; reason: "sending" | "unknown" };
 
+/**
+ * 队列面板只展示「还没派发给后端」的行。claim 之后本条已经作为用户消息上屏，不再是排队内容；
+ * 尤其是 ACP —— `session/prompt` 的回包就是整个回合的结算，投递确认要等到回合结束，
+ * 继续展示 sending 行会让队首在整轮里看起来像「队列没清空」。
+ * 派发被拒或结果未知时状态回落为 failed/unknown，行会重新显形供用户处理。
+ */
+export function visibleQueuedPrompts(queue: QueuedPromptSnapshot[]): QueuedPromptSnapshot[] {
+	return queue.filter((prompt) => prompt.status !== "sending");
+}
+
 /** 撤回（撤回修改）的可用性：sending/unknown 禁用，原因用于展示禁用提示。 */
 export function retractControlHint(status?: QueuedPromptStatus): QueueControlHint {
 	if (status === "sending") return { disabled: true, reason: "sending" };

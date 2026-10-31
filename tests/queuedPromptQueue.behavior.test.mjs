@@ -19,6 +19,7 @@ import {
 	retractPrompt,
 	retryFailedPrompt,
 	updateQueuedPromptBehavior,
+	visibleQueuedPrompts,
 } from "../src/renderer/src/utils/queuedPromptQueue.ts";
 import { updateActiveToolCalls } from "../src/shared/toolRuntimeState.ts";
 
@@ -258,6 +259,11 @@ test("immediate unknown snapshots stay visible and acknowledgement-only", () => 
 	assert.match(composerPanelsSource, /status === "unknown"/);
 	assert.match(composerPanelsSource, /canRetractQueuedPromptToInput\(status\)/);
 	assert.match(composerPanelsSource, /canDiscardQueuedPrompt\(status\)/);
+	// 面板只渲染未派发的行，计数与列表同源（sending 行在 claim 时已上屏）。
+	assert.match(composerPanelsSource, /const visiblePrompts = visibleQueuedPrompts\(props\.prompts\)/);
+	assert.match(composerPanelsSource, /visiblePrompts\.map\(/);
+	assert.match(composerPanelsSource, /sessionQueue\.count", \{ n: visiblePrompts\.length \}/);
+	assert.doesNotMatch(composerPanelsSource, /props\.prompts\.map\(\(prompt, index\) =>/);
 	assert.equal(canRetractQueuedPromptToInput("pending"), true);
 	assert.equal(canRetractQueuedPromptToInput("failed"), true);
 	assert.equal(canRetractQueuedPromptToInput("sending"), false);
@@ -331,4 +337,27 @@ test("queue view shows at most three rows and reports the rest as hidden", () =>
 		visible: [],
 		hiddenCount: 0,
 	});
+});
+
+test("claimed rows leave the queue panel while delivery waits for turn settlement", () => {
+	// ACP 的 session/prompt 回包就是回合结算：投递确认要等整轮结束。已 claim 的消息那一刻
+	// 已作为用户消息上屏，继续当成排队行会让队首在整轮里看起来像「队列没清空」。
+	let queues = { a: [prompt("m1", "followUp")] };
+	const claim = claimIdleHead(queues, "a");
+	queues = claim.queues;
+	assert.equal(queues.a[0].status, "sending");
+	assert.deepEqual(visibleQueuedPrompts(queues.a), []);
+
+	// 后面排队的消息仍然可见，返工/未知结果重新显形供用户处理。
+	queues = enqueuePrompt(queues, "a", prompt("m2"));
+	assert.deepEqual(
+		visibleQueuedPrompts(queues.a).map((item) => item.id),
+		["m2"],
+	);
+	assert.deepEqual(
+		visibleQueuedPrompts([prompt("failed", "followUp", "failed"), prompt("unknown", "followUp", "unknown")]).map((item) => item.status),
+		["failed", "unknown"],
+	);
+	// 计数也只算可见行，否则折叠头会显示 N 条却列出 N-1 条。
+	assert.equal(visibleQueuedPrompts(queues.a).length, getQueuedPromptView(visibleQueuedPrompts(queues.a), 3).visible.length);
 });
