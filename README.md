@@ -449,6 +449,8 @@ src/
   <a href="docs/images/gpt-recharge-price.png"><img src="docs/images/gpt-recharge-price.png" alt="GPT 充值价目表" width="420" /></a>
 </p>
 
+> 价目表仅供参考：汇率与官方调价会让价格波动，具体以实际问询为准，欢迎来询价。
+
 ---
 
 ## ☕ 赞助
