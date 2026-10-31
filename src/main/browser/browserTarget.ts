@@ -1,7 +1,7 @@
 /**
  * 内置浏览器 guest 的选择逻辑（纯函数）。
  *
- * 事实约束（docs/browser-agent-plan.md §1.2 / §4）：
+ * 事实约束（docs/archive/plans/browser-agent-plan.md §1.2 / §4）：
  * - 内置浏览器是主窗口里的 <webview> guest，partition 固定 persist:pideck-browser-panel；
  * - 宿主插件面板也是 webview，但 partition 是 host-plugin:<uuid>，由 session 身份天然排除；
  * - PiDeck 任意时刻最多 1 个 browser guest（切 tab 用 loadURL 复用同一 guest）。

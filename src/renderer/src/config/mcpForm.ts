@@ -96,7 +96,7 @@ export function textToRecord(text: string): Record<string, string> | undefined {
 	return Object.keys(out).length > 0 ? out : undefined;
 }
 
-// ── 智能添加（设计见 docs/mcp-config-ux-redesign.md A 片）────────────────
+// ── 智能添加（设计见 docs/archive/plans/mcp-config-ux-redesign.md A 片）────────────────
 // 一个粘贴框认三种输入：URL / 命令行（整行拆 command+args）/ JSON 片段（整块配置、
 // 命名映射或单条定义）。识别是纯函数：不访问网络、不校验服务器可达性（那由检测做）。
 

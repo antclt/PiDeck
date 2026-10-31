@@ -1,6 +1,6 @@
 /**
  * Main-only repair primitives for a host store stuck in `needs-repair`
- * (`docs/remote-host-cross-store-design.md` §4.5 and §6).
+ * (`docs/archive/remote/remote-host-cross-store-design.md` §4.5 and §6).
  *
  * Three hard rules from §6.1 shape every primitive here:
  * 1. never delete a trust anchor: a pin may only go away when no profile claims it (orphan) or its

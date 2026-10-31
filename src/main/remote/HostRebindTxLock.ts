@@ -1,6 +1,6 @@
 /**
  * Transaction lock for the cross-store host rebind transaction
- * (`docs/remote-host-cross-store-design.md` §5.1 R1/R4/R6).
+ * (`docs/archive/remote/remote-host-cross-store-design.md` §5.1 R1/R4/R6).
  *
  * The owner shape, the R6 liveness decision and the create/reclaim/release mechanics live in
  * `src/main/persistence/StoreFileLock.ts`, shared with the two reference stores (`projects.json`,

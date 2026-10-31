@@ -1,7 +1,7 @@
 /**
  * Single source of truth for the remote-host domain's on-disk layout.
  *
- * Why one resolver (`docs/remote-host-cross-store-design.md` §7.1 第 25 项): the store file, its
+ * Why one resolver (`docs/archive/remote/remote-host-cross-store-design.md` §7.1 第 25 项): the store file, its
  * backup, its lock, the pin root and the rebind journal/tx lock used to be assembled independently in
  * five places. A drift between two of them means a lock that guards a different file than the one
  * being written — the exact failure the cross-process guarantees exist to prevent. Callers pass the

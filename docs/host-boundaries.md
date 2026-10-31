@@ -1,5 +1,8 @@
 # 宿主边界与例外通道
 
+> **Status: Current（2026-10-31 核对；以代码与测试为准）**
+
+
 > 改 `src/main/pi/**`、`resources/*.mjs`、`resources/extensions/**`、MCP host、spawn 侧车或新增「宿主 ↔ pi」能力前读本文。
 > 总原则：**pi 的事不要替它做，UI 的事 pi 也不要做**。二者只经既有通道通信；每一条例外只允许一种用途，**禁止扩成通用桥**。
 
@@ -56,7 +59,7 @@
 - 只读工具免审批；写工具 fail-closed（无 approval handler / 超时 / 拒绝即不执行）。页面与屏幕内容是不可信输入；工具输出不得包含凭据，日志不得写页面文本或截图内容。
 - 禁止扩展成通用宿主控制通道：不得暴露任意 JS 执行、文件系统、shell、任意 HTTP 代理、会话/模型控制。内置浏览器工具不得绕过 `isAllowedBrowserPanelUrl`、不得注入 preload / 放开 allowpopups、不得改 webview 安全档位。
 - 与 `pideck`（对外 MCP 服务，见 `docs/pideck-mcp.md`）是两个独立端点：CUA/浏览器工具只服务 pi；ACP 调用（`acp_tools_list` / `sessions_create` / `sessions_send` / `sessions_wait` / `sessions_messages` / `sessions_stop`）只存在于 `pideck`，由独立开关 `allowAcpInvoke` 约束，**不在本端点扩展**。
-- 详见 `docs/browser-agent-plan.md`（工具面、快照契约、风险与合并门禁）。
+- 详见 `docs/archive/plans/browser-agent-plan.md`（工具面、快照契约、风险与合并门禁）。
 
 ## 例外七：会话分组宿主数据（`sessionGroups.*`，只允许分组读写）
 

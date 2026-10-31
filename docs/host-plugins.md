@@ -1,5 +1,8 @@
 # PiDeck 宿主插件（Host Plugins）
 
+> **Status: Current（2026-10-31 核对；以代码与测试为准）**
+
+
 > 第一阶段独立插件系统：不依赖 pi 进程，向 PiDeck 桌面壳（而非 pi RPC）注册 UI 面板与受限 API。
 > 设计动机：现有扩展点（pi 扩展 + GUI 桥）依赖 pi 进程且受 `ctx.ui` 降级限制；宿主插件让纯查看器/工具类扩展（如 pi-context）直接挂在 PiDeck 上。
 

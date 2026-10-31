@@ -9,7 +9,7 @@
  * 为什么走 SSH 短命令而不是 helper 的 `fs.*`：
  * - helper 的 `--root` 是**每连接一个目录**（`RemoteHelperCommand`），会话文件在用户 home 下，
  *   不在项目 root 之内 ⇒ `fs.read` 只会得到 `PATH_OUTSIDE_ROOT`；要读它就得改 helper 的 root 语义
- *   或新增 op，而「零新增 helper op」是本阶段的既定决定（见 docs/remote-phase4-plan.md §3.6 后的
+ *   或新增 op，而「零新增 helper op」是本阶段的既定决定（见 docs/archive/remote/remote-phase4-plan.md §3.6 后的
  *   冻结纪律）。
  * - 因此这里用既有 pinned SSH 通道执行**有界**读取命令（`tail`/`head`），复用 `buildPinnedSshInvocation`
  *   一系的 pin/指纹校验（禁止 ssh-keyscan、禁止把远端路径交给本机 fs）。

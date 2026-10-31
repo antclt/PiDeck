@@ -40,7 +40,7 @@ import type { DshCommandView, DshPluginBridgeResponse, DshPluginInstallInput, Ds
  * 主进程侧通过 `DshApiClient`（AbstractApiClient 实例，doFetch 走桥）访问
  * 同一 ApiProxy 契约——传输替换对 PiDeck 其余代码完全透明。
  *
- * 形态说明（docs/dsh-agent-backend-plan.md §3.2 形态 b）：
+ * 形态说明（docs/archive/plans/dsh-agent-backend-plan.md §3.2 形态 b）：
  * - host 在 utilityProcess 里 boot（无 web/无 HTTP/无端口），原生 ABI 与崩溃面
  *   不污染主进程；hostEntry 产物经 electron-vite 多入口打包到 out/main/。
  * - 启动预热：runtime 已安装且用户没手动停止过 host 时，窗口首帧后后台预热（不等用户

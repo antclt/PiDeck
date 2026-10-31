@@ -1,6 +1,6 @@
 # PiDeck 商业化 UI / UX 统一规划
 
-> 状态：**待执行**。本文只做排查与施工规划，不代表任何页面已经完成改造。
+> 状态：**Wave 1–7 已落地（2026-10-31 合入 origin/dev；实施记录见 archive/plans/ui-commercialization-impl-*）；本文件保留为剩余页面清单与验收基线，未完成项按文中“待执行/未覆盖”标记为准。**
 > 适用端：PiDeck 桌面端（Electron renderer）。Web 远端界面保持其独立设计体系，不在本次合并范围内。
 > 关联文档：`DESIGN.md`、`docs/ui-unification-plan.md`、`docs/ui-and-css.md`、`docs/architecture.md`、`docs/engineering-standards.md`。
 
@@ -43,7 +43,7 @@ PiDeck 已经有明确的 **The Ink Workbench** 设计方向和较完整的语�
 
 ### 2.3 已有专项方案不重开
 
-- MCP 已完成智能添加、认证简化、状态与删除反馈等专项改造；后续只做共享视觉模式和遗留一致性检查，流程继续遵循 `docs/mcp-config-ux-redesign.md`。
+- MCP 已完成智能添加、认证简化、状态与删除反馈等专项改造；后续只做共享视觉模式和遗留一致性检查，流程继续遵循 `docs/archive/plans/mcp-config-ux-redesign.md`。
 - 项目位置、远程访问等涉及产品模型或后端的事项，不因“UI 统一”被顺带改写。
 
 ## 3. 商业化设计目标与原则

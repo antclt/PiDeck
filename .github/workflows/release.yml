@@ -5,7 +5,7 @@ name: Release
 #   runner 交叉打包 6 平台 runtime tgz，含 win32-arm64 / darwin-x64 这两个历史缺口）
 #   → softprops 用 RELEASE_PAT 发布（GITHUB_TOKEN 发布不广播 release: published，防递归）
 #   → post-release-sidecars.yml 被触发：只负责触发 sync-atomgit.yml（runtime 补发
-#      职责已由交叉打包取代，见 docs/dsh-runtime-cross-pack.md）
+#      职责已由交叉打包取代，见 docs/archive/plans/dsh-runtime-cross-pack.md）
 #   → sync-atomgit.yml 等资产清单稳定后同步到 AtomGit 镜像。
 # 手动补发入口：publish-dsh-runtime.yml / publish-dsh-runner-node.yml（保留，用于
 # 给旧版本补发或重试；前者同样支持 --target-* 交叉模式），sync-atomgit.yml 手动
@@ -360,7 +360,7 @@ jobs:
   # 可行性根因：runtime 闭包内所有原生依赖都以 prebuild 分发（node-pty tarball 自带
   # 全平台 prebuilds、koffi/sharp/rg 是 optional 平台包），
   # `npm install --os --cpu --libc --ignore-scripts` 可在任意宿主交叉解析出目标平台
-  # 完整树（WSL 真机 boot 已验证，见 docs/dsh-runtime-cross-pack.md）。
+  # 完整树（WSL 真机 boot 已验证，见 docs/archive/plans/dsh-runtime-cross-pack.md）。
   # linux 目标必须显式 --libc glibc：npm 在非 Linux 宿主上检测不到 libc，会把
   # libc:["glibc"] 的平台包（@img/sharp-linux-x64 等）静默过滤掉。
   pack-dsh-runtime:

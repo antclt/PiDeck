@@ -16,7 +16,7 @@
  *   - 其余未引用快照最多保留 2 份且不超过 7 天；
  *   - **并发连接保护**：年龄 < 1h 的未引用快照不删（另一台机器/另一个 PiDeck 版本可能正连在它上面；
  *     plan 要求的「连接注册/lease」尚未实现，这是当前能做到的最保守替代，见
- *     docs/remote-security-remediation.md 的残留风险）；
+ *     docs/archive/remote/remote-security-remediation.md 的残留风险）；
  *   - `.staging-*` 只在**没有活跃 deploy lock** 时、目录 mtime 超过 1h 才删（上传中的 staging mtime 会更新）；
  *   - `.deploy.lock` 持有者按 pid + Linux /proc start identity 判定存活（与 bootstrap 同一判据）：
  *     存活 ⇒ 整个 sweep 跳过（另一个客户端可能正在部署）；已死 ⇒ 删除 stale lock；

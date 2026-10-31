@@ -4,7 +4,7 @@ name: Publish DSH runtime
 # 该文件需要提交到默认分支；否则 GitHub Actions 不会在页面注册/显示本 workflow。
 # 两种打包模式（2026-09 起二选一，cross_pack 输入控制）：
 # - 交叉模式（推荐）：单 ubuntu runner 交叉打包全 6 平台，无需原生 runner
-#   （lock 驱动 + prebuild 分发，详见 docs/dsh-runtime-cross-pack.md）；
+#   （lock 驱动 + prebuild 分发，详见 docs/archive/plans/dsh-runtime-cross-pack.md）；
 # - 原生模式（回退）：按平台原生 runner 逐平台打包（与 2026-09 前行为一致）。
 # 产物挂到目标 GitHub *应用* Release（vX.Y.Z；留空时取 latest），再按需手动重跑
 # sync-atomgit。禁止独立 dsh-runtime tag：会抢走 /releases/latest，把更新检查指到
@@ -56,7 +56,7 @@ permissions:
 
 jobs:
   # 交叉模式（cross_pack=true）：单 ubuntu runner 一次打全 6 平台，替代原生矩阵。
-  # 闭包内所有原生依赖都是 prebuild 分发，无本机编译；详见 docs/dsh-runtime-cross-pack.md。
+  # 闭包内所有原生依赖都是 prebuild 分发，无本机编译；详见 docs/archive/plans/dsh-runtime-cross-pack.md。
   pack-and-upload-cross:
     name: Cross-pack all platforms
     if: ${{ inputs.cross_pack == true }}

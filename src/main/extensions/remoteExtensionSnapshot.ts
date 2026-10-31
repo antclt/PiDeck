@@ -1,5 +1,5 @@
 /**
- * 远端内置扩展：镜像表 + 生效快照读取（P4.4 扩展面，`docs/remote-extension-injection-plan.md`）。
+ * 远端内置扩展：镜像表 + 生效快照读取（P4.4 扩展面，`docs/archive/remote/remote-extension-injection-plan.md`）。
  *
  * 这个模块只回答两个问题，都是纯数据/纯函数：
  *

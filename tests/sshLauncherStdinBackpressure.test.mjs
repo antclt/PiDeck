@@ -4,7 +4,7 @@ import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 /**
- * F2b：写侧背压（docs/remote-functional-optimization-plan.md §3 F2）。
+ * F2b：写侧背压（docs/archive/remote/remote-functional-optimization-plan.md §3 F2）。
  *
  * 这些用例证明三件事，全部离线可判定：`write=false` 之后不再无界写入；`drain` 恢复时整帧顺序不变；
  * 进程结束/停止时等待者被释放而不是悬挂。真机内存曲线不在这里测量（见 F0/F5 记录要求）。

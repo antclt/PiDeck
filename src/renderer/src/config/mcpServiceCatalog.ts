@@ -1,7 +1,7 @@
 import type { McpServerDefinition } from "../../../shared/types/mcp";
 
 /**
- * 内置 MCP 服务目录（国产服务批次接入方式逐项按官方文档核实，见 docs/mcp-config-form-redesign.md）。
+ * 内置 MCP 服务目录（国产服务批次接入方式逐项按官方文档核实，见 docs/archive/plans/mcp-config-form-redesign.md）。
  * 数据层只声明「凭据字段 + 写入位置」，不含密钥值；表单渲染与落盘字段映射都由这里的声明驱动。
  */
 export type McpCatalogAuthKind = "none" | "oauth" | "header-key" | "env-key" | "url-key" | "multi-key";

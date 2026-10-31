@@ -94,7 +94,7 @@
    */
   /* 默认浅色外观以纯白为基底；灰色只用于控件表面、hover 和选中层级。 */
   --color-bg-app: #ffffff;
-  /* 主次分明（对齐 ZCode 排版，docs/zcode-design-analysis.md）：chrome 退一档——
+  /* 主次分明（对齐 ZCode 排版，docs/archive/research/zcode-design-analysis.md）：chrome 退一档——
      侧栏 #f0f0f0（ZCode sidebar 同值），正文面板保持纯白，
      内容浮在 chrome 之上，焦点自然落在会话区。
      右抽屉曾试过同步退 chrome 档，用户裁决回退白面板（2026-10，docs §八）：
@@ -116,7 +116,7 @@
   --color-bg-popover: #ffffff;
   --color-bg-input: #ffffff;
   /* 控件表面/hover/选中层：全部纯中性灰（R=G=B，无色相）——ZCode 质感的关键
-     是灰阶零色相噪声，色相只留给语义色与身份色（见 docs/zcode-design-analysis.md）。
+     是灰阶零色相噪声，色相只留给语义色与身份色（见 docs/archive/research/zcode-design-analysis.md）。
      交互阶梯对齐 ZCode 的「纸感」：侧栏 #f0f0f0 上 hover Δ6（#eaeaea）、选中 Δ12
      （#e4e4e4，≈ZCode 选中墨量 4.7%）——选中感靠小步长，不靠深底；白面板上两档
      相应为 Δ21/Δ27，仍清晰可辨。暗色阶梯保持更大步长不动（ZCode 暗色同理）。
@@ -583,7 +583,7 @@
   color-scheme: dark;
   /* 暗色黑灰基底 + 中性灰默认主题；data-accent 可切换到彩色主题。 */
   --color-bg-app: #121212;
-  /* 主次分明（对齐 ZCode 排版，docs/zcode-design-analysis.md）：暗色方向反过来——
+  /* 主次分明（对齐 ZCode 排版，docs/archive/research/zcode-design-analysis.md）：暗色方向反过来——
      chrome 更暗（#141414），正文面板 #1a1a1a 更亮，
      深度序列 chrome < content < sticky（bg-app #121212），与浅色的白卡浮层同构。 */
   --color-bg-sidebar: #141414;

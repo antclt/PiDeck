@@ -3,7 +3,7 @@ import { replaceOutsideProtected } from "../utils/protectedText";
 /**
  * 发送前展开管线（发布乐观气泡之后的两步）。
  *
- * 完整顺序（见 `docs/chip-rendering-refactor-plan.md` §3.2）：
+ * 完整顺序（见 `docs/archive/plans/chip-rendering-refactor-plan.md` §3.2）：
  *   1) 引用 token `#q<id>` → `<quoted_context>`：在乐观发布**之前**同步完成
  *      （见 `components/session/composer/quoteChip.expandQuoteTokens`，纯函数、无 IO，
  *      先展开才能让气泡不闪 `#q` token）。

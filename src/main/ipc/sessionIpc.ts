@@ -775,7 +775,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 	 * 冷启动里程碑（3/3）：首个会话列表返回。前两个里程碑（app ready / first window shown）
 	 * 记在 index.ts，但用户真正看到内容要等这次扫描结束；scanMs 单独拆出来，才能区分
 	 * 「窗口起得慢」和「会话扫描慢」（侧栏扫描是唯一未进 sidecar 的机械成本，见
-	 * docs/session-data-plane-plan.md §7）。只在首个请求记录一次，切项目不再刷屏。
+	 * docs/archive/plans/session-data-plane-plan.md §7）。只在首个请求记录一次，切项目不再刷屏。
 	 */
 	let firstSessionListMilestoneLogged = false;
 	ipcMain.handle(ipcChannels.sessionsList, async (_event, projectId?: string) => {
@@ -1272,7 +1272,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		// 2. 不动本机回收站、不删/改任何本机文件；
 		// 3. **零远端数据写入**：不改写远端 JSONL、不 move、不删除；
 		// 4. 但“停进程 ≠ 改数据”：有运行实例时照本机「先杀后删」的先例先停掉它（见下）。
-		// 真删远端文件是**另一个显式动作**（需二次确认），不在本批（见 docs/remote-write-plan.md §0）。
+		// 真删远端文件是**另一个显式动作**（需二次确认），不在本批（见 docs/archive/remote/remote-write-plan.md §0）。
 		const remoteLocator = entry.locator?.kind === "ssh" ? entry.locator : undefined;
 		if (remoteLocator) {
 			// 先停后摘记录（与本机删除同序）：留一个 `sessionId` 已不存在却仍绑定 runtime 的悬空会话会漏事件、

@@ -1,6 +1,6 @@
 /**
  * Reference-source registry for the cross-store host transaction design
- * (`docs/remote-host-cross-store-design.md` §4.1).
+ * (`docs/archive/remote/remote-host-cross-store-design.md` §4.1).
  *
  * Why this exists: `RemoteHostStore.retire` hard-deletes a profile once the reference set looks
  * empty, and a reference source that cannot be read must never be mistaken for "no references".

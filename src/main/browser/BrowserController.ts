@@ -25,7 +25,7 @@ import { buttonMask, clamp, KEY_DEFS, modifierMask, readRuntimeValue, withTimeou
 import type { BrowserGuestCandidate } from "./browserTarget";
 import { isRecord, readFiniteNumber, readString, truncateText } from "./valueRead";
 
-/** 目标身份：webContentsId + URL + 标题（主进程拿不到渲染层 tabId，见 docs/browser-agent-plan.md §4）。 */
+/** 目标身份：webContentsId + URL + 标题（主进程拿不到渲染层 tabId，见 docs/archive/plans/browser-agent-plan.md §4）。 */
 export type BrowserTargetInfo = { webContentsId: number; url: string; title: string };
 
 /** 写动作的归属：sessionId 必填（只用于门控/审批归属），agentId 与 runtimeGeneration 可选。 */

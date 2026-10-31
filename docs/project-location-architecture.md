@@ -8,7 +8,7 @@
 
 用户应能在同一项目列表中同时打开本机、WSL 和 SSH 项目。现在 Windows 上的“Pi 来源：Windows/WSL”是全局设置：`DevTab` 写入 `wslEnabled`，`projectsIpc` 用它过滤项目列表、决定新增项目的位置，并用全局 `wslDistro` 转换已有 WSL 项目路径；`TerminalSessionManager` 用它选择 WSL shell。切换一个设置会改变所有项目的可见性和部分执行上下文。这不是三个并列位置。
 
-Phase 1 已有 `ProjectLocator = local(environment: native | wsl) | ssh`、项目相对文件目标和本地 backend 的边界，但目前 `ProjectStore` 的业务对象仍是旧 `path/environment` 形状，v2 codec 拒绝读取 SSH 项目；会话 catalog 仍有旧环境字段与全局 WSL 身份上下文。这些是兼容过渡，不应被当作“WSL/SSH 项目已可并存”的完成证据。[实施计划](remote-development-plan.md) §5.1、§11.2 和 §12 的范围、协议与阶段门禁继续有效；具体的旧数据判定、现有 WSL 执行链路和测试缺口见 [WSL 位置迁移基线](wsl-location-baseline.md)。本 ADR 专门补充位置的产品语义和迁移门禁。
+Phase 1 已有 `ProjectLocator = local(environment: native | wsl) | ssh`、项目相对文件目标和本地 backend 的边界，但目前 `ProjectStore` 的业务对象仍是旧 `path/environment` 形状，v2 codec 拒绝读取 SSH 项目；会话 catalog 仍有旧环境字段与全局 WSL 身份上下文。这些是兼容过渡，不应被当作“WSL/SSH 项目已可并存”的完成证据。[实施计划](./archive/remote/remote-development-plan.md) §5.1、§11.2 和 §12 的范围、协议与阶段门禁继续有效；具体的旧数据判定、现有 WSL 执行链路和测试缺口见 [WSL 位置迁移基线](./archive/plans/wsl-location-baseline.md)。本 ADR 专门补充位置的产品语义和迁移门禁。
 
 ## 建议决策
 
@@ -33,7 +33,7 @@ type ProjectLocator =
 
 ## 能力与归属对照
 
-此表区分**目标路由**与**当前状态**。SSH 的“目标”不表示已实现；更完整的远端 v1 支持/禁用清单见[实施计划](remote-development-plan.md) §13。
+此表区分**目标路由**与**当前状态**。SSH 的“目标”不表示已实现；更完整的远端 v1 支持/禁用清单见[实施计划](./archive/remote/remote-development-plan.md) §13。
 
 | 能力 | 本机项目 | WSL 项目 | SSH 项目目标 | 迁移关键点 |
 | --- | --- | --- | --- | --- |
@@ -54,7 +54,7 @@ type ProjectLocator =
 2. **先完成按项目路由，再开放并列操作**：逐域落实 files → Git → terminal → Pi launcher → Session history/catalog → config/skills/extensions/trust。每个 IPC 从可信 `projectId`/`sessionId` 解析位置；旧 local adapter 只支持本机/已明确绑定的 WSL，SSH target 在支持前 fail closed。先检查 Git 与文件在 WSL `/mnt`、UNC 两种存储路径下的现有执行语义，再决定统一走哪种 adapter，不通过转换路径来暗中切换 Git 实现。尚未迁移的操作必须按项目禁用并说明原因，不可取当前全局 WSL 配置凑合执行。
 3. **交付三位置并列的项目列表与添加入口**：列表从持久项目读，不受 Pi 来源开关过滤；“添加项目”显式选本机/WSL/SSH（SSH 入口到远端只读阶段前可标为尚不可用）；WSL 选择可填发行版/用户。UI 可以先展示已有项目和不可达状态，但本机/WSL 同时可操作的入口必须等第 2 批相关路由及第 4 批并存回归通过后才启用。连接失败仍保留已登记项目。旧设置保留读取/兼容，但不再充当项目路由开关。
 4. **并存回归门禁**：Windows 上本机项目 A、Ubuntu 的 B、另一发行版的 C 同时可见；两条发行版内相同 `/home/u/repo` 互不复用文件、会话、终端和 trust；本机 `C:\repo` 与 WSL `/mnt/c/repo` 允许作为两个执行上下文；切换项目/标签页不重写 Pi 环境；发行版停止、改名或用户变更时只影响引用它的项目且不可回退本机。SSH 上线后补两个主机同路径、断线/重连、host-key 变更和远端禁用能力的隔离测试。非 Windows 平台保留本机/SSH，绝不展示可执行的 WSL 入口。
-5. **阶段门禁不得提前放宽**：Phase 2 可先开发不联网的主机身份/连接契约及 Windows → Linux 受控路径；macOS/Linux 客户端各自在启用 SSH 连接前完成已认证 fingerprint 与环境变量验证，未验证平台不得激活 profile 或启动远端进程。稳定版仍须达到[实施计划](remote-development-plan.md) §14.2 的发布矩阵；Phase 3/4/5 的只读、Agent、写入与 Git/终端发布边界继续按原计划。未经跨目标并存回归，不得移除旧设置兼容读取，也不得宣称三位置功能已交付。
+5. **阶段门禁不得提前放宽**：Phase 2 可先开发不联网的主机身份/连接契约及 Windows → Linux 受控路径；macOS/Linux 客户端各自在启用 SSH 连接前完成已认证 fingerprint 与环境变量验证，未验证平台不得激活 profile 或启动远端进程。稳定版仍须达到[实施计划](./archive/remote/remote-development-plan.md) §14.2 的发布矩阵；Phase 3/4/5 的只读、Agent、写入与 Git/终端发布边界继续按原计划。未经跨目标并存回归，不得移除旧设置兼容读取，也不得宣称三位置功能已交付。
 
 ## 仍需评审的问题
 

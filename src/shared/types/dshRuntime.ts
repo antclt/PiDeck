@@ -1,5 +1,5 @@
 /**
- * DSH runtime 安装态契约（AgentRuntimeProvider，docs/dsh-runtime-optional-plan.md）。
+ * DSH runtime 安装态契约（AgentRuntimeProvider，docs/archive/plans/dsh-runtime-optional-plan.md）。
  *
  * 官方安装包默认 lite：不随 runtime。dev 与打包版统一先探测外部
  * userData/runtimes/dsh/<version>；仅依赖分区前的存量 full 包可额外回退随包资源，

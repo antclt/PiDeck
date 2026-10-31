@@ -3,7 +3,7 @@ import type { TranslationKey } from "../../i18n/rendererCopy.zh-CN";
 /**
  * 远端文件管理 UI 状态机（纯 reducer，无 React）。
  *
- * 冻结契约（docs/remote-file-management-plan.md §10.3）：
+ * 冻结契约（docs/archive/remote/remote-file-management-plan.md §10.3）：
  * idle → creating|renaming|deleting|restoring|pruning → idle|failed|unknown；
  * 单飞（任一写操作在途即 busy，其余写按钮禁用）；成功只触发显式刷新；未知结果保留提示直到显式刷新。
  * 这里只放「事实」与「稳定码」，文案由 t() 映射（remoteFileEntryErrorText），便于离开 React 单测。

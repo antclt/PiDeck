@@ -41,13 +41,13 @@ export function isLocalFileExtensionSource(source: string): boolean {
 export class ExtensionManager {
 	private wslEnvironment: WslEnvironment | null = null;
 	/**
-	 * 自更新执行链路协作者（拆分 Wave 2，计划见 docs/pi-self-update-split-plan.md）：
+	 * 自更新执行链路协作者（拆分 Wave 2，计划见 docs/archive/plans/pi-self-update-split-plan.md）：
 	 * 检查 / 通道分派 / 包管理器代跑 / 失败提示都在里面。
 	 * public：行为测试需要注入窗口（stub runPi 与各代跑方法、替换 locator、直接调 fetchLatestVersion）。
 	 */
 	public readonly selfUpdate: PiSelfUpdateRunner;
 	/**
-	 * 扩展目录/版本查询协作者（拆分 Wave 3，计划见 docs/pi-self-update-split-plan.md）：
+	 * 扩展目录/版本查询协作者（拆分 Wave 3，计划见 docs/archive/plans/pi-self-update-split-plan.md）：
 	 * pi list + 本地目录扫描 + 启用态投影 + npm 版本补全，缓存与并发去重都在里面。
 	 * public：行为测试需要注入窗口（stub loadList / scanLocalExtensions / parseListOutput / npmViewVersion）。
 	 */

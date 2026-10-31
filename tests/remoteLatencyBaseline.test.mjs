@@ -6,7 +6,7 @@ import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 /**
- * F0 基线（docs/remote-functional-optimization-plan.md §3 F0 / §7.1）：把「一次远端往返」固定成 100 ms，
+ * F0 基线（docs/archive/remote/remote-functional-optimization-plan.md §3 F0 / §7.1）：把「一次远端往返」固定成 100 ms，
  * 用**实际工作量**（请求数、上传字节数）当硬判据，墙钟耗时只做同条件对照。
  *
  * 为什么用注入延迟而不是真机：真机网络不可重复，100 ms 是把两边拉到同一条件下的手段；真机证据仍归

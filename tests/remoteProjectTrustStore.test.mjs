@@ -5,7 +5,7 @@
  * `RemoteProjectTrustService` 的公开接口（不碰私有函数），持久化用真端口语义的替身：
  * 一个 `{ read(), write() }` 对象就是 settings.json 里那一段，重建 service 即等价于「重启后仍在」。
  *
- * 关键判据（对应 docs/remote-trust-plan.md §2 / §3 决策 2/4/5）：
+ * 关键判据（对应 docs/archive/remote/remote-trust-plan.md §2 / §3 决策 2/4/5）：
  * - 未决策 / 材料缺失 / endpoint 变更（作废）⇒ `trustOverride()` 返回 undefined ⇒ spawn 一个 flag 都不加；
  * - 同 host + 同根但 endpoint 变了要能被**检测出来并说明原因**（stale + reason），不是悄悄变回未决策；
  * - 主机被移除/退役 ⇒ 该主机的条目被清掉（与 pin 清理同一位置，见 RemoteHostStore 的 onHostRetired）；

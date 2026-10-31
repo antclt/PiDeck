@@ -1,5 +1,8 @@
 # Electron 实战手册
 
+> **Status: Current（2026-10-31 核对；以代码与测试为准）**
+
+
 > 改 `main/index.ts`、窗口创建、preload、webview、打包配置、原生模块或跨平台路径前读本文。每条都是踩坑结论。
 
 ## 启动与生命周期

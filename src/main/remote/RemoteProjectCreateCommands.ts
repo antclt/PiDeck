@@ -4,7 +4,7 @@ import { buildPinnedSshInvocation } from "./SshVerifiedConnection";
 import type { SshClientRuntime } from "./SshClientRuntime";
 
 /**
- * 创建空远端项目的固定命令（Phase 5 文件面；docs/remote-file-management-plan.md §7）。
+ * 创建空远端项目的固定命令（Phase 5 文件面；docs/archive/remote/remote-file-management-plan.md §7）。
  *
  * 创建发生在**任何项目根之外**，因此不能复用 withProjectSession：这里与 RemoteBrowseRoot 同源，
  * 走 pinned SSH 短命令（单引号字面量、shell:false 的 argv），不建 helper 会话、不写 ProjectStore。

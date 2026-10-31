@@ -7,7 +7,7 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 import { createManualTimers, createPinnedClient, createPinnedHostFixture, settle } from "./helpers/sshPinnedHostFixture.mjs";
 
 /*
- * Lifetime of a remote ssh process, after the D2 decision (docs/remote-phase4-plan.md §3.6, task-33).
+ * Lifetime of a remote ssh process, after the D2 decision (docs/archive/remote/remote-phase4-plan.md §3.6, task-33).
  *
  * The launcher now states the policy per request:
  *

@@ -8,7 +8,7 @@ import { REMOTE_HELPER_MAX_REMOTE_COMMAND_LENGTH } from "./RemoteHelperContract"
 /**
  * 远端文件管理（Phase 5 文件面）的命令构造与 main 侧输入边界。
  *
- * 设计约束（冻结在 docs/remote-file-management-plan.md §2.3/§3.4/§4/§8）：
+ * 设计约束（冻结在 docs/archive/remote/remote-file-management-plan.md §2.3/§3.4/§4/§8）：
  * - **不新增 helper op**：所有写操作是 main 构造的一次性 Node 标准库脚本，经既有 pinned SSH 执行；
  * - **边界只有一份实现**：脚本前缀直接拼接 RemoteProjectFileCommands 的 BOUNDARY_SCRIPT（canonical root
  *   重证 + 父链逐级非链接 + /proc/self/fd 锚定），本文件不复制那套判据；
@@ -31,7 +31,7 @@ export const REMOTE_PROJECT_ENTRY_SCRIPT_MAX_CHARS = 5120;
 /**
  * 回收站 restore/prune 脚本的预算例外（Lead 已批准）：两者必须携带完整严格 manifest 重验 +
  * fd 锚定 + payload 状态判定，实测 6,0xx（list/entry/put 均 <=5,120）。冻结的 5120 目标保留给其余脚本；
- * 单条远程命令仍由 8192 硬上限在构造时兜底拒绝。见 docs/remote-file-management-plan.md §3.4。
+ * 单条远程命令仍由 8192 硬上限在构造时兜底拒绝。见 docs/archive/remote/remote-file-management-plan.md §3.4。
  */
 export const REMOTE_PROJECT_TRASH_ADMIN_SCRIPT_MAX_CHARS = 6100;
 export const REMOTE_PROJECT_ENTRY_MAX_RELATIVE = 4096;

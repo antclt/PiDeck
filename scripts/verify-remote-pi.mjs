@@ -1,5 +1,5 @@
 /**
- * 真实主机验证：远端 pi 定位与版本兼容矩阵（Phase 4 P4.1，`docs/remote-phase4-plan.md` §7）。
+ * 真实主机验证：远端 pi 定位与版本兼容矩阵（Phase 4 P4.1，`docs/archive/remote/remote-phase4-plan.md` §7）。
  *
  * 验证对象是 `RemotePiDiscovery` 的两个真机前提，它们都无法在本地证实：
  * 1. **登录 shell PATH 里能挑出 pi 候选**——非交互式 SSH 不加载 shell 初始化，真机 `serve` 上

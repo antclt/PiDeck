@@ -1,5 +1,5 @@
 /**
- * MCP 智能添加面板（docs/mcp-config-ux-redesign.md A 片）。
+ * MCP 智能添加面板（docs/archive/plans/mcp-config-ux-redesign.md A 片）。
  *
  * 一个粘贴框认三种输入（URL / 命令行 / JSON 片段），识别结果即时预览、名称可改；
  * 「添加并保存」把条目写入草稿并触发保存 + 自动检测（检测在父层 save 成功后执行）。

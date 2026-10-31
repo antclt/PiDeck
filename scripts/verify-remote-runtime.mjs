@@ -1,5 +1,5 @@
 /**
- * 真机端到端运行时验收（Phase 4 P4.2 的 Agent 通路）：`docs/remote-phase4-plan.md` §7「P4.2 最小端到端会话」
+ * 真机端到端运行时验收（Phase 4 P4.2 的 Agent 通路）：`docs/archive/remote/remote-phase4-plan.md` §7「P4.2 最小端到端会话」
  * 那条验收 —— 「prompt → 至少一个 assistant 事件 → abort → restart 后历史仍在」+「runner 回收后 ps 无残留
  * pi 进程组」—— 在**真实主机**上跑一遍。
  *

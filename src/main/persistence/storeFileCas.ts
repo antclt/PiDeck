@@ -2,7 +2,7 @@
  * Read-modify-write over one persisted JSON store, under a cross-process lock and with an explicit
  * revision token.
  *
- * Why this exists (INV-5a，`docs/remote-cross-store-consistency-plan.md` §2.1): a store used to build
+ * Why this exists (INV-5a，`docs/archive/remote/remote-cross-store-consistency-plan.md` §2.1): a store used to build
  * its next snapshot from its own in-memory copy and write the whole file. Two live writers (two
  * PiDeck versions are allowed to run against the same userData) each advanced "their" revision, so
  * the later rename silently dropped the earlier writer's committed records. This module makes the

@@ -6,7 +6,7 @@ import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 /**
- * F1：取消必须真正到达部署与进程边界（docs/remote-functional-optimization-plan.md §3 F1）。
+ * F1：取消必须真正到达部署与进程边界（docs/archive/remote/remote-functional-optimization-plan.md §3 F1）。
  *
  * 这些用例只用真实生产模块 + 注入的 launcher/session，不启动 ssh：它们检验的是「取消后等待立即结束、
  * 不再进入后续阶段、进程被停止」这条边界，而不检验真机行为（真机由 e2e 与 F5 台账负责）。

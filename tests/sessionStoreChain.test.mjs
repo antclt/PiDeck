@@ -197,6 +197,6 @@ test("Wave 2b：条目表落盘默认开启（可闸），落盘目录与 extraR
 	assert.deepEqual(entry.filter, ["session-store", "session-store.exe"]);
 	assert.match(String(pkg.scripts.build), /npm run build:session-store/);
 	// 收益结论必须留档，否则默认值没人知道为什么开
-	const plan = read("../docs/session-data-plane-plan.md");
+	const plan = read("../docs/archive/plans/session-data-plane-plan.md");
 	assert.match(plan, /### 8\.11/);
 });

@@ -767,7 +767,7 @@ test("composes with the real launcher: explicit session deadline and exit classi
 		assert.equal(manager.getState(profile.id).state, "reconnecting", shape.label);
 		assert.equal(requests.length, 1, shape.label);
 		// A control session is not a command: it states the session lifetime and carries no wall-clock budget at
-		// all (the old 120 s ceiling is exactly what Phase 4 cannot live with; docs/remote-phase4-plan.md §3.6).
+		// all (the old 120 s ceiling is exactly what Phase 4 cannot live with; docs/archive/remote/remote-phase4-plan.md §3.6).
 		assert.equal(requests[0].lifetime, "session", shape.label);
 		assert.equal(requests[0].timeoutMs, undefined, shape.label);
 		assert.equal(requests[0].maxOutputBytes, SSH_LAUNCHER_MAX_OUTPUT_BYTES, shape.label);

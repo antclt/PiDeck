@@ -1,8 +1,11 @@
 # 过程组实现契约（冻结版）
 
+> **Status: Current（2026-10-31 核对；以代码与测试为准）**
+
+
 - **状态**：**已实现并通过验证**（T1–T5 全部完成；`typecheck` 0 错误、针对性测试全绿、全仓 biome 格式干净）。接口在实现期间冻结；后续要改先改本文件再改代码。
 - **分支**：`research/dsh-process-display`
-- **关联文档**：[timeline-process-display-research.md](./timeline-process-display-research.md) §9（设计稿）、[process-group-scroll.html](./mockups/process-group-scroll.html)（视觉效果稿）
+- **关联文档**：[timeline-process-display-research.md](./archive/plans/timeline-process-display-research.md) §9（设计稿）、[process-group-scroll.html](./mockups/process-group-scroll.html)（视觉效果稿）
 - **已定产品决策**：组头不带步数；大折叠栏文案不动；中间回复不加视觉标记（保持正文样式）；重试/错误 = 与中间回复同级的一级行 + 截断组；组体限高 + 内部滚轮；行内容一律照抄现状。
 
 ---

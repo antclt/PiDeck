@@ -17,7 +17,7 @@ import { createNpmRegistryVersionResolver } from "./npmRegistryVersion";
  *
  * 为什么独立成模块：这段逻辑（约 400 行含缓存状态机与版本查询快路）与「安装/卸载/开关/内置生命周期」是两件事，
  * 混在一起既超文件红线，也让「缓存代数 / 代际丢弃」这类不方便被无关改动波及的约束暴露在无关编辑面前；
- * 拆分计划与门禁见 docs/pi-self-update-split-plan.md 的 Wave 3。
+ * 拆分计划与门禁见 docs/archive/plans/pi-self-update-split-plan.md 的 Wave 3。
  *
  * 边界：本模块只管「读与投影」；写盘类动作（装/卸/开关/内置文件清理/移除清单落盘）留在 ExtensionManager，
  * 需要时以回调注入。依赖全部经构造注入，不反向 import ExtensionManager。

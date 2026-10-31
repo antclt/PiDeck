@@ -1,11 +1,11 @@
 # ADR：同主机多项目 root 池化（测量 + 方案）
 
-> 状态：**Proposed（仅测量与设计；本轮不改生产代码）**。工作分支从 dev 187c96041 起，只新增本文与
+> 状态：**Proposed（仅测量与设计；本轮不改生产代码）**。初稿从 dev `187c96041` 起；当前 `dev` 已到 `f6f4eeaf6`，实现前请以当前 HEAD 重新核对 §2 的 file:line。本文与
 > `tests/remoteRootSwitchProbe.mjs`。任何实现都要另行批准，并且必须先合入测量门槛与回滚开关。
 >
-> 相关前置：`docs/remote-functional-optimization-plan.md` F3（切 root 仍重建会话，只复用已验证安装内容）、
-> `docs/remote-phase4-plan.md` B7（`--root` 每连接一个）、`docs/remote-development-plan.md` `7（`root.register`
-> 只是早期规划词，从未实现）、`docs/remote-wsl-functional-hardening-handoff.md` `7.6（本卡来源）。
+> 相关前置：`docs/archive/remote/remote-functional-optimization-plan.md` F3（切 root 仍重建会话，只复用已验证安装内容）、
+> `docs/archive/remote/remote-phase4-plan.md` B7（`--root` 每连接一个）、`docs/archive/remote/remote-development-plan.md` `7（`root.register`
+> 只是早期规划词，从未实现）、`docs/archive/remote/remote-wsl-functional-hardening-handoff.md` `7.6（本卡来源）。
 
 ## 1. 问题与结论摘要
 

@@ -25,7 +25,7 @@ export type RemoteProjectEntryTarget = { hostId: string; remotePath: string };
 export type RemoteProjectEntrySession = { nodePath: string; hostRevision: number; runCommand: (command: string) => Promise<{ exitCode: number; stdout: string }> };
 
 /**
- * 新稳定码的唯一注册点（docs/remote-file-management-plan.md §9.2）。
+ * 新稳定码的唯一注册点（docs/archive/remote/remote-file-management-plan.md §9.2）。
  *
  * 收录本批全部新增码（含 4 个 create-project 码，它们由 remoteProjectIpc 发出）与复用码；
  * 脚本返回的码只有在此闭集内才允许透传，闭集外一律折叠（见 run 的 sentUnknown 规则）。

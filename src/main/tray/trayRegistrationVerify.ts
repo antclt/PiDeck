@@ -1,7 +1,7 @@
 /**
  * Linux 托盘注册验收 —— 纯诊断（不动作）。
  *
- * 背景（详见 docs/linux-tray-icon.md）：GNOME 的 appindicator 扩展 < v66 初始化时逐个
+ * 背景（详见 docs/archive/plans/linux-tray-icon.md）：GNOME 的 appindicator 扩展 < v66 初始化时逐个
  * `Get` SNI 属性，而 Chromium/Electron 对这类请求一律返回 `Failed`，扩展随即 `destroy()`
  * 该图标且**不再重试** —— 托盘图标永久缺席。v66 改用 `GetAll` 读法后握手正常。
  *

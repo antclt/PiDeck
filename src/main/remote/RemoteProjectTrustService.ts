@@ -8,7 +8,7 @@
  * - **每次 spawn 重新解析**（`trustOverride()` 现读配置 + 现读主机目录）⇒ 撤销下一次 spawn 即生效，
  *   不要求重启应用，也不缓存上一轮决策。
  * - **未决策 = 不传 flag**：undecided / stale / 材料缺失 / 主机读不出来一律返回 undefined，
- *   远端行为与「PiDeck 完全不传 trust」逐字相同（见 `docs/remote-trust-plan.md` §3 决策 2）。
+ *   远端行为与「PiDeck 完全不传 trust」逐字相同（见 `docs/archive/remote/remote-trust-plan.md` §3 决策 2）。
  *
  * 为什么服务层不自己读 pin：材料只能来自既有 pin 事实（`SshHostPinStore` 一系）。本模块只吃
  * `RemoteProjectTrustHostFactsPort` 给的 endpoint 身份，新增第二条 SSH/pin 读取通道属越界。

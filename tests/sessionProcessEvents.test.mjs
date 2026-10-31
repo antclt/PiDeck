@@ -130,7 +130,7 @@ test("process-event IPC is wired on channel, handler, and preload", () => {
 	assert.match(preload, /sessionsCatalogReadProcessEvents/);
 });
 
-// ── S1 红测基线（计划 docs/trajectory-session-consumer-plan.md §8.3）────────────
+// ── S1 红测基线（计划 docs/archive/plans/trajectory-session-consumer-plan.md §8.3）────────────
 // 这组用例按「修正后的语义」写，当前实现应为红；S1 实现落地后转绿并永久保留。
 // 夹具数值取自计划 §3.2 的预算口径：提示词 ≤96,000 码元且 ≤256KiB（262,144 字节）。
 

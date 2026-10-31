@@ -151,7 +151,7 @@ function assertReferencePath(value: unknown, code: string): asserts value is str
  * `projects` and `sessions` are the two durable stores that can hold an ssh locator, and both are
  * scanned from disk. `host-profiles` and `runtime` declare that they structurally cannot hold a
  * reference and are skipped without affecting completeness (their hostId fields are transient or
- * self-describing, see `docs/remote-host-cross-store-design.md` §4.1).
+ * self-describing, see `docs/archive/remote/remote-host-cross-store-design.md` §4.1).
  */
 export function createRemoteHostReferenceRegistry(sessionCatalogFilePath: string, projectsFilePath: string): RemoteHostReferenceRegistry {
 	assertReferencePath(sessionCatalogFilePath, "REMOTE_HOST_REFERENCE_SCAN_INVALID");

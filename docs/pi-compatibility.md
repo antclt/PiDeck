@@ -1,8 +1,11 @@
 # Pi CLI 兼容性记录
 
+> **Status: Current（2026-10-31 核对；以代码与测试为准）**
+
+
 > 这是一份**兼容账本**，不是 PiDeck 的功能设计文档。每次升级 Pi CLI 时，先把上游行为、PiDeck 处理方式和兼容代码的移除条件记在这里。
 >
-> 模型能力、思考档位和多模态配置的详细链路与重构方案见 [`docs/pi-model-capability-plan.md`](./pi-model-capability-plan.md)。
+> 模型能力、思考档位和多模态配置的详细链路与重构方案见 [`docs/archive/plans/pi-model-capability-plan.md`](./archive/plans/pi-model-capability-plan.md)。
 
 ## 当前基线
 
@@ -201,7 +204,7 @@ node scripts/probe-pi-1.4-regression.mjs --pi <pi> --live   --auth-from ~/.pi/ag
 
 ## 0.99.x 整体适配矩阵
 
-以下按当前工作区事实记录，**初版代码存在不等于适配已验收**。完整收尾与原生资源迁移方案见 [pi 原生资源管理与 MCP / Codemode 执行计划](./pi-0.99-mcp-codemode-plan.md)；其中阶段和测试尚待执行，本次文档更新没有重跑业务测试。
+以下按当前工作区事实记录，**初版代码存在不等于适配已验收**。完整收尾与原生资源迁移方案见 [pi 原生资源管理与 MCP / Codemode 执行计划](./archive/plans/pi-0.99-mcp-codemode-plan.md)；其中阶段和测试尚待执行，本次文档更新没有重跑业务测试。
 
 | 上游变化 | PiDeck 当前处理与待办 | 状态 | 代码/验证入口 | 兼容代码移除条件 |
 |---|---|---|---|---|

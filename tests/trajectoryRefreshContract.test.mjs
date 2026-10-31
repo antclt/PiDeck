@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 /**
- * 轨迹刷新契约（计划 docs/trajectory-session-consumer-plan.md §4 S2）。
+ * 轨迹刷新契约（计划 docs/archive/plans/trajectory-session-consumer-plan.md §4 S2）。
  *
  * 为什么用源码断言：hook 依赖 jotai store 与 preload desktopApi，完整执行需要大量 stub；
  * 这里守住几条「一改就会退化回高频重拉」的结构约束。正则一律空白容忍。

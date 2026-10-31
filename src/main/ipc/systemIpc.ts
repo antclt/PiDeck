@@ -674,7 +674,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			// 旧目录也能刷新列表，刷新按钮不因网络问题报错。
 			// 同时这是模型选择器里唯一付「带扩展」成本的入口（loadExtensions: true）：
 			// 启动/失效重建默认走 --no-extensions 快速档，扩展通过 pi.registerProvider
-			// 贡献的模型（issue #181）只在这里补回，见 docs/pi-model-capability-plan.md。
+			// 贡献的模型（issue #181）只在这里补回，见 docs/archive/plans/pi-model-capability-plan.md。
 			if (forceArg) {
 				const catalogRefreshed = await refreshModelCatalogStore(piLocator, settingsStore);
 				void appLogger.info("pi", "Model catalog force refresh on manual reload", {

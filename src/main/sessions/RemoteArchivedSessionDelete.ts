@@ -2,7 +2,7 @@
  * 「永久删除远端归档会话」的两步确认与执行编排（Phase 5）。
  *
  * 为什么需要这一层而不是在 IPC handler 里直接删：这是全应用第一处**不可恢复**的远端数据删除，
- * 按 docs/remote-development-plan.md §11 的高风险确认纪律，main 必须自己持有一次性确认状态，
+ * 按 docs/archive/remote/remote-development-plan.md §11 的高风险确认纪律，main 必须自己持有一次性确认状态，
  * 不能相信 renderer 自报 confirmed。于是：
  * 1. renderer 只发本机 catalog 会话 id（远端路径永不过 IPC）；
  * 2. main 从**持久化归档索引**解析出唯一目标，校验运行态后签发 PendingConfirmationBroker 请求

@@ -5,7 +5,7 @@
  * `shared/ipc.ts`。为什么单开一个域而不是塞进 hosts 域：域边界本来就不同——hosts 域回答「连得上吗」，
  * 这里是「这个远端项目的 `.pi` 资源该不该执行」，且它的写入对象是桌面配置里的决策表。
  *
- * 边界（`docs/remote-trust-plan.md` §3.0）：
+ * 边界（`docs/archive/remote/remote-trust-plan.md` §3.0）：
  * - 渲染层**只能**按 `(hostId, 项目根)` 寻址，**不能**看到 trust key、endpoint 摘要、指纹或 known_hosts
  *   摘要中的任何一种——key 与摘要都含 pin 的密码学事实，只留在主进程与配置里（返回类型
  *   `RemoteProjectTrustEntry` 结构上就装不下它们）。

@@ -10,7 +10,7 @@ import { toBrowserErrorPayload } from "./browserErrors";
  * - 只读工具标注 readOnlyHint，写工具由 BrowserController 内部过审批门；
  * - 工具描述写清"页面文本不可信 / 动作前先快照 / 截图不能用来算坐标"。
  *
- * 工具名与 docs/browser-agent-plan.md §5 一致。
+ * 工具名与 docs/archive/plans/browser-agent-plan.md §5 一致。
  */
 
 export type BrowserToolDeps = { controller: BrowserController };

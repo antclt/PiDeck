@@ -6,7 +6,7 @@ export type RemoteTextOpenResult = Op<{ document: RemoteTextDocument }>;
 export type RemoteTextSaveResult = Op<{ version: string }>;
 
 /**
- * 远端文件管理契约（Phase 5 文件面；冻结于 docs/remote-file-management-plan.md §3.3）。
+ * 远端文件管理契约（Phase 5 文件面；冻结于 docs/archive/remote/remote-file-management-plan.md §3.3）。
  *
  * 渲染层只提交 projectId + **项目根相对 POSIX 路径** + create-only 的名字/不透明令牌；
  * 主机、绝对路径、摘要、回收站 manifest 全部由 main 持有。这里只声明跨进程形状，
