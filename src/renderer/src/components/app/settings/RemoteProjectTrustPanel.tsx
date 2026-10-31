@@ -25,6 +25,9 @@ export function RemoteProjectTrustPanel() {
 	const [errorCode, setErrorCode] = useState<string | null>(null);
 
 	const keyOf = (target: RemoteProjectTrustTarget) => `${target.hostId}\n${target.remoteRoot}`;
+	// 没有决策时整段不出现：空清单没有可操作内容，留着只会把「连接」页拉长。
+	if (listState.status !== "error" && entries.length === 0) return null;
+
 	const revoke = (target: RemoteProjectTrustTarget) => {
 		setBusyKey(keyOf(target));
 		setErrorCode(null);

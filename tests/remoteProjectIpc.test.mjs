@@ -12,6 +12,7 @@ import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const HOSTS_FILE = "src/main/ipc/remoteHostIpc.ts";
 const PROJECT_FILE = "src/main/ipc/remoteProjectIpc.ts";
+const PROJECT_READ_FILE = "src/main/ipc/remoteProjectReadIpc.ts";
 const HOST_CHANNELS = ["remote:hosts-list", "remote:connect", "remote:disconnect", "remote:diagnostics", "remote:scan-config", "remote:add", "remote:repair-diagnose", "remote:repair-run", "remote:repair-answer"];
 const PROJECT_CHANNELS = ["remote:project-enroll", "remote:project-answer", "remote:project-list", "remote:project-read", "remote:project-search", "remote:project-root-status"];
 
@@ -51,14 +52,19 @@ test("hosts 文件不再携带项目域（搬迁必须搬干净，不留第二�
 	assert.ok(!/projects\s*\??:/.test(hosts), "hosts 注册入口不应再接受 projects 端口");
 });
 
-test("项目域文件只含项目 handler，且两个文件都在体量红线内", () => {
+test("项目域文件按写面/读面拆分，各自都在体量红线内", () => {
 	const project = readFileSync(PROJECT_FILE, "utf8");
+	const read = readFileSync(PROJECT_READ_FILE, "utf8");
 	const hosts = readFileSync(HOSTS_FILE, "utf8");
-	for (const symbol of ["remoteProjectEnroll", "remoteProjectAnswer", "remoteProjectList", "remoteProjectRead", "remoteProjectSearch"]) assert.ok(project.includes(symbol), "项目域应注册 " + symbol);
+	for (const symbol of ["remoteProjectEnroll", "remoteProjectAnswer"]) assert.ok(project.includes(symbol), "项目写面应注册 " + symbol);
+	for (const symbol of ["remoteProjectList", "remoteProjectRead", "remoteProjectSearch"]) assert.ok(read.includes(symbol), "项目读面应注册 " + symbol);
+	assert.ok(!project.includes("remoteProjectList"), "读面 handler 不应留在写面文件");
 	assert.ok(!project.includes("remoteHostConnect"), "项目域不应注册 hosts 域通道");
-	const projectLines = project.split(/\r?\n/).length;
-	const hostsLines = hosts.split(/\r?\n/).length;
+	const projectLines = project.split(String.fromCharCode(10)).length;
+	const readLines = read.split(String.fromCharCode(10)).length;
+	const hostsLines = hosts.split(String.fromCharCode(10)).length;
 	assert.ok(projectLines < 400, "remoteProjectIpc.ts 应 <400 行，实际 " + projectLines);
+	assert.ok(readLines < 400, "remoteProjectReadIpc.ts 应 <400 行，实际 " + readLines);
 	assert.ok(hostsLines < 600, "remoteHostIpc.ts 应 <600 行，实际 " + hostsLines);
 });
 

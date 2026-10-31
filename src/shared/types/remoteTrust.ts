@@ -13,6 +13,8 @@
  *   key 里含 endpoint 摘要，天然就不该出主进程。
  */
 
+import type { Op } from "../op";
+
 /** trust 决策：approve=信任（让远端 pi 加载项目 `.pi` 资源）；deny=明确拒绝。 */
 export type RemoteProjectTrustDecision = "approve" | "deny";
 
@@ -56,7 +58,7 @@ export type RemoteProjectTrustEntry = {
 };
 
 /** 远端 trust 清单（设置页 + 会话提示条共用）。 */
-export type RemoteProjectTrustListResult = { ok: true; entries: RemoteProjectTrustEntry[] } | { ok: false; code: string };
+export type RemoteProjectTrustListResult = Op<{ entries: RemoteProjectTrustEntry[] }>;
 
 /** 记录一条决策（信任 / 拒绝）。`remoteRoot` 由主进程规范化为规范项目根。 */
 export type RemoteProjectTrustSetInput = {
@@ -65,7 +67,7 @@ export type RemoteProjectTrustSetInput = {
 	readonly decision: RemoteProjectTrustDecision;
 };
 
-export type RemoteProjectTrustSetResult = { ok: true; entry: RemoteProjectTrustEntry } | { ok: false; code: string };
+export type RemoteProjectTrustSetResult = Op<{ entry: RemoteProjectTrustEntry }>;
 
 /** 撤销：按 `(hostId, 规范项目根)` 删除该项目的决策（含已作废的那条）。 */
-export type RemoteProjectTrustClearResult = { ok: true; removed: boolean } | { ok: false; code: string };
+export type RemoteProjectTrustClearResult = Op<{ removed: boolean }>;

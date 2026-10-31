@@ -22,7 +22,23 @@ import { verifyRemoteGitCompare } from "./remote-git-compare";
 import { initializeRemoteGitInitFixture, verifyRemoteGitInit } from "./remote-git-init";
 import { initializeRemoteGitReposFixture, verifyRemoteGitRepos } from "./remote-git-repos";
 import { verifyRemoteHistoryMutations } from "./remote-history-mutations";
-import { REMOTE_ACCEPTANCE_ENV, createRemoteSessionInProject, matchesRemoteFingerprint, readRemoteAcceptanceCredentials, readRemoteAcceptanceTimeouts, remoteProjectRow, runRemoteCommand, test, type RemoteAcceptanceCredentials, type RemoteAcceptanceTimeouts } from "./remote-fixtures";
+import {
+	REMOTE_ACCEPTANCE_ENV,
+	dismissRemoteToasts,
+	openSessionRunMenu,
+	REMOTE_APP_DATA_DIR_NAME,
+	createRemoteSessionInProject,
+	matchesRemoteFingerprint,
+	readPinnedHostKeyFingerprint,
+	chooseRemoteDirectory,
+	readRemoteAcceptanceCredentials,
+	readRemoteAcceptanceTimeouts,
+	remoteProjectRow,
+	runRemoteCommand,
+	test,
+	type RemoteAcceptanceCredentials,
+	type RemoteAcceptanceTimeouts,
+} from "./remote-fixtures";
 
 /**
  * 远端会话功能级验收（Phase 4 P4.2 真机 UI 收口）：在真实 Electron + 真实主机上跑
@@ -125,7 +141,7 @@ function readLatestPlanArgs(userDataRoot: string): string {
 
 /** 会话 Tab 栏右上角的 ⋯ 菜单（运行控制组：启动/重启、停止回答、重新加载、关闭 Agent 都在这里）。 */
 async function openTabsActionMenu(window: Page): Promise<void> {
-	await window.locator(".session-tabs-actions").getByRole("button", { name: "更多操作" }).click();
+	await openSessionRunMenu(window);
 }
 
 /** 会话管理入口锚定项目标题行，不右键整个含会话正文的项目组。 */
@@ -170,35 +186,52 @@ async function createRemoteProjectDirectory(credentials: RemoteAcceptanceCredent
 	await runRemoteCommand(credentials, "mkdir -p " + paths.projectPath + " && echo hello > " + paths.projectPath + "/hello.txt", 60_000);
 }
 
-/** 设置页加主机：ssh config 候选 → pin 指纹必须命中注入的期望值 → 连接 ready（与 Phase 3 同一 UI 路径）。 */
-async function addVerifiedRemoteHostAndConnect(window: Page, credentials: RemoteAcceptanceCredentials, limits: RemoteAcceptanceTimeouts): Promise<void> {
+/**
+ * 设置页加主机：ssh config 候选 → 保存（首次信任在主进程内完成）→ 产品自动连接 ready。
+ *
+ * 这里的断言口径与旧版一致，只是证据换了一处：不再读已经取消的「确认主机指纹」弹框，而是读产品为这台
+ * 主机**实际落盘**的 pin（`remote-hosts.json` 的 `verifiedEndpoint.hostKeyFingerprints[0]`）——那是它此后
+ * 用 `StrictHostKeyChecking=yes` 强制执行的那把钥匙，比界面文本更硬。以下业务断言逐字不变。
+ */
+async function addVerifiedRemoteHostAndConnect(window: Page, credentials: RemoteAcceptanceCredentials, limits: RemoteAcceptanceTimeouts, userDataRoot: string): Promise<void> {
 	await dismissOnboarding(window, 0);
 	// 设置入口是左下角 Dock 的第一个按钮（Bolt）：aria-label 是「设置」或「设置（有新版本可用）」。
 	await window.getByRole("button", { name: /^设置/ }).click();
 	const modal = window.locator(".settings-modal");
 	await expect(modal).toBeVisible();
 	await modal.getByRole("tab", { name: "连接", exact: true }).click();
-	await modal.getByRole("button", { name: "添加", exact: true }).click();
-	const addDialog = window.locator('[role="dialog"]').filter({ hasText: "添加 SSH 连接" });
-	await expect(addDialog, "点「添加」必须打开 AddHostDialog").toBeVisible();
+	await modal.getByRole("button", { name: /^(添加|新建连接)$/ }).click();
+	const addDialog = window.getByRole("dialog", { name: /^(新建连接|添加 SSH 连接)$/ });
+	await expect(addDialog, "点「新建连接」必须打开 AddHostDialog").toBeVisible();
 	// 候选来自真实 ~/.ssh/config：按 user@host 精确匹配，同一条 config 可能有多条别名指向同一主机，
 	// 所以断言「至少一条」再取第一条。
-	const candidate = addDialog.getByRole("button", { name: new RegExp(credentials.user + "@" + credentials.host.replace(/\./g, "\\.")) });
+	const candidate = window.getByRole("button", { name: new RegExp(credentials.user + "@" + credentials.host.replace(/\./g, "\\.")) });
 	// 扫描是异步的：列表可能比对话框晚到。用可等待的可见性断言而不是 count() 立即采样，否则主机负载高
 	// 时会把「还没渲染」误判成「没有候选」（2026-10-17 真机门禁偶发，均停在此断言）。
+	// 面板自 1dd8ceb7e 起默认收起候选列表：先展开「从 SSH config 导入」。
+	const importToggle = addDialog.getByRole("button", { name: "从 SSH config 导入" });
+	if ((await importToggle.count()) > 0 && (await importToggle.getAttribute("aria-expanded")) !== "true") await importToggle.click();
 	await expect(candidate.first(), "ssh config 里需要至少一条 " + credentials.user + "@" + credentials.host + " 候选").toBeVisible({ timeout: 30_000 });
 	await candidate.first().click();
-	await addDialog.getByRole("button", { name: "保存", exact: true }).click();
-	// pin 流程：主进程推送真实 host key，界面必须原样展示；期望指纹必须命中它。
-	const pinDialog = window.locator('[role="dialog"]').filter({ hasText: "确认主机指纹" });
-	await expect(pinDialog).toBeVisible({ timeout: limits.connectMs });
-	const observed = await pinDialog.locator("li.select-all.break-all.font-mono").allTextContents();
-	expect(observed.length, "pin 弹框必须列出至少一个主机密钥指纹").toBeGreaterThan(0);
-	expect(matchesRemoteFingerprint(credentials.fingerprint, observed), "pin 弹框展示的指纹必须命中 " + REMOTE_ACCEPTANCE_ENV.fingerprint + "（期望 " + credentials.fingerprint + "，实到 " + observed.join(" | ") + "）").toBe(true);
-	await pinDialog.getByRole("button", { name: "指纹正确，信任" }).click();
-	await expect(pinDialog).toHaveCount(0);
-	// 连接：bootstrap 完成后行状态是「已连接」、开关翻成「断开」。
-	await window.getByRole("button", { name: "连接", exact: true }).first().click();
+	// 提交入口在 1dd8ceb7e 的面板改造里从「保存」改成「添加并连接」（两者都容忍，便于跨版本回归）。
+	await addDialog
+		.getByRole("button", { name: /^(保存|添加并连接)$/ })
+		.first()
+		.click();
+	// 指纹：等产品落盘后再比对（主进程在 add 里完成首次信任，落盘存在短額异步窗口）。
+	const pinDeadline = Date.now() + 30_000;
+	let pinned: string | undefined;
+	while (Date.now() < pinDeadline && pinned === undefined) {
+		pinned = readPinnedHostKeyFingerprint(join(userDataRoot, REMOTE_APP_DATA_DIR_NAME), credentials.host);
+		if (pinned === undefined) await window.waitForTimeout(200);
+	}
+	expect(matchesRemoteFingerprint(credentials.fingerprint, pinned === undefined ? [] : [pinned]), "落盘 pin 的主机指纹必须命中 " + REMOTE_ACCEPTANCE_ENV.fingerprint + "（期望 " + credentials.fingerprint + "，实到 " + String(pinned) + "）").toBe(true);
+	// 保存后产品直接开始连接：就绪时进度框标题变成「{host} 已连接」。
+	// 先关掉进度框（模态会遮住设置页），再确认行状态与开关；旧构建无此弹框的路径也容忍。
+	const progress = window.getByRole("dialog", { name: /已连接$/ });
+	await expect(progress, "连接就绪后的进度框必须出现").toBeVisible({ timeout: limits.helperMs });
+	const done = progress.getByRole("button", { name: /^(完成|关闭)$/ }).first();
+	if ((await done.count()) > 0) await done.click();
 	await expect(window.getByText("已连接").first()).toBeVisible({ timeout: limits.helperMs });
 	await expect(window.getByRole("button", { name: "断开", exact: true }).first()).toBeVisible();
 	await window.locator(".settings-modal").getByRole("button", { name: "关闭" }).first().click();
@@ -214,7 +247,7 @@ async function enrollRemoteProjectInSidebar(window: Page, projectPath: string, l
 	const enrollDialog = window.locator('[role="dialog"]').filter({ hasText: "添加远端项目" });
 	await expect(enrollDialog).toBeVisible();
 	await expect(enrollDialog.locator("#remote-enroll-host")).not.toBeEmpty();
-	await enrollDialog.locator("#remote-enroll-path").fill(projectPath);
+	await chooseRemoteDirectory(window, projectPath);
 	await enrollDialog.getByRole("button", { name: "解析并确认" }).click();
 	const confirmDialog = window.locator('[role="dialog"]').filter({ hasText: "确认远端项目目录" });
 	await expect(confirmDialog).toBeVisible({ timeout: limits.helperMs });
@@ -312,11 +345,12 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 				await createRemoteProjectDirectory(creds, paths);
 			});
 			await test.step("设置页加主机 pin → 连接 ready", async () => {
-				await addVerifiedRemoteHostAndConnect(window, creds, timeouts);
+				await addVerifiedRemoteHostAndConnect(window, creds, timeouts, remoteUserDataRoot);
 			});
 			await test.step("侧栏登记远端项目（canonical 确认 + 立即选中）", async () => {
 				await enrollRemoteProjectInSidebar(window, paths.projectPath, timeouts);
-				await expect(window.getByText("远端项目", { exact: true })).toBeVisible({ timeout: timeouts.helperMs });
+				// 空态默认输入页；文件浏览是次入口（59a1fb351 起）。
+				await expect(window.getByRole("button", { name: "浏览远端文件" })).toBeVisible({ timeout: timeouts.helperMs });
 			});
 			await test.step("在该远端项目里新建会话（项目行 + →「普通会话」）", async () => {
 				sessionId = await createRemoteSessionAndReadId(window, paths.projectName, timeouts);
@@ -459,8 +493,8 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 				// 默认门禁的一部分（见文件头）：这条走的是「应用侧从远端会话文件读回正文」，与上面的
 				// 「重开标签页」不同——后者可能仍靠 runtime 内存消息，覆盖不到读页分支。
 				await openTabsActionMenu(window);
-				await expect(window.getByRole("menuitem", { name: "重新加载会话", exact: true }), "无进程时「重新加载会话」必须可用").toBeVisible({ timeout: timeouts.helperMs });
-				await window.getByRole("menuitem", { name: "重新加载会话", exact: true }).click();
+				await expect(window.getByRole("menuitem", { name: "从磁盘重新加载消息", exact: true }), "无进程时「重新加载会话」必须可用").toBeVisible({ timeout: timeouts.helperMs });
+				await window.getByRole("menuitem", { name: "从磁盘重新加载消息", exact: true }).click();
 				const timeline = window.locator(".message-timeline");
 				// 时间线现状原样记进日志（证据不只来自失败信息）。
 				console.log("[p42-acceptance] after reload: userTurns=" + (await timeline.locator(".user-turn-text").count()) + " assistant=" + (await timeline.locator(".assistant-text").count()) + " textLength=" + (await timeline.innerText()).trim().length);
@@ -478,10 +512,10 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 				const activeRow = dialog.locator("tbody tr").filter({ has: window.getByRole("button", { name: "归档", exact: true }) });
 				await expect(activeRow, "远端会话必须出现在普通管理列表").toHaveCount(1);
 				await activeRow.getByRole("button", { name: "归档", exact: true }).click();
-				await expect(dialog).toHaveCount(0, { timeout: timeouts.helperMs });
+				// 现行产品：归档成功后弹窗保持打开，方便连续清理/切到归档视图核对。
+				await expect(activeRow).toHaveCount(0, { timeout: timeouts.helperMs });
 				expect((await runRemoteCommand(creds, "[ ! -e '" + evidenceFile + "' ] && [ -f '" + archiveFile + "' ] && printf moved", 20_000)).stdout.trim()).toBe("moved");
 				expect(await checksum(archiveFile)).toBe(before);
-				dialog = await openRemoteSessionManager(window, paths.projectName);
 				await dialog.getByRole("button", { name: "已归档", exact: true }).click();
 				const archivedRow = dialog.locator("tbody tr").filter({ has: window.getByRole("button", { name: "恢复", exact: true }) });
 				await expect(archivedRow).toHaveCount(1, { timeout: timeouts.helperMs });
@@ -497,6 +531,9 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 				await dialog.getByRole("button", { name: "已归档", exact: true }).click();
 				await expect(dialog.getByRole("button", { name: "归档", exact: true })).toHaveCount(1, { timeout: timeouts.helperMs });
 				await dialog.getByRole("button", { name: "关闭", exact: true }).click();
+				// 恢复后立刻关闭时，Radix 偶发收不到这次点击（真机 trace 复现）；Escape 是同一受控关闭路径。
+				if (await dialog.isVisible().catch(() => false)) await window.keyboard.press("Escape");
+				await expect(dialog).toHaveCount(0, { timeout: timeouts.helperMs });
 				const rows = projectRow(window, paths.projectName).locator(".session-row");
 				await expect(rows).toHaveCount(1, { timeout: timeouts.helperMs });
 				await rows.first().click();
@@ -591,9 +628,10 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 					.filter({ hasNotText: "(fork)" });
 				await expect(activeRow, "再次归档前会话必须回到普通管理列表").toHaveCount(1);
 				await activeRow.getByRole("button", { name: "归档", exact: true }).click();
-				await expect(dialog).toHaveCount(0, { timeout: timeouts.helperMs });
+				// 归档成功后弹窗保持打开（现行产品语义）：同一弹窗切到归档视图，不重复打开。
+				await expect(activeRow).toHaveCount(0, { timeout: timeouts.helperMs });
 				expect((await runRemoteCommand(creds, "[ -f '" + archiveFile + "' ] && printf archived", 20_000)).stdout.trim()).toBe("archived");
-				let archivedDialog = await openRemoteSessionManager(window, paths.projectName);
+				const archivedDialog = dialog;
 				await archivedDialog.getByRole("button", { name: "已归档", exact: true }).click();
 				const archivedRow = archivedDialog.locator("tbody tr").filter({ has: window.getByRole("button", { name: "恢复", exact: true }) });
 				await expect(archivedRow).toHaveCount(1, { timeout: timeouts.helperMs });
@@ -636,7 +674,7 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 			await createRemoteProjectDirectory(creds, paths);
 			await initializeRemoteCodeFixture(creds, paths.projectPath);
 			await runRemoteCommand(creds, "mkdir -p '" + neighborPath + "'; umask 077; printf '%s' '" + Buffer.from("module.exports = { value: 101 };\n").toString("base64") + "' | base64 -d > '" + neighborPath + "/calc.cjs'", 20_000);
-			await addVerifiedRemoteHostAndConnect(window, creds, timeouts);
+			await addVerifiedRemoteHostAndConnect(window, creds, timeouts, remoteUserDataRoot);
 			await enrollRemoteProjectInSidebar(window, paths.projectPath, timeouts);
 			await verifyRemoteCodeEditing({ window, credentials: creds, projectPath: paths.projectPath, testInfo, timeoutMs: timeouts.helperMs });
 			await enrollRemoteProjectInSidebar(window, neighborPath, timeouts);
@@ -649,7 +687,28 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 			await expect(window.getByTestId("drawer-rail-files")).toHaveAttribute("aria-selected", "true");
 			await window.getByRole("button", { name: "calc.cjs", exact: false }).click();
 			await expect(window.getByRole("region", { name: "远端文件编辑器" }).locator(".cm-content")).toContainText("value: 2", { timeout: timeouts.helperMs });
-			await window.locator(".header-drawer-toggle").first().click();
+			await test.step("文件抽屉内容搜索：输入夹具正文标记 → 出现内容命中分区（新 helper 能力，全链路无错误）", async () => {
+				// 能力来自 helper hello（1.25.0 声明 fs.searchContent）；真机无法回退 helper 版本模拟旧能力，
+				// 所以本用例覆盖新 helper 命中，并断言「仅文件名」能力提示不出现——不能把能力缺失静默吞掉。
+				await window.getByRole("button", { name: "搜索文件名" }).click();
+				await window.getByRole("textbox", { name: "搜索文件名" }).fill("中文保存验收");
+				await window.getByRole("button", { name: "搜索", exact: true }).click();
+				const contentSection = window.locator(".file-search-content");
+				await expect(contentSection, "内容命中分区必须出现（helper 1.25 声明 fs.searchContent）").toBeVisible({ timeout: timeouts.helperMs });
+				const hit = contentSection.locator(".file-node-row").filter({ hasText: "calc.cjs" });
+				await expect(hit, "内容命中行必须指向夹具文件 calc.cjs").toBeVisible({ timeout: timeouts.helperMs });
+				// 命中行 title 是「项目相对路径:行号」，正文片段必须带出 fixture 里的中文标记。
+				await expect(hit).toHaveAttribute("title", /^calc\.cjs:\d+$/);
+				await expect(hit, "命中行必须带出夹具正文片段").toContainText("中文保存验收");
+				await expect(window.getByTestId("file-search-name-only-hint"), "新 helper 下不得显示「仅文件名」提示").toHaveCount(0);
+				// 收尾：清空搜索回到文件树，后续步骤仍按原路径操作抽屉。
+				await window.getByRole("button", { name: "清除搜索结果" }).click();
+				await expect(contentSection).toHaveCount(0);
+			});
+			// 抽屉打开后开关并入抽屉（.header-drawer-toggle 只在关闭态渲染，见 SessionTabsBar）：用抽屉自己的
+			// 关闭入口，再断言开关回到会话 Tab 栏 —— 与旧断言同一个可观察契约「抽屉已关」，只是点对了控件。
+			await window.getByRole("button", { name: "关闭右侧边栏" }).first().click();
+			await expect(window.locator(".header-drawer-toggle").first(), "关闭抽屉后开关必须回到会话 Tab 栏").toBeVisible({ timeout: timeouts.helperMs });
 			console.log("[remote-file-acceptance] activeSessionFileDrawer=true");
 			const prompt = "请读取 calc.cjs 和 test.cjs，然后用 bash 执行 node test.cjs。不要修改任何文件，必须真实运行测试，测试通过后回复 REMOTE_FILE_TEST_OK。";
 			await window.locator(".composer .rich-input").click();
@@ -696,7 +755,7 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 			await dismissOnboarding(remoteWindow, 8_000);
 			await createRemoteProjectDirectory(creds, paths);
 			await initializeRemoteGitFixture(creds, paths.projectPath, neighbor);
-			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts);
+			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts, remoteUserDataRoot);
 			await enrollRemoteProjectInSidebar(remoteWindow, neighbor, timeouts);
 			await enrollRemoteProjectInSidebar(remoteWindow, paths.projectPath, timeouts);
 			// A draft exposes shared workspace chrome, without starting pi or relying on model quota.
@@ -726,7 +785,7 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 			await createRemoteProjectDirectory(creds, paths);
 			await initializeRemoteGitFixture(creds, paths.projectPath, neighbor);
 			await initializeRemoteUnbornGitFixture(creds, unborn);
-			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts);
+			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts, remoteUserDataRoot);
 			await enrollRemoteProjectInSidebar(remoteWindow, unborn, timeouts);
 			await enrollRemoteProjectInSidebar(remoteWindow, paths.projectPath, timeouts);
 			await createRemoteSessionAndReadId(remoteWindow, paths.projectName, timeouts);
@@ -752,7 +811,7 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 			await dismissOnboarding(remoteWindow, 8_000);
 			await createRemoteProjectDirectory(creds, paths);
 			await initializeRemoteGitHistoryFixture(creds, paths.projectPath);
-			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts);
+			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts, remoteUserDataRoot);
 			await enrollRemoteProjectInSidebar(remoteWindow, paths.projectPath, timeouts);
 			await createRemoteSessionAndReadId(remoteWindow, paths.projectName, timeouts);
 			await verifyRemoteGitHistory({ window: remoteWindow, credentials: creds, root: paths.projectPath, timeoutMs: 40_000, testInfo });
@@ -777,7 +836,7 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 			await dismissOnboarding(remoteWindow, 8_000);
 			await createRemoteProjectDirectory(creds, paths);
 			await initializeRemoteGitBranchFixture(creds, paths.projectPath);
-			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts);
+			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts, remoteUserDataRoot);
 			await enrollRemoteProjectInSidebar(remoteWindow, paths.projectPath, timeouts);
 			await createRemoteSessionAndReadId(remoteWindow, paths.projectName, timeouts);
 			await verifyRemoteGitBranch({ window: remoteWindow, credentials: creds, root: paths.projectPath, timeoutMs: 40_000, testInfo });
@@ -802,7 +861,7 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 			await dismissOnboarding(remoteWindow, 8_000);
 			await createRemoteProjectDirectory(creds, paths);
 			await initializeRemoteGitDiscardFixture(creds, paths.projectPath);
-			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts);
+			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts, remoteUserDataRoot);
 			await enrollRemoteProjectInSidebar(remoteWindow, paths.projectPath, timeouts);
 			await createRemoteSessionAndReadId(remoteWindow, paths.projectName, timeouts);
 			await verifyRemoteGitDiscard({ window: remoteWindow, credentials: creds, root: paths.projectPath, timeoutMs: 40_000, testInfo });
@@ -827,7 +886,7 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 			await dismissOnboarding(remoteWindow, 8_000);
 			await createRemoteProjectDirectory(creds, paths);
 			await initializeRemoteGitRecoveryFixture(creds, paths.projectPath);
-			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts);
+			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts, remoteUserDataRoot);
 			await enrollRemoteProjectInSidebar(remoteWindow, paths.projectPath, timeouts);
 			await createRemoteSessionAndReadId(remoteWindow, paths.projectName, timeouts);
 			await verifyRemoteGitRecovery({ window: remoteWindow, credentials: creds, root: paths.projectPath, timeoutMs: 40_000, testInfo });
@@ -852,7 +911,7 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 			await dismissOnboarding(remoteWindow, 8_000);
 			await createRemoteProjectDirectory(creds, paths);
 			const sync = await initializeRemoteGitSyncFixture(creds, paths.projectPath, paths.e2eRoot);
-			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts);
+			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts, remoteUserDataRoot);
 			await enrollRemoteProjectInSidebar(remoteWindow, paths.projectPath, timeouts);
 			await createRemoteSessionAndReadId(remoteWindow, paths.projectName, timeouts);
 			await verifyRemoteGitSync({ window: remoteWindow, credentials: creds, root: paths.projectPath, origin: sync.origin, other: sync.other, timeoutMs: 60_000, testInfo });
@@ -879,7 +938,7 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 			// The G3a fixture already has two tags, a second commit with a rename, and a decoy branch: exactly the
 			// refs a compare and a polling observation need, without a second fixture shape.
 			await initializeRemoteGitHistoryFixture(creds, paths.projectPath);
-			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts);
+			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts, remoteUserDataRoot);
 			await enrollRemoteProjectInSidebar(remoteWindow, paths.projectPath, timeouts);
 			await createRemoteSessionAndReadId(remoteWindow, paths.projectName, timeouts);
 			await verifyRemoteGitCompare({ window: remoteWindow, credentials: creds, root: paths.projectPath, timeoutMs: 40_000, testInfo });
@@ -906,7 +965,7 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 			// panel must offer only the explicit init action - never an automatic one.
 			await createRemoteProjectDirectory(creds, paths);
 			await initializeRemoteGitInitFixture(creds, paths.projectPath);
-			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts);
+			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts, remoteUserDataRoot);
 			await enrollRemoteProjectInSidebar(remoteWindow, paths.projectPath, timeouts);
 			await createRemoteSessionAndReadId(remoteWindow, paths.projectName, timeouts);
 			await verifyRemoteGitInit({ window: remoteWindow, credentials: creds, root: paths.projectPath, timeoutMs: 40_000, testInfo });
@@ -934,7 +993,7 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 		});
 		try {
 			await dismissOnboarding(remoteWindow, 8_000);
-			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts);
+			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts, remoteUserDataRoot);
 			await createEmptyRemoteProjectInSidebar(remoteWindow, createPath, timeouts);
 			// 产品之外的第一方佐证：目录存在、为空，且不是用 -p 递归造出来的父链。
 			const created = await runRemoteCommand(creds, "test -d '" + createPath + "' && [ -z \"$(ls -A '" + createPath + "')\" ] && echo CREATED_EMPTY", 60_000);
@@ -966,7 +1025,7 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 			// A root repository plus a nested one, each with its own untracked change and an own branch name.
 			await createRemoteProjectDirectory(creds, paths);
 			await initializeRemoteGitReposFixture(creds, paths.projectPath);
-			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts);
+			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts, remoteUserDataRoot);
 			await enrollRemoteProjectInSidebar(remoteWindow, paths.projectPath, timeouts);
 			await createRemoteSessionAndReadId(remoteWindow, paths.projectName, timeouts);
 			await verifyRemoteGitRepos({ window: remoteWindow, credentials: creds, root: paths.projectPath, timeoutMs: 60_000, testInfo });
@@ -993,7 +1052,7 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 				await dismissOnboarding(remoteWindow, 8_000);
 				await createRemoteProjectDirectory(credentials, paths);
 				await initializeRemoteGitFixture(credentials, paths.projectPath, neighbor);
-				await addVerifiedRemoteHostAndConnect(remoteWindow, credentials, timeouts);
+				await addVerifiedRemoteHostAndConnect(remoteWindow, credentials, timeouts, remoteUserDataRoot);
 				await enrollRemoteProjectInSidebar(remoteWindow, neighbor, timeouts);
 				await enrollRemoteProjectInSidebar(remoteWindow, paths.projectPath, timeouts);
 				await createRemoteSessionAndReadId(remoteWindow, paths.projectName, timeouts);
@@ -1023,7 +1082,7 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 			await createRemoteProjectDirectory(creds, paths);
 			await initializeRemoteCodeFixture(creds, paths.projectPath);
 			await runRemoteCommand(creds, "mkdir -p '" + neighborPath + "'", 20_000);
-			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts);
+			await addVerifiedRemoteHostAndConnect(remoteWindow, creds, timeouts, remoteUserDataRoot);
 			await enrollRemoteProjectInSidebar(remoteWindow, paths.projectPath, timeouts);
 			await verifyRemoteCodeEditing({ window: remoteWindow, credentials: creds, projectPath: paths.projectPath, testInfo, timeoutMs: timeouts.helperMs });
 			await enrollRemoteProjectInSidebar(remoteWindow, neighborPath, timeouts);
@@ -1076,7 +1135,7 @@ test.describe("远端会话功能级验收（真机 · Phase 4 P4.2）", () => {
 				await createRemoteProjectDirectory(creds, paths);
 			});
 			await test.step("设置页加主机 pin → 连接 ready", async () => {
-				await addVerifiedRemoteHostAndConnect(window, creds, timeouts);
+				await addVerifiedRemoteHostAndConnect(window, creds, timeouts, remoteUserDataRoot);
 			});
 			await test.step("侧栏登记远端项目并新建会话", async () => {
 				await enrollRemoteProjectInSidebar(window, paths.projectPath, timeouts);

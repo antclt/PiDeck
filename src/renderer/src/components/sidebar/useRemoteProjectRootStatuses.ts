@@ -67,7 +67,7 @@ export function useRemoteProjectRootStatuses(hostApi: unknown, projects: readonl
 				try {
 					view = readRootStatusResponse(await port(project.id));
 				} catch {
-					view = { status: "unavailable", code: null };
+					view = { status: "unavailable", code: null, helperCapabilities: null };
 				}
 				// 旧批次（刷新/卸载）的迟到结果整体丢弃。
 				if (!gate.isCurrent(generation)) return;

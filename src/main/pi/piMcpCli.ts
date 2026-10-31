@@ -181,8 +181,8 @@ export class PiMcpCli {
 
 	/** 当前环境是否走 WSL 命令（与 ExtensionManager 同判断）。 */
 	private wslEnabled(): boolean {
-		const settings = this.deps.getSettings();
-		return Boolean(settings.wslEnabled && settings.wslDistro && settings.wslUser) || Boolean(this.deps.wslEnvironment);
+		// WSL 作用域必须由调用方显式注入环境；不再读取旧全局设置。
+		return Boolean(this.deps.wslEnvironment);
 	}
 
 	/**
@@ -192,7 +192,8 @@ export class PiMcpCli {
 	 */
 	private buildInvocation(scope: McpCliScope, args: string[], timeoutMs: number): Invocation {
 		const settings = this.deps.getSettings();
-		const command = this.deps.locator.resolveCommand(settings.customPiPath, this.wslEnabled(), settings.wslDistro, settings.wslUser);
+		const wsl = this.deps.wslEnvironment;
+		const command = this.deps.locator.resolveCommand(settings.customPiPath, Boolean(wsl?.distro && wsl.user), wsl?.distro, wsl?.user);
 		const invocation = this.deps.locator.createInvocation(command, args, {});
 		const env = this.deps.locator.createProcessEnv(settings, invocation.pathPrefix, invocation.wsl);
 		const options: Record<string, unknown> = {
@@ -266,10 +267,8 @@ export class PiMcpCli {
 	}
 
 	private async warmWsl(): Promise<void> {
-		const settings = this.deps.getSettings();
-		if (settings.wslDistro && settings.wslUser) {
-			await this.deps.locator.warmWslCommand(settings.wslDistro, settings.wslUser).catch(() => undefined);
-		}
+		const wsl = this.deps.wslEnvironment;
+		if (wsl?.distro && wsl.user) await this.deps.locator.warmWslCommand(wsl.distro, wsl.user).catch(() => undefined);
 	}
 
 	/**

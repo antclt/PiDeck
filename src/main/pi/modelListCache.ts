@@ -333,11 +333,7 @@ async function loadModelsFromLocalConfig(configSource?: ModelListConfigSource): 
 /** 执行 pi CLI 命令并返回 stdout（WSL/customPath 解析与进程环境同 execPiListModels）。 */
 async function runPiCliCommand(piLocator: PiLocator, settingsStore: SettingsStore, args: readonly string[]): Promise<string> {
 	const settings = settingsStore.get();
-	// 拉模型列表可以等 WSL which；不能在 resolveCommand 里同步卡住主进程。
-	if (settings.wslEnabled && settings.wslDistro && settings.wslUser) {
-		await piLocator.warmWslCommand(settings.wslDistro, settings.wslUser);
-	}
-	const command = piLocator.resolveCommand(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
+	const command = piLocator.resolveCommand(settings.customPiPath);
 	const invocation = piLocator.createInvocation(command, [...args]);
 	return new Promise((resolve, reject) => {
 		void import("node:child_process")
@@ -644,7 +640,7 @@ export async function resolveModelListReport(piLocator: PiLocator, settingsStore
 	let version: string | null = null;
 	let checkError: string | null = null;
 	try {
-		const status = await piLocator.check(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
+		const status = await piLocator.check(settings.customPiPath);
 		installed = status.installed;
 		version = status.installed && status.version ? status.version : null;
 		checkError = status.error ?? null;

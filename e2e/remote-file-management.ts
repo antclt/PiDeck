@@ -1,5 +1,5 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { runRemoteCommand, remoteProjectRow, type RemoteAcceptanceCredentials, type RemoteAcceptanceTimeouts } from "./remote-fixtures";
+import { chooseRemoteDirectory, runRemoteCommand, remoteProjectRow, openRemoteProjectFiles, type RemoteAcceptanceCredentials, type RemoteAcceptanceTimeouts } from "./remote-fixtures";
 
 const q = (value: string): string => "'" + value.replace(/'/g, "'\\''") + "'";
 
@@ -14,16 +14,20 @@ async function openProjectPanel(window: Page, projectPath: string): Promise<void
 		.locator(".conversation-title")
 		.first()
 		.click();
+	await openRemoteProjectFiles(window);
 	await expect(window.getByTestId("remote-file-toolbar")).toBeVisible();
 }
 
 /** 主目录列表中的条目行（带行菜单按钮，避免与回收站行/下拉项混淆）。 */
+/**
+ * 远端文件行现在与本机文件树共用 `FileTreeNodeRow`：行是 `.file-node`，
+ * 行操作走右键菜单（不再有常驻的「…」按钮）。
+ */
 function entryRow(window: Page, name: string) {
 	return window
-		.locator("li")
-		.filter({ has: window.getByTestId("remote-file-row-menu") })
-		.filter({ hasText: name })
-		.first();
+		.locator(".file-node")
+		.filter({ has: window.locator(".file-node-name", { hasText: name }) })
+		.last();
 }
 
 async function openEntry(window: Page, name: string): Promise<void> {
@@ -31,7 +35,7 @@ async function openEntry(window: Page, name: string): Promise<void> {
 }
 
 async function rowAction(window: Page, name: string, action: "remote-file-row-rename" | "remote-file-row-delete"): Promise<void> {
-	await entryRow(window, name).getByTestId("remote-file-row-menu").click();
+	await entryRow(window, name).locator("button").first().click({ button: "right" });
 	await window.getByTestId(action).click();
 }
 
@@ -73,7 +77,8 @@ export async function createEmptyRemoteProjectInSidebar(window: Page, projectPat
 	const enrollDialog = window.locator('[role="dialog"]').filter({ hasText: "添加远端项目" });
 	await expect(enrollDialog).toBeVisible();
 	await enrollDialog.getByTestId("remote-enroll-mode-create").check();
-	await enrollDialog.locator("#remote-enroll-path").fill(projectPath);
+	await chooseRemoteDirectory(window, projectPath.slice(0, projectPath.lastIndexOf("/")));
+	await enrollDialog.locator("#remote-enroll-leaf").fill(projectPath.split("/").at(-1) ?? "");
 	await enrollDialog.getByRole("button", { name: "解析并确认" }).click();
 	const confirmDialog = window.locator('[role="dialog"]').filter({ hasText: "新建空远端项目目录" });
 	await expect(confirmDialog).toBeVisible({ timeout: limits.helperMs });

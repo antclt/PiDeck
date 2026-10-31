@@ -46,7 +46,7 @@ import { t } from "../../i18n";
 import { copyTextWithCopiedNotice } from "../../utils/clipboardNotice";
 import { canRunSessionAction, type SessionReloadMode, type SessionRunAction, type SessionRunCapabilities } from "../../utils/sessionCommands";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "../ui-shadcn/alert-dialog";
-import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
 import { X } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
@@ -76,6 +76,7 @@ import {
 	type ManagerArchivedRow,
 } from "../../sessionManagerModel";
 import { remoteArchivedDeleteErrorKey, remoteArchivedDeleteRowPhase } from "../../utils/remoteArchivedDeleteState";
+import { shouldShowWorktreeMenuEntry } from "../../utils/worktreeEntryGate";
 import { useRemoteArchivedSessionDelete } from "../../hooks/useRemoteArchivedSessionDelete";
 
 /**
@@ -261,11 +262,9 @@ export function SessionManagerModal(props: {
 						<small className="text-muted-foreground">
 							{filteredSessions.length} / {props.sessions.length} sessions
 						</small>
-						<DialogClose asChild>
-							<Button variant="ghost" size="icon" aria-label={t("common.close")} title={t("common.close")}>
-								<X size={18} strokeWidth={2.2} aria-hidden="true" />
-							</Button>
-						</DialogClose>
+						<Button variant="ghost" size="icon" aria-label={t("common.close")} title={t("common.close")} data-testid="session-manager-close" onClick={props.onClose}>
+							<X size={18} strokeWidth={2.2} aria-hidden="true" />
+						</Button>
 					</div>
 				</DialogHeader>
 				<div className="flex min-h-0 flex-1 flex-col overflow-hidden border-none bg-transparent shadow-none">
@@ -806,8 +805,9 @@ export function ProjectContextMenu(props: {
 				<RefreshCw className="size-3.5" aria-hidden="true" />
 				{t("app.projectRefresh")}
 			</DropdownMenuItem>
-			{/* Chat 内置项目没有 Git 工作区概念（存储目录即会话宿主目录），工作区开关无意义；仅普通项目展示 */}
-			{props.menu.project.kind !== "chat" && (
+			{/* Chat 内置项目没有 Git 工作区概念（存储目录即会话宿主目录）；远端项目没有本机 Git 目录。
+			    两者都不展示工作区开关，避免点击后才收到主进程的 UNSUPPORTED_PROJECT_LOCATION。 */}
+			{shouldShowWorktreeMenuEntry(props.menu.project) && (
 				<DropdownMenuItem onSelect={props.onToggleWorktree}>
 					<GitBranch className="size-3.5" aria-hidden="true" />
 					{isWorktreeEnabled ? t("menu.disableWorktree") : t("menu.enableWorktree")}

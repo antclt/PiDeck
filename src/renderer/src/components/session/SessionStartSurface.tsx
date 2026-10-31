@@ -38,6 +38,8 @@ type SessionStartProps = {
 	sessionId: string;
 	/** 可选项目切换器：引导页（无会话空态）传入，标明并可切换下一次发送将会话创建到哪个项目 */
 	projectSwitcher?: ReactNode;
+	/** 项目切换器下方的次级入口（远端空态的「浏览远端文件」）；本机引导页不传。 */
+	secondaryAction?: ReactNode;
 	/** 引导页虚拟会话没有 SessionRecord，用选中项目兑底加载 @ 引用文件树。 */
 	bootstrapProjectId?: string;
 	mode?: "session";
@@ -128,7 +130,7 @@ function SessionStartBody(props: SessionStartProps) {
 	// 各自起始页显示各自 worktree 的分支，不跟随 App 聚焦项目（栏级 usePaneGitInfo）。
 	const sessionRecord = useAtomValue(sessionRecordByIdAtomFamily(props.sessionId));
 	const startProjectId = props.bootstrapProjectId ?? sessionRecord?.projectId;
-	const { gitInfo, switchBranch } = usePaneGitInfo(startProjectId, {
+	const { gitInfo, gitUnavailable, switchBranch } = usePaneGitInfo(startProjectId, {
 		onChanged: services.onProjectGitChanged,
 		onSwitchError: (error) => services.showToast(t("app.branchSwitchFailed", { error: error instanceof Error ? error.message : String(error) })),
 	});
@@ -137,12 +139,22 @@ function SessionStartBody(props: SessionStartProps) {
 	const project = useAtomValue(projectByIdAtomFamily(startProjectId ?? ""));
 	const fixedProjectLabel = project === undefined ? undefined : isChatProject(project) ? t("app.chatProject") : project.name;
 	// 只有无会话引导页允许换项目；真实会话（包括空的历史会话）始终只读，忽略误传的切换器。
+	// 项目记录缺失（Wave 4 §5）：真实会话的 startProjectId 指向尚未加载/已移除的项目时
+	// 不再整条静默消失——显式显示「项目不可用」；引导页瞬态（无 startProjectId）仍隐藏。
+	const projectMissing = props.sessionId !== GUIDE_BOOTSTRAP_SESSION_ID && startProjectId !== undefined && fixedProjectLabel === undefined;
 	const contextBar =
 		(props.sessionId === GUIDE_BOOTSTRAP_SESSION_ID ? props.projectSwitcher : undefined) ??
-		(fixedProjectLabel !== undefined ? (
+		(projectMissing ? (
+			<span className="inline-flex h-6 min-w-0 max-w-56 items-center gap-1.5 rounded-md px-1.5 text-caption font-normal text-muted-foreground/70" title={t("app.projectUnavailable")}>
+				<FolderGit2 size={14} strokeWidth={1.8} className="shrink-0 text-muted-foreground/60" aria-hidden="true" />
+				<span className="min-w-0 truncate">{t("app.projectUnavailable")}</span>
+			</span>
+		) : fixedProjectLabel !== undefined ? (
 			<span className="inline-flex h-6 min-w-0 max-w-56 items-center gap-1.5 rounded-md px-1.5 text-caption font-normal text-text-secondary">
 				<FolderGit2 size={14} strokeWidth={1.8} className="shrink-0 text-text-tertiary" aria-hidden="true" />
-				<span className="min-w-0 truncate">{fixedProjectLabel}</span>
+				<span className="min-w-0 truncate" title={fixedProjectLabel}>
+					{fixedProjectLabel}
+				</span>
 			</span>
 		) : undefined);
 	const queuedTrackRef = useRef<HTMLElement | null>(null);
@@ -154,6 +166,7 @@ function SessionStartBody(props: SessionStartProps) {
 
 	return (
 		<StartSurfaceShell slogan={t("session.start.slogan")}>
+			{props.secondaryAction !== undefined ? <div className="flex w-full justify-center">{props.secondaryAction}</div> : null}
 			{/* 复用会话页底部输入框组件：高度随内容撑开，底部栏（模型/思考/模式/安全级别/git）与发送按钮全保留。
 				[--chat-content-pct-set:100%] 只在本页生效，抵消内容宽度设置（默认 80%）在引导页的二次收窄——
 				引导页没有消息列要对其，输入框直接用满容器（composer 实际宽 = 容器 - 48px 两侧安全空隙）。 */}
@@ -162,6 +175,7 @@ function SessionStartBody(props: SessionStartProps) {
 					sessionId={props.sessionId}
 					contextBar={contextBar}
 					gitInfo={gitInfo}
+					gitUnavailable={gitUnavailable}
 					onSwitchBranch={switchBranch}
 					enqueue={services.enqueueSessionPrompt}
 					ensureSessionId={services.ensureSessionId}

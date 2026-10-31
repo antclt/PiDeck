@@ -25,8 +25,8 @@ export function RemoteTrashPanel(props: { projectId: string; open: boolean; relo
 		try {
 			const result = await desktopApi.remoteHosts.listProjectTrash(props.projectId);
 			if (result.ok) {
-				setEntries(result.entries);
-				setTruncated(result.truncated);
+				setEntries(result.value.entries);
+				setTruncated(result.value.truncated);
 			} else {
 				setErrorCode(result.code);
 			}

@@ -8,6 +8,7 @@ import { isAbsolute } from "node:path";
 import { dialog, ipcMain, type BrowserWindow, type WebContents } from "electron";
 import { agentEventTags, ipcChannels } from "../../shared/ipc";
 import { isLocalProject } from "../../shared/projectLocation";
+import { resolveProjectWslIdentity } from "../wsl/WslProjectEnvironment";
 import { isDshPermissionPreset } from "../../shared/types/agent";
 import { isRewindRestoreScope } from "../../shared/types/rewind";
 import { canonicalizeSessionPath } from "../../shared/sessionIdentity";
@@ -404,6 +405,8 @@ export type SessionIpcDeps = {
 	projectStore: ProjectStore;
 	settingsStore: SettingsStore;
 	sessionScanner: SessionScanner;
+	/** 第 14 步：按项目 WSL 档案解析独立 scanner（多发行版并存）；未装配时退回本机 scanner。 */
+	resolveWslSessionScanner?: (identity: { distro: string; user: string }) => Promise<SessionScanner>;
 	sessionCatalog: SessionCatalog;
 	sessionRuntimeCoordinator: SessionRuntimeCoordinator;
 	agentManager: AgentManager;
@@ -551,6 +554,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		projectStore,
 		settingsStore,
 		sessionScanner,
+		resolveWslSessionScanner,
 		sessionCatalog,
 		sessionRuntimeCoordinator,
 		agentManager,
@@ -776,14 +780,15 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 	let firstSessionListMilestoneLogged = false;
 	ipcMain.handle(ipcChannels.sessionsList, async (_event, projectId?: string) => {
 		const project = projectId ? projectStore.get(projectId) : undefined;
+		const projectWsl = resolveProjectWslIdentity(project, settingsStore.get());
 		let projectPath = project?.path;
-		// WSL 模式：将 Windows 项目路径转为 WSL /mnt/ 格式，
-		// 使 WSL 会话（CWD = /mnt/c/...）能正确匹配到项目。
-		if (projectPath && settingsStore.get().wslEnabled && settingsStore.get().wslDistro) {
+		// WSL 项目：把 Windows 项目路径转为 WSL /mnt/ 格式，使 CWD=/mnt/... 的会话能匹配。
+		if (projectPath && projectWsl !== undefined) {
 			projectPath = projectPath.replace(/^([A-Za-z]):\\/, (_: string, d: string) => `/mnt/${d.toLowerCase()}/`).replace(/\\/g, "/");
 		}
 		const startedAt = Date.now();
-		const sessions = await sessionScanner.list(projectPath);
+		const scanner = projectWsl !== undefined && resolveWslSessionScanner !== undefined ? await resolveWslSessionScanner(projectWsl) : sessionScanner;
+		const sessions = await scanner.list(projectPath);
 		if (!firstSessionListMilestoneLogged) {
 			firstSessionListMilestoneLogged = true;
 			void appLogger.info("app", "Cold start milestone: first session list", {
@@ -938,15 +943,16 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		}
 		let projectPath = project.path;
 		const settings = settingsStore.get();
-		if (settings.wslEnabled && settings.wslDistro) {
+		// 第 12 步：扫描按项目身份解析；缺字段的旧项目回退全局设置。
+		const projectWsl = resolveProjectWslIdentity(project, settings);
+		if (projectWsl !== undefined) {
 			projectPath = projectPath.replace(/^([A-Za-z]):\\/, (_: string, drive: string) => `/mnt/${drive.toLowerCase()}/`).replace(/\\/g, "/");
 		}
-		const { wslEnabled, wslDistro, wslUser } = settings;
-
 		// 扫描 + 合并 + 运行时绑定（首次同步路径与后台路径共用）
 		const runScanAndMerge = async (): Promise<SessionRecord[]> => {
-			const summaries = await sessionScanner.list(projectPath);
-			const records = await sessionCatalog.mergeScanned(projectId, summaries, wslEnabled ? { wslDistro, wslUser } : {});
+			const scanner = projectWsl !== undefined && resolveWslSessionScanner !== undefined ? await resolveWslSessionScanner(projectWsl) : sessionScanner;
+			const summaries = await scanner.list(projectPath);
+			const records = await sessionCatalog.mergeScanned(projectId, summaries, projectWsl !== undefined ? { wslDistro: projectWsl.distro, wslUser: projectWsl.user } : {});
 			// 重发/编辑 fork 化替换：被子会话接替的旧记录不出现在列表（文件保留可恢复，
 			// 用户要求 fork 后历史会话不重复）
 			const visibleRecords = records.filter((record) => !record.supersededBy);
@@ -1101,10 +1107,13 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 				// Config read is best-effort; draft creation must never block.
 			}
 		}
+		const projectWsl = resolveProjectWslIdentity(project, settingsStore.get());
 		const draft = await sessionCatalog.createDraft({
 			projectId: input.projectId,
+			...(projectWsl !== undefined ? { wslDistro: projectWsl.distro, wslUser: projectWsl.user } : {}),
 			title: input.title?.trim() || mainCopy("session.newTitle"),
-			environment: settingsStore.get().wslEnabled ? "wsl" : "native",
+			// 第 12 步：会话按项目档案记录环境；旧项目回退全局设置。
+			environment: projectWsl !== undefined ? "wsl" : "native",
 			// 后端透传：仅接受白名单枚举，其余视为 pi（渲染层不可信输入校验在边界）。
 			backend: input.backend === "dsh" ? "dsh" : input.backend === "acp" ? "acp" : undefined,
 			// ACP 工具预选（AcpToolConfig.id）：backend=acp 草稿期选哪个 CLI。
@@ -1926,13 +1935,13 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		if (!restored) throw new Error(mainCopy("session.invalidArchivePath"));
 		// 重建 catalog 记录：按会话自己的 cwd 匹配或注册项目；没有 cwd 才兑底。
 		// 打开会话时 DshAgentManager 用 project.path 当 cwd，挂错项目会 attach 错 workspace。
-		const project = restored.cwd ? (projectStore.findByPath(restored.cwd) ?? (await projectStore.add(restored.cwd, undefined, settingsStore.get().wslEnabled ? "wsl" : "windows"))) : await projectStore.ensureExternalSessionsProject(mainCopy("project.externalSessions"));
+		const project = restored.cwd ? (projectStore.findByPath(restored.cwd) ?? (await projectStore.add(restored.cwd))) : await projectStore.ensureExternalSessionsProject(mainCopy("project.externalSessions"));
 		const draft = await sessionCatalog.createDraft({
 			projectId: project.id,
 			// 恢复时优先用 manifest 里的原标题（旧归档由 DshHost 日志折叠补全），
 			// 缺省才落「新会话」占位——否则侧栏恢复后显示不了真实会话名。
 			title: restored.title ?? mainCopy("session.newTitle"),
-			environment: settingsStore.get().wslEnabled ? "wsl" : "native",
+			environment: "native",
 			backend: "dsh",
 		});
 		// 归档恢复是用户明确找回：必须 active，并清掉删除墓碑，否则下次自动同步仍会跳过。

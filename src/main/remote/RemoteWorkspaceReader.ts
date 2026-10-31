@@ -28,12 +28,16 @@ import {
 	REMOTE_HELPER_MAX_HOST_ID_LENGTH,
 	REMOTE_HELPER_MAX_LIST_ENTRIES,
 	REMOTE_HELPER_MAX_PATH_LENGTH,
+	REMOTE_HELPER_MAX_STAT_MANY_PATHS,
 	REMOTE_HELPER_METHOD_FS_LIST,
 	REMOTE_HELPER_METHOD_FS_READ,
 	REMOTE_HELPER_METHOD_FS_STAT,
+	REMOTE_HELPER_METHOD_FS_STAT_MANY,
 	type RemoteHelperListEntry,
 	type RemoteHelperListResult,
 	type RemoteHelperPathKind,
+	type RemoteHelperStatManyEntry,
+	type RemoteHelperStatManyResult,
 	type RemoteHelperStatResult,
 } from "./RemoteHelperContract";
 
@@ -237,6 +241,12 @@ export type RemoteWorkspaceReaderOptions = {
 export type RemoteWorkspaceReader = {
 	/** Classify one entry. lstat semantics: a symlink is `other`, its target's size is never reported. */
 	stat(hostId: string, path: string, options?: RemoteWorkspaceCallOptions): Promise<RemoteHelperStatResult>;
+	/**
+	 * Classify up to REMOTE_HELPER_MAX_STAT_MANY_PATHS entries in one request. Per-path semantics are exactly
+	 * those of `stat` (including all-or-nothing failure), and the answer echoes the request order. An empty
+	 * list answers an empty result without writing a frame.
+	 */
+	statMany(hostId: string, paths: readonly string[], options?: RemoteWorkspaceCallOptions): Promise<RemoteHelperStatManyResult>;
 	/** List one directory. Past the contract's entry cap the call is refused, never truncated. */
 	list(hostId: string, path: string, options?: RemoteWorkspaceCallOptions): Promise<RemoteHelperListResult>;
 	/** Read one regular file in contract-sized chunks, validated against a single description of the entry. */
@@ -282,6 +292,8 @@ const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$
 const RETRYABLE_CODES = new Set<string>(["REQUEST_TIMEOUT", "REMOTE_CONNECTION_LOST"]);
 /** Contract field sets: an exact match is required, so an unknown extra field is as fatal as a missing one. */
 const STAT_FIELDS = ["kind", "bytes", "mtimeMs"] as const;
+const STAT_MANY_FIELDS = ["entries"] as const;
+const STAT_MANY_ENTRY_FIELDS = ["path", "kind", "bytes", "mtimeMs"] as const;
 const LIST_FIELDS = ["entries"] as const;
 const ENTRY_FIELDS = ["name", "kind"] as const;
 const ENTRY_FILE_FIELDS = ["name", "kind", "bytes"] as const;
@@ -631,6 +643,25 @@ export function createRemoteWorkspaceReader(options: RemoteWorkspaceReaderOption
 		return stat;
 	}
 
+	/** Strict decode of one `fs.statMany` answer: the count and every echoed path must match the request. */
+	function readStatManyResult(site: CallSite, expected: readonly string[], value: unknown): RemoteHelperStatManyResult {
+		if (!isRecord(value) || !hasExactFields(value, STAT_MANY_FIELDS)) throw refuse(site, "PROTOCOL_INVALID");
+		const entries = value.entries;
+		if (!isUnknownArray(entries) || entries.length !== expected.length) throw refuse(site, "PROTOCOL_INVALID");
+		const validated: RemoteHelperStatManyEntry[] = [];
+		for (let index = 0; index < entries.length; index += 1) {
+			const entry = entries[index];
+			if (!isRecord(entry) || !hasExactFields(entry, STAT_MANY_ENTRY_FIELDS)) throw refuse(site, "PROTOCOL_INVALID");
+			// The answer is bound to the request position by position: a helper may not reorder, drop or invent paths.
+			const requested = expected[index];
+			if (entry.path !== requested) throw refuse(site, "PROTOCOL_INVALID");
+			const stat = readStatResult({ kind: entry.kind, bytes: entry.bytes, mtimeMs: entry.mtimeMs });
+			if (stat === undefined) throw refuse(site, "PROTOCOL_INVALID");
+			validated.push({ path: requested, ...stat });
+		}
+		return { entries: validated };
+	}
+
 	/**
 	 * `fs.list` answers in one frame, so the contract caps the entry count instead of paging it: past the cap
 	 * the whole call is refused with `RESULT_TOO_LARGE`, exactly like the helper does, because a listing that
@@ -818,6 +849,14 @@ export function createRemoteWorkspaceReader(options: RemoteWorkspaceReaderOption
 		return { hostId: host, path: target, cancellation: createCancellation(read.signal), timeoutMs: read.timeoutMs };
 	}
 
+	/** Validate a call that has no single path (the path-list batch keeps its entries in the params). */
+	function beginBatchCall(hostId: unknown, options: unknown): CallSetup | undefined {
+		const host = readHostId(hostId);
+		const read = readCallOptions(options);
+		if (host === undefined || !read.ok) return undefined;
+		return { hostId: host, path: "", cancellation: createCancellation(read.signal), timeoutMs: read.timeoutMs };
+	}
+
 	return {
 		async stat(hostId, path, options) {
 			const setup = beginCall(hostId, path, options);
@@ -826,6 +865,36 @@ export function createRemoteWorkspaceReader(options: RemoteWorkspaceReaderOption
 			if (setup === undefined) throw new RemoteWorkspaceError("PROTOCOL_INVALID", false);
 			try {
 				return await requestStat(setup);
+			} finally {
+				disposeCancellation(setup.cancellation);
+			}
+		},
+		async statMany(hostId, paths, options) {
+			const setup = beginBatchCall(hostId, options);
+			if (setup === undefined) throw new RemoteWorkspaceError("PROTOCOL_INVALID", false);
+			const reject = (): never => {
+				disposeCancellation(setup.cancellation);
+				throw new RemoteWorkspaceError("PROTOCOL_INVALID", false);
+			};
+			// The batch has no single path to validate, so the list itself is checked: a bounded array of
+			// protocol-shaped paths. An empty list answers empty without a frame (there is nothing to ask).
+			if (!isUnknownArray(paths)) reject();
+			const candidates = paths as readonly unknown[];
+			if (candidates.length > REMOTE_HELPER_MAX_STAT_MANY_PATHS) reject();
+			const targets: string[] = [];
+			for (const value of candidates) {
+				const target = readRequestPath(value);
+				if (target === undefined) reject();
+				targets.push(target as string);
+			}
+			if (targets.length === 0) {
+				disposeCancellation(setup.cancellation);
+				return { entries: [] };
+			}
+			try {
+				const site = siteOf(setup, REMOTE_HELPER_METHOD_FS_STAT_MANY);
+				const raw = await callHelper(site, { paths: targets }, setup.cancellation, setup.timeoutMs);
+				return readStatManyResult(site, targets, raw);
 			} finally {
 				disposeCancellation(setup.cancellation);
 			}

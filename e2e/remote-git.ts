@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { remoteProjectRow, runRemoteCommand, type RemoteAcceptanceCredentials } from "./remote-fixtures";
+import { dismissRemoteConnectionProgress, remoteProjectRow, runRemoteCommand, type RemoteAcceptanceCredentials } from "./remote-fixtures";
 
 /** Separate local Git negative control: the remote UI must leave its index and worktree untouched. */
 export async function createLocalGitReadControl() {
@@ -174,6 +174,7 @@ export async function verifyRemoteGitRead(input: { window: Page; credentials: Re
 		await modal.getByRole("button", { name: "连接", exact: true }).first().click();
 		await expect(modal.getByText("已连接").first()).toBeVisible({ timeout: timeoutMs });
 	}
+	await dismissRemoteConnectionProgress(window);
 	await modal.getByRole("button", { name: "断开", exact: true }).first().click();
 	await expect(modal.getByRole("button", { name: "连接", exact: true }).first()).toBeVisible({ timeout: timeoutMs });
 	await modal.getByRole("button", { name: "关闭" }).first().click();
@@ -183,9 +184,10 @@ export async function verifyRemoteGitRead(input: { window: Page; credentials: Re
 	await expect(panel.getByTestId("remote-git-workingTree")).toHaveCount(0);
 	await window.getByRole("button", { name: /^设置/ }).click();
 	await modal.getByRole("tab", { name: "连接", exact: true }).click();
-	await expect(modal.getByText("已断开连接").first()).toBeVisible();
+	await expect(modal.getByText(/已断开连接|已离线/).first()).toBeVisible();
 	await modal.getByRole("button", { name: "连接", exact: true }).first().click();
 	await expect(modal.getByText("已连接").first()).toBeVisible({ timeout: timeoutMs });
+	await dismissRemoteConnectionProgress(window);
 	await modal.getByRole("button", { name: "关闭" }).first().click();
 	await expect(panel.getByTestId("remote-git-workingTree")).toHaveCount(0); // explicit reconnect alone never replays a read
 	await panel.getByRole("button", { name: "刷新远端 Git", exact: true }).click();

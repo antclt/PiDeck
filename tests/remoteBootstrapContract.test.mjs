@@ -479,7 +479,7 @@ test("the inline entry is byte-frozen", () => {
 	// This entry is the only code that runs on a remote before anything is deployed, so any edit must
 	// be deliberate: update this digest in the same commit that changes REMOTE_BOOTSTRAP_INLINE_SOURCE.
 	const digest = createHash("sha256").update(REMOTE_BOOTSTRAP_INLINE_SOURCE, "utf8").digest("hex");
-	assert.equal(digest, "c6b35f62bb3c6faed5c13fd4cf75926005574e854e22660c645b8d50abf90f7c");
+	assert.equal(digest, "1194899dc81a57da866d37d5fc7c682abacc8987d89e40a8a9b05b7a34933fb6");
 });
 
 test("the frozen entry refuses a deploy root that is not a private real directory", async (t) => {
@@ -1182,4 +1182,119 @@ test("an undeclared file left in staging blocks the commit instead of riding int
 	assert.notEqual(result.code, 0);
 	assert.equal(result.frames.at(-1).code, "BOOTSTRAP_FILE_MISMATCH");
 	await assertNothingActivated(home, "undeclared staging entry");
+});
+
+/* --------------------------------------------------------------------------------------------------
+ * F3 reuse check (docs/remote-functional-optimization-plan.md §3 F3): a second attempt may re-prove the
+ * already active content-addressed directory instead of transferring the same bytes again. The verdict is
+ * produced by this frozen entry, never by the bundle it is checking.
+ * ------------------------------------------------------------------------------------------------ */
+
+const VERIFY_FRAME = { v: 1, op: "finalize-verify" };
+
+test("a verify round reuses an already active bundle without any staging upload", async (t) => {
+	const home = await temporaryHome(t);
+	const files = [stagedFile("helper.mjs", "export const helper = 1;\n"), stagedFile("bootstrap.mjs", "#!/usr/bin/env node\nrun();\n", "0700")];
+	const first = await startStagingSession(home);
+	for (const file of files) await stageFile(home, file);
+	first.write(beginFrame(files.length), ...files.map((file) => fileFrame(file)), COMMIT_FRAME);
+	const committed = await first.finish();
+	assert.equal(committed.code, 0, committed.stderr);
+
+	const second = await startStagingSession(home);
+	second.write(beginFrame(files.length), ...files.map((file) => fileFrame(file)), VERIFY_FRAME);
+	const verified = await second.finish();
+	assert.equal(verified.code, 0, verified.stderr);
+	assert.deepEqual(
+		verified.frames.map((frame) => frame.op),
+		["ready", "verified"],
+	);
+	assert.deepEqual(verified.frames[1], { v: 1, op: "verified", active: `./bundles/${BUNDLE_SHA}`, files: files.length });
+	// A reuse proves the same content, so nothing is left behind: no staging copy, no deploy lock.
+	await assert.rejects(lstat(stagingOf(home)), /ENOENT/);
+	await assert.rejects(lstat(lockPathOf(home)), /ENOENT/);
+});
+
+test("a verify miss answers absent and leaves the same session able to upload and commit", async (t) => {
+	const home = await temporaryHome(t);
+	const file = stagedFile("helper.mjs", "helper\n");
+	const session = await startStagingSession(home);
+	session.write(beginFrame(1), fileFrame(file), VERIFY_FRAME);
+	const miss = await session.waitForFrame((frame) => frame.op === "verify-miss");
+	assert.deepEqual(miss, { v: 1, op: "verify-miss", reason: "absent" });
+	// The declaration of the miss is dropped, so the ordinary upload round is accepted on the same entry.
+	await stageFile(home, file);
+	session.write(beginFrame(1), fileFrame(file), COMMIT_FRAME);
+	const result = await session.finish();
+	assert.equal(result.code, 0, result.stderr);
+	assert.deepEqual(
+		result.frames.map((frame) => frame.op),
+		["ready", "verify-miss", "finalized"],
+	);
+	assert.equal(await readFile(join(bundlesOf(home), BUNDLE_SHA, file.name), "utf8"), file.text);
+});
+
+test("a verify round refuses to reuse a bundle whose payload changed and leaves it untouched", async (t) => {
+	const home = await temporaryHome(t);
+	const file = stagedFile("helper.mjs", "helper\n");
+	const first = await startStagingSession(home);
+	await stageFile(home, file);
+	first.write(beginFrame(1), fileFrame(file), COMMIT_FRAME);
+	assert.equal((await first.finish()).code, 0);
+	const activeFile = join(bundlesOf(home), BUNDLE_SHA, file.name);
+	await writeFile(activeFile, "tampered\n");
+
+	const second = await startStagingSession(home);
+	second.write(beginFrame(1), fileFrame(file), VERIFY_FRAME);
+	const miss = await second.waitForFrame((frame) => frame.op === "verify-miss");
+	assert.deepEqual(miss, { v: 1, op: "verify-miss", reason: "conflict" });
+	// Fail-closed: the suspicious directory is neither reused nor repaired by the verify round.
+	assert.equal(await readFile(activeFile, "utf8"), "tampered\n");
+	second.write(ABORT_FRAME);
+	const result = await second.finish();
+	assert.equal(result.code, 0);
+	assert.equal(result.frames.at(-1).op, "aborted");
+	await assert.rejects(lstat(stagingOf(home)), /ENOENT/);
+});
+
+test("a verify round refuses a bundle directory with an undeclared extra file", async (t) => {
+	const home = await temporaryHome(t);
+	const file = stagedFile("helper.mjs", "helper\n");
+	const first = await startStagingSession(home);
+	await stageFile(home, file);
+	first.write(beginFrame(1), fileFrame(file), COMMIT_FRAME);
+	assert.equal((await first.finish()).code, 0);
+	await writeFile(join(bundlesOf(home), BUNDLE_SHA, "extra.mjs"), "extra\n");
+
+	const second = await startStagingSession(home);
+	second.write(beginFrame(1), fileFrame(file), VERIFY_FRAME);
+	const miss = await second.waitForFrame((frame) => frame.op === "verify-miss");
+	assert.equal(miss.reason, "conflict");
+	second.write(ABORT_FRAME);
+	await second.finish();
+});
+
+test("a verify round never reuses a bundle directory that was replaced by a link", async (t) => {
+	// The reuse verdict shares `activeMatches` with the commit path, so the same fail-closed directory checks
+	// have to hold here: an attacker (or a careless script) that swaps the content-addressed directory for a
+	// junction pointing at byte-identical content must not be accepted as "already installed".
+	const home = await temporaryHome(t);
+	const file = stagedFile("helper.mjs", "helper\n");
+	const first = await startStagingSession(home);
+	await stageFile(home, file);
+	first.write(beginFrame(1), fileFrame(file), COMMIT_FRAME);
+	assert.equal((await first.finish()).code, 0);
+
+	const elsewhere = join(home, "elsewhere");
+	await mkdir(elsewhere, { recursive: true });
+	await rename(bundlesOf(home), join(elsewhere, "moved"));
+	await mkdir(bundlesOf(home), { recursive: true });
+	await symlink(join(elsewhere, "moved", BUNDLE_SHA), activeOf(home), "junction");
+
+	const second = await startStagingSession(home);
+	second.write(beginFrame(1), fileFrame(file), VERIFY_FRAME);
+	const miss = await second.waitForFrame((frame) => frame.op === "verify-miss");
+	assert.equal(miss.reason, "conflict", "a linked directory is never the bundle this client installed");
+	second.write(ABORT_FRAME);
+	await second.finish();
 });

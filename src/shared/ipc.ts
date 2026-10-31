@@ -10,6 +10,20 @@ export const ipcChannels = {
 	remoteHostScanConfig: "remote:scan-config",
 	/** 添加主机：建立 draft、完成首次 host key 信任（TOFU）并落盘 pin，返回 verified。 */
 	remoteHostAdd: "remote:add",
+	/** 编辑已添加的主机（显示名/地址/端口/用户/私钥/认证方式）；地址变化后重新验证并 pin。 */
+	remoteHostUpdate: "remote:update",
+	/** 编辑表单的初值：主机字段 + 已保存口令（明文，仅回给发起编辑的窗口）。 */
+	remoteHostEditDraft: "remote:host-edit-draft",
+	remoteHostPickIdentityFile: "remote:pick-identity-file",
+	/** 移除一台主机：先停连接，再 disable + retire（引用检查由主进程执行）。 */
+	remoteHostRemove: "remote:remove",
+	/** 只读列目录（项目登记时的目录浏览器）：只返回目录名，不返回文件/内容。 */
+	remoteHostListDirs: "remote:list-dirs",
+	/** WSL 连接档案（本机清单，不启动发行版）：列表 / 新增 / 编辑 / 移除。 */
+	remoteHostsWslList: "remote:wsl-hosts-list",
+	remoteHostsWslAdd: "remote:wsl-hosts-add",
+	remoteHostsWslUpdate: "remote:wsl-hosts-update",
+	remoteHostsWslRemove: "remote:wsl-hosts-remove",
 	/** 主进程 → 渲染层：主机连接状态变化推送（connect 返回之后的迁移也在此到达）。 */
 	remoteHostStateChanged: "remote:state-changed",
 	/** 只读：诊断 needs-repair 的原因与合法动作（不写任何东西）。 */
@@ -63,6 +77,12 @@ export const ipcChannels = {
 	remoteProjectSearch: "remote:project-search",
 	/** 项目已确认 root 的最近一次复核结果（只读、不建会话、无 helper 请求）。 */
 	remoteProjectRootStatus: "remote:project-root-status",
+	/** 订阅一个项目的目录/Git 事实变化（只标脏，不触发装载）；订阅绑定 sender + project。 */
+	remoteProjectFactsSubscribe: "remote:project-facts-subscribe",
+	/** 取消一个项目的事实变化订阅。 */
+	remoteProjectFactsUnsubscribe: "remote:project-facts-unsubscribe",
+	/** 主进程 → 渲染层：事实变化通知（projectId + generation + 被标脏的 scopes）。 */
+	remoteProjectFactsChanged: "remote:project-facts-changed",
 	/** 列出远端主机上的会话文件（只读、有界；不含正文）。 */
 	remoteSessionScan: "remote:remote-session-scan",
 	/** 按需解析一条远端会话的标题（有界头读；只读、不写 catalog）。 */
@@ -79,6 +99,8 @@ export const ipcChannels = {
 	remotePiModels: "remote:pi-models",
 	projectsList: "projects:list",
 	projectsAdd: "projects:add",
+	/** 按 WSL 连接档案添加项目：主进程查档案、解析环境、选目录并写入 wslHostId/distro/user。 */
+	projectsAddWsl: "projects:add-wsl",
 	// 文件夹右键菜单直达：按路径添加项目（渲染层确认后调用；projectsAdd 走系统目录选择框）
 	projectsAddByPath: "projects:add-by-path",
 	projectsRemove: "projects:remove",
@@ -113,6 +135,8 @@ export const ipcChannels = {
 	editorsChooseExecutable: "editors:choose-executable",
 	editorsOpenProject: "editors:open-project",
 	filesList: "files:list",
+	/** 公共目录页（v5 T6）：本地/SSH 同一形状，带 truncated + revision + generation。 */
+	filesDirectoryPage: "files:directory-page",
 	/** 工作区文件名搜索（issue #215）：主进程全盘扫描，不受抽屉懒加载深度限制 */
 	filesSearch: "files:search",
 	/** 工作区文件内容检索（Go file-index sidecar）：未就绪/不可用时回 null，渲染层不展示内容分区 */
@@ -603,6 +627,12 @@ export const ipcChannels = {
 	skillsStoreOpenDir: "skills-store:open-dir",
 	/** 扫描项目目录内的独立 Git 仓库（根 + 嵌套），供侧栏切换 */
 	gitListRepos: "git:list-repos",
+	/** 公共仓库列表（v5 T7）：带 truncated 与 revision/generation，本地/SSH 同形 */
+	gitRepositoryList: "git:repository-list",
+	/** 公共历史页（v5 T7）：显式分页；远端 HEAD-only 时不填 totalCount */
+	gitHistoryPage: "git:history-page",
+	/** 公共比较（v5 T7）：显式 mode；三点模式才有 ahead/behind */
+	gitCompareRefs: "git:compare-refs",
 	gitBranches: "git:branches",
 	gitCheckout: "git:checkout",
 	gitCreateBranch: "git:create-branch",

@@ -367,8 +367,14 @@ const api = {
 	remoteHosts: {
 		/** 只读：列出已登记主机（不发请求、不启动 SSH）。功能未启用时返回稳定码。 */
 		list: () => ipcRenderer.invoke(ipcChannels.remoteHostsList) as Promise<import("../shared/types/remoteHost").RemoteHostListResult>,
-		/** 连接一台主机。这是本组里唯一会启动真实 SSH 的方法。 */
-		connect: (hostId: string) => ipcRenderer.invoke(ipcChannels.remoteHostConnect, hostId) as Promise<import("../shared/types/remoteHost").RemoteHostConnectResult>,
+		/** 连接一台主机。这是本组里唯一会启动真实 SSH 的方法；密码只随本次调用进入 main 内存。 */
+		connect: (hostId: string, password?: string) => ipcRenderer.invoke(ipcChannels.remoteHostConnect, hostId, password) as Promise<import("../shared/types/remoteHost").RemoteHostConnectResult>,
+		/** 打开系统文件选择器挑选私钥；返回绝对路径。 */
+		/** Edit an added host in place; an address change re-probes and re-pins in main. */
+		update: (input: { hostId: string; patch: import("../shared/types/remoteHost").RemoteHostUpdatePatch; secret?: string }) => ipcRenderer.invoke(ipcChannels.remoteHostUpdate, input) as Promise<import("../shared/types/remoteHost").RemoteHostUpdateResult>,
+		/** The edit form's starting values, including the stored secret (plaintext); null when none is saved. */
+		editDraft: (hostId: string) => ipcRenderer.invoke(ipcChannels.remoteHostEditDraft, hostId) as Promise<import("../shared/types/remoteHost").RemoteHostEditDraftResult>,
+		pickIdentityFile: () => ipcRenderer.invoke(ipcChannels.remoteHostPickIdentityFile) as Promise<import("../shared/types/remoteHost").RemoteHostPickIdentityFileResult>,
 		/** 断开一台主机（不忘记已验证的 bootstrap，重连会复用）。 */
 		disconnect: (hostId: string) => ipcRenderer.invoke(ipcChannels.remoteHostDisconnect, hostId) as Promise<import("../shared/types/remoteHost").RemoteHostDisconnectResult>,
 		/** 读取脱敏诊断历史（只读）。 */
@@ -377,8 +383,32 @@ const api = {
 		scanConfig: () => ipcRenderer.invoke(ipcChannels.remoteHostScanConfig) as Promise<import("../shared/types/remoteHost").RemoteHostConfigScanResult>,
 		/** 添加主机：建立 draft、完成首次 host key 信任（TOFU）并落盘 pin；成功即 verified，可直接连接。 */
 		add: (input: import("../shared/types/remoteHost").RemoteHostAddInput) => ipcRenderer.invoke(ipcChannels.remoteHostAdd, input) as Promise<import("../shared/types/remoteHost").RemoteHostAddResult>,
+		/** 移除连接：主进程先断开再退役 profile/pin；仍被项目引用时拒绝。 */
+		remove: (hostId: string) => ipcRenderer.invoke(ipcChannels.remoteHostRemove, hostId) as Promise<import("../shared/types/remoteHost").RemoteHostRemoveResult>,
+		/** 只读列目录：path 缺省从远端 home 开始；只返回目录名。 */
+		listDirs: (hostId: string, path?: string) => ipcRenderer.invoke(ipcChannels.remoteHostListDirs, hostId, path) as Promise<import("../shared/types/remoteHost").RemoteDirectoryListResult>,
+		/** WSL 连接档案：只读写本机档案，不启动 wsl.exe。 */
+		listWslHosts: () => ipcRenderer.invoke(ipcChannels.remoteHostsWslList) as Promise<import("../shared/types/wslHost").WslHostListResult>,
+		addWslHost: (input: import("../shared/types/wslHost").WslHostAddInput) => ipcRenderer.invoke(ipcChannels.remoteHostsWslAdd, input) as Promise<import("../shared/types/wslHost").WslHostMutationResult>,
+		updateWslHost: (id: string, patch: import("../shared/types/wslHost").WslHostUpdateInput) => ipcRenderer.invoke(ipcChannels.remoteHostsWslUpdate, id, patch) as Promise<import("../shared/types/wslHost").WslHostMutationResult>,
+		removeWslHost: (id: string) => ipcRenderer.invoke(ipcChannels.remoteHostsWslRemove, id) as Promise<import("../shared/types/wslHost").WslHostRemoveResult>,
 		/** 订阅连接状态推送；返回 unsubscribe，组件卸载必须退订。 */
 		onStateChange: (callback: (change: import("../shared/types/remoteHost").RemoteHostStateChange) => void) => subscribe(ipcChannels.remoteHostStateChanged, callback),
+		/**
+		 * 订阅一个项目的目录/Git 事实变化（只标脏，不触发装载）：返回 unsubscribe。
+		 * 订阅绑定 sender + project：主进程只推送这个项目的变化，别的项目不会串到本监听。
+		 */
+		onProjectFactsChanged: (projectId: string, callback: (change: import("../shared/types/remoteHost").RemoteProjectFactsChange) => void) => {
+			const handler = (_event: unknown, change: import("../shared/types/remoteHost").RemoteProjectFactsChange) => {
+				if (change?.projectId === projectId) callback(change);
+			};
+			ipcRenderer.on(ipcChannels.remoteProjectFactsChanged, handler);
+			void ipcRenderer.invoke(ipcChannels.remoteProjectFactsSubscribe, projectId).catch(() => undefined);
+			return () => {
+				ipcRenderer.removeListener(ipcChannels.remoteProjectFactsChanged, handler);
+				void ipcRenderer.invoke(ipcChannels.remoteProjectFactsUnsubscribe, projectId).catch(() => undefined);
+			};
+		},
 		/** 只读：诊断 needs-repair 的原因与合法动作。 */
 		diagnoseRepair: () => ipcRenderer.invoke(ipcChannels.remoteHostRepairDiagnose) as Promise<import("../shared/types/remoteHost").RemoteHostRepairDiagnosisResult>,
 		/** 发起修复：推送确认请求，用户回答后才真正执行。 */
@@ -453,16 +483,18 @@ const api = {
 	},
 	/** 远端会话只读发现与登记（Phase 3 第三段）；本批无侧栏 UI，通道先按 IPC 契约收口。 */
 	remoteSessions: {
-		scan: (hostId: string) => ipcRenderer.invoke(ipcChannels.remoteSessionScan, hostId) as Promise<import("../shared/types/remoteHost").RemoteSessionScanResult>,
-		register: (hostId: string, remoteSessionId: string) => ipcRenderer.invoke(ipcChannels.remoteSessionRegister, hostId, remoteSessionId) as Promise<import("../shared/types/remoteHost").RemoteSessionRegisterResult>,
+		scan: (hostId: string) => ipcRenderer.invoke(ipcChannels.remoteSessionScan, hostId) as Promise<import("../shared/types/remoteHost").RemoteSessionScanIpcResult>,
+		register: (hostId: string, remoteSessionId: string) => ipcRenderer.invoke(ipcChannels.remoteSessionRegister, hostId, remoteSessionId) as Promise<import("../shared/types/remoteHost").RemoteSessionRegisterIpcResult>,
 		/** 按需解析标题（有界头读；头内没有权威名时再补一次有界尾读）；`titleOrigin` 三档：authoritative（名字字段）/ inferred（首条消息弱兜底）/ fallback（文件名 stem）。 */
-		title: (hostId: string, remoteSessionId: string) => ipcRenderer.invoke(ipcChannels.remoteSessionTitle, hostId, remoteSessionId) as Promise<import("../shared/types/remoteHost").RemoteSessionTitleResult>,
+		title: (hostId: string, remoteSessionId: string) => ipcRenderer.invoke(ipcChannels.remoteSessionTitle, hostId, remoteSessionId) as Promise<import("../shared/types/remoteHost").RemoteSessionTitleIpcResult>,
 	},
 	projects: {
 		list: () => ipcRenderer.invoke(ipcChannels.projectsList) as Promise<Project[]>,
 		add: () => ipcRenderer.invoke(ipcChannels.projectsAdd) as Promise<Project | null>,
 		/** 文件夹右键菜单直达：给定路径必须是已存在的目录，主进程校验后入库 */
 		addByPath: (path: string) => ipcRenderer.invoke(ipcChannels.projectsAddByPath, path) as Promise<Project>,
+		/** 通过已登记的 WSL 档案添加项目（主进程查档案并写入 wslHostId/distro/user）。 */
+		addWsl: (hostId: string) => ipcRenderer.invoke(ipcChannels.projectsAddWsl, hostId) as Promise<Project | null>,
 		remove: (id: string) => ipcRenderer.invoke(ipcChannels.projectsRemove, id) as Promise<Project[]>,
 		reorder: (projectIds: string[]) => ipcRenderer.invoke(ipcChannels.projectsReorder, projectIds) as Promise<Project[]>,
 		// 置顶/取消置顶普通项目；返回更新后的项目列表
@@ -506,6 +538,11 @@ const api = {
 	},
 	files: {
 		list: (project: string | ProjectFileTarget, options?: { maxDepth?: number; directory?: string; skipGeneratedDirs?: boolean }) => ipcRenderer.invoke(ipcChannels.filesList, project, options) as Promise<FileTreeNode[]>,
+		/**
+		 * 公共目录页（T6）：位置无关，带 `truncated` 与事实版本。
+		 * 本地与远端返回同一形状；`hasChildren` 远端为 "unknown"（不假装空目录）。
+		 */
+		directoryPage: (target: ProjectFileTarget, options?: { force?: boolean }) => ipcRenderer.invoke(ipcChannels.filesDirectoryPage, target, options) as Promise<import("../shared/types/projectFiles").ProjectDirectoryPageResult>,
 		/** 工作区文件名搜索（issue #215）：主进程全盘扫描，忽略规则与文件抽屉的文件树同档（只跳 .git/node_modules） */
 		search: (projectId: string, query: string) => ipcRenderer.invoke(ipcChannels.filesSearch, projectId, query) as Promise<FileSearchResult[]>,
 		/** 工作区文件内容检索（Go file-index sidecar）：未就绪/不可用时回 null，渲染层不展示内容分区 */
@@ -1011,6 +1048,8 @@ const api = {
 	git: {
 		/** 扫描项目内独立仓库；单仓项目通常只返回根仓库 */
 		listRepos: (projectId: string) => ipcRenderer.invoke(ipcChannels.gitListRepos, projectId) as Promise<GitRepoInfo[]>,
+		/** 公共仓库列表（T7）：带 truncated 与 revision/generation；旧 listRepos 保留一版兼容。 */
+		repositoryList: (projectId: string) => ipcRenderer.invoke(ipcChannels.gitRepositoryList, projectId) as Promise<import("../shared/types").GitRepositoryListResult>,
 		branches: (projectId: string, repoPath?: ProjectFileTarget) => ipcRenderer.invoke(ipcChannels.gitBranches, projectId, repoPath) as Promise<GitBranchInfo>,
 		checkout: (projectId: string, branch: string, repoPath?: ProjectFileTarget) => ipcRenderer.invoke(ipcChannels.gitCheckout, projectId, branch, repoPath) as Promise<GitBranchInfo>,
 		createBranch: (projectId: string, branchName: string, repoPath?: ProjectFileTarget) => ipcRenderer.invoke(ipcChannels.gitCreateBranch, projectId, branchName, repoPath) as Promise<GitBranchInfo>,
@@ -1030,6 +1069,10 @@ const api = {
 		refs: (projectId: string, repoPath?: ProjectFileTarget) => ipcRenderer.invoke(ipcChannels.gitRefs, projectId, repoPath) as Promise<GitRef[]>,
 		// 分支对比概要（变更文件 + ahead/behind）
 		branchCompare: (projectId: string, base: string, target: string, repoPath?: ProjectFileTarget) => ipcRenderer.invoke(ipcChannels.gitBranchCompare, projectId, base, target, repoPath) as Promise<BranchDiffResult>,
+		/** 公共历史页（T7）：显式分页；远端 HEAD-only 时没有 totalCount。 */
+		historyPage: (projectId: string, options?: { maxCount?: number; skip?: number; ref?: string; path?: ProjectFileTarget; allBranches?: boolean }, repoPath?: ProjectFileTarget) => ipcRenderer.invoke(ipcChannels.gitHistoryPage, projectId, options, repoPath) as Promise<import("../shared/types").GitHistoryPageResult>,
+		/** 公共比较（T7）：mode 显式；三点模式才有 ahead/behind。 */
+		compareRefs: (projectId: string, base: string, head: string, repoPath?: ProjectFileTarget) => ipcRenderer.invoke(ipcChannels.gitCompareRefs, projectId, base, head, repoPath) as Promise<import("../shared/types").GitCompareRefsResult>,
 		// 单个 commit 详情
 		commitDetail: (projectId: string, ref: string, repoPath?: ProjectFileTarget) => ipcRenderer.invoke(ipcChannels.gitCommitDetail, projectId, ref, repoPath) as Promise<CommitDetail | null>,
 		// 提交历史中单个文件相对第一父提交的两侧内容
@@ -1044,6 +1087,8 @@ const api = {
 		commitRemote: (projectId: string, message: string, token: string, repo?: string) => ipcRenderer.invoke(ipcChannels.gitRemoteCommit, projectId, message, token, repo) as Promise<import("../shared/types").GitCommitResult>,
 		// G5d/G5e：读通道与写通道尾部都可带项目相对 repo scope（空/缺省 = 项目根）；写通道的 scope 由 main 的令牌绑定。
 		remoteSnapshot: (projectId: string, repo?: string) => ipcRenderer.invoke(ipcChannels.gitRemoteSnapshot, projectId, repo) as Promise<import("../shared/types").GitReadSnapshotResult>,
+		// 显式刷新（同一通道的 force 位）：越过已完成事实缓存；普通读仍可共享缓存。
+		refreshRemoteSnapshot: (projectId: string, repo?: string) => ipcRenderer.invoke(ipcChannels.gitRemoteSnapshot, projectId, repo, true) as Promise<import("../shared/types").GitReadSnapshotResult>,
 		// G5d：项目根下的有界仓库发现（无 token、纯读）
 		remoteRepos: (projectId: string) => ipcRenderer.invoke(ipcChannels.gitRemoteRepos, projectId) as Promise<import("../shared/types").RemoteGitReposResult>,
 		// 分支写面（G3b）：新建分支不移动 HEAD，切换走原生 switch 且冲突即拒（绝不 force）
@@ -1257,31 +1302,31 @@ const api = {
 		toggleDevTools: () => ipcRenderer.invoke(ipcChannels.appToggleDevTools) as Promise<boolean>,
 	},
 	skills: {
-		list: () => ipcRenderer.invoke(ipcChannels.skillsList) as Promise<PiSkillListResult>,
+		list: (options?: import("../shared/piConfig").PiResourceOptions) => ipcRenderer.invoke(ipcChannels.skillsList, options) as Promise<PiSkillListResult>,
 		// 读技能 SKILL.md 正文（白名单校验在主进程完成），技能选择器详情/全文插入用。
 		readContent: (path: string) => ipcRenderer.invoke(ipcChannels.skillsReadContent, path) as Promise<SkillContentResult>,
-		create: (input: CreatePiSkillInput) => ipcRenderer.invoke(ipcChannels.skillsCreate, input) as Promise<PiSkillSummary>,
-		toggle: (path: string, enabled: boolean) => ipcRenderer.invoke(ipcChannels.skillsToggle, path, enabled) as Promise<PiSkillSummary>,
-		delete: (path: string) => ipcRenderer.invoke(ipcChannels.skillsDelete, path) as Promise<void>,
-		openFolder: (path?: string) => ipcRenderer.invoke(ipcChannels.skillsOpenFolder, path) as Promise<void>,
-		rename: (skillPath: string, newName: string) => ipcRenderer.invoke(ipcChannels.skillsRename, skillPath, newName) as Promise<PiSkillSummary>,
+		create: (input: CreatePiSkillInput, options?: import("../shared/piConfig").PiResourceOptions) => ipcRenderer.invoke(ipcChannels.skillsCreate, input, options) as Promise<PiSkillSummary>,
+		toggle: (path: string, enabled: boolean, options?: import("../shared/piConfig").PiResourceOptions) => ipcRenderer.invoke(ipcChannels.skillsToggle, path, enabled, options) as Promise<PiSkillSummary>,
+		delete: (path: string, options?: import("../shared/piConfig").PiResourceOptions) => ipcRenderer.invoke(ipcChannels.skillsDelete, path, options) as Promise<void>,
+		openFolder: (path?: string, options?: import("../shared/piConfig").PiResourceOptions) => ipcRenderer.invoke(ipcChannels.skillsOpenFolder, path, options) as Promise<void>,
+		rename: (skillPath: string, newName: string, options?: import("../shared/piConfig").PiResourceOptions) => ipcRenderer.invoke(ipcChannels.skillsRename, skillPath, newName, options) as Promise<PiSkillSummary>,
 	},
 	resourceImport: {
 		scan: (input: ResourceImportScanInput) => ipcRenderer.invoke(ipcChannels.resourceImportScan, input) as Promise<ResourceImportScanResponse>,
 		apply: (input: ResourceImportApplyInput) => ipcRenderer.invoke(ipcChannels.resourceImportApply, input) as Promise<ResourceImportApplyResponse>,
 	},
 	prompts: {
-		list: () => ipcRenderer.invoke(ipcChannels.promptsList) as Promise<PiPromptTemplateListResult>,
-		create: (input: CreatePiPromptTemplateInput) => ipcRenderer.invoke(ipcChannels.promptsCreate, input) as Promise<PiPromptTemplateSummary>,
-		delete: (filePath: string) => ipcRenderer.invoke(ipcChannels.promptsDelete, filePath) as Promise<void>,
-		openFolder: () => ipcRenderer.invoke(ipcChannels.promptsOpenFolder) as Promise<void>,
-		edit: (filePath: string, content?: string) => ipcRenderer.invoke(ipcChannels.promptsEdit, filePath, content) as Promise<string | void>,
+		list: (options?: import("../shared/piConfig").PiResourceOptions) => ipcRenderer.invoke(ipcChannels.promptsList, options) as Promise<PiPromptTemplateListResult>,
+		create: (input: CreatePiPromptTemplateInput, options?: import("../shared/piConfig").PiResourceOptions) => ipcRenderer.invoke(ipcChannels.promptsCreate, input, options) as Promise<PiPromptTemplateSummary>,
+		delete: (filePath: string, options?: import("../shared/piConfig").PiResourceOptions) => ipcRenderer.invoke(ipcChannels.promptsDelete, filePath, options) as Promise<void>,
+		openFolder: (options?: import("../shared/piConfig").PiResourceOptions) => ipcRenderer.invoke(ipcChannels.promptsOpenFolder, options) as Promise<void>,
+		edit: (filePath: string, content?: string, options?: import("../shared/piConfig").PiResourceOptions) => ipcRenderer.invoke(ipcChannels.promptsEdit, filePath, content, options) as Promise<string | void>,
 		listByProject: (projectId: string) => ipcRenderer.invoke(ipcChannels.promptsListByProject, projectId) as Promise<PiPromptTemplateListResult>,
 		createInProject: (projectId: string, input: CreatePiPromptTemplateInput) => ipcRenderer.invoke(ipcChannels.promptsCreateInProject, projectId, input) as Promise<PiPromptTemplateSummary>,
 		deleteFromProject: (projectId: string, name: string) => ipcRenderer.invoke(ipcChannels.promptsDeleteInProject, projectId, name) as Promise<void>,
-		rename: (oldName: string, newName: string) => ipcRenderer.invoke(ipcChannels.promptsRename, oldName, newName) as Promise<PiPromptTemplateSummary>,
+		rename: (oldName: string, newName: string, options?: import("../shared/piConfig").PiResourceOptions) => ipcRenderer.invoke(ipcChannels.promptsRename, oldName, newName, options) as Promise<PiPromptTemplateSummary>,
 		renameInProject: (projectId: string, oldName: string, newName: string) => ipcRenderer.invoke(ipcChannels.promptsRenameInProject, projectId, oldName, newName) as Promise<PiPromptTemplateSummary>,
-		toggle: (filePath: string, enabled: boolean) => ipcRenderer.invoke(ipcChannels.promptsToggle, filePath, enabled) as Promise<PiPromptTemplateSummary>,
+		toggle: (filePath: string, enabled: boolean, options?: import("../shared/piConfig").PiResourceOptions) => ipcRenderer.invoke(ipcChannels.promptsToggle, filePath, enabled, options) as Promise<PiPromptTemplateSummary>,
 		toggleInProject: (projectId: string, name: string, enabled: boolean) => ipcRenderer.invoke(ipcChannels.promptsToggleInProject, projectId, name, enabled) as Promise<PiPromptTemplateSummary>,
 	},
 	promptStore: {
@@ -1310,10 +1355,10 @@ const api = {
 		retryDb: () => ipcRenderer.invoke(ipcChannels.yaoPromptsDbRetry) as Promise<YaoPromptDbSnapshot>,
 	},
 	extensions: {
-		list: (forceRefresh?: boolean) => ipcRenderer.invoke(ipcChannels.extensionsList, forceRefresh) as Promise<PiExtensionListResult>,
+		list: (forceRefresh?: boolean, options?: import("../shared/piConfig").PiResourceOptions) => ipcRenderer.invoke(ipcChannels.extensionsList, forceRefresh, options) as Promise<PiExtensionListResult>,
 		uninstall: (source: string, scope?: "user" | "project" | "unknown", projectId?: string) => ipcRenderer.invoke(ipcChannels.extensionsUninstall, source, scope, projectId) as Promise<void>,
 		install: (source: string, projectId?: string) => ipcRenderer.invoke(ipcChannels.extensionsInstall, source, projectId) as Promise<string>,
-		toggle: (source: string, enabled: boolean, scope?: "user" | "project" | "unknown", path?: string, projectId?: string) => ipcRenderer.invoke(ipcChannels.extensionsToggle, source, enabled, scope, path, projectId) as Promise<void>,
+		toggle: (source: string, enabled: boolean, scope?: "user" | "project" | "unknown", path?: string, projectId?: string, options?: import("../shared/piConfig").PiResourceOptions) => ipcRenderer.invoke(ipcChannels.extensionsToggle, source, enabled, scope, path, projectId, options) as Promise<void>,
 		removeBuiltIn: (source: string) => ipcRenderer.invoke(ipcChannels.extensionsRemoveBuiltIn, source) as Promise<void>,
 		restoreBuiltIn: (source: string) => ipcRenderer.invoke(ipcChannels.extensionsRestoreBuiltIn, source) as Promise<void>,
 		update: () => ipcRenderer.invoke(ipcChannels.extensionsUpdate) as Promise<PiCliUpdateResult>,

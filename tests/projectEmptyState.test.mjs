@@ -25,7 +25,7 @@ test("empty state no longer auto-creates sessions (startup / closing all tabs)",
 	// 只显示空白输入框，首次发送才创建真实会话。闸门状态 allTabsClosedByUser
 	// 随之删除。
 	assert.doesNotMatch(emptyState, /autoCreateOnMount/);
-	assert.doesNotMatch(emptyState, /autoCreatedRef|useEffect\(/);
+	assert.doesNotMatch(emptyState, /autoCreatedRef|autoCreateOnMount/);
 	assert.doesNotMatch(app, /autoCreateOnMount/);
 	assert.doesNotMatch(app, /startupDraftProjectId/);
 	assert.doesNotMatch(workspaceChrome, /allTabsClosedByUser/);

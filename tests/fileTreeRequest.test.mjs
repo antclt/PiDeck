@@ -37,50 +37,39 @@ test("loadProjectFileTree returns null when the request is superseded mid-flight
 	assert.equal(await stale, null);
 });
 
-test("project file tree refresh and expand drop stale listings", () => {
-	const sync = readFileSync("src/renderer/src/hooks/useProjectSync.ts", "utf8");
-	// 切项目时的树清空/代次闸门已迁入 useProjectFileTreeController。
+test("project file tree switch clears the projection and fences late loads", () => {
+	// 切项目时的树清空已迁入 useProjectFileTreeController；迟到结果由 lazyDirTree 的按目录代次丢弃。
 	const app = readFileSync("src/renderer/src/hooks/files/useProjectFileTreeController.ts", "utf8");
+	const core = readFileSync("src/renderer/src/utils/lazyDirTree.ts", "utf8");
 
-	// #159：切项目后旧 files:list 仍可能很晚返回，必须按代次/当前项目丢弃。
-	assert.match(sync, /loadProjectFileTree/);
-	assert.match(sync, /fileTreeGenerationRef/);
-	assert.match(sync, /beginFileTreeRequest/);
+	assert.match(app, /createLazyDirTreeController/);
+	assert.match(app, /controller\.dispose\(\)/);
 	assert.match(app, /setFiles\(\(current\) => \(current\.length === 0 \? current : \[\]\)\)/);
-	assert.match(app, /beginFileTreeRequest\(\)/);
-	assert.match(app, /isFileTreeRequestCurrent\(generation, projectId\)/);
+	assert.match(app, /migrateExpandedDirKeys/);
+	assert.match(core, /generations\.get\(dir\) !== request/);
+	assert.match(core, /epoch \+= 1/);
 });
 
-test("展开目录的 IPC 不在 setFiles updater 里（StrictMode 双跑不得发两次 files:list）", () => {
+test("展开目录只改 controller，不在 setFiles updater 里发 IPC", () => {
 	const app = readFileSync("src/renderer/src/hooks/files/useProjectFileTreeController.ts", "utf8");
-	const start = app.indexOf("function toggleDirectory(");
-	const end = app.indexOf("function collapseAllDirectories(");
+	const start = app.indexOf("const toggleDirectory = useCallback(");
+	const end = app.indexOf("const collapseAllDirectories = useCallback(");
 	assert.ok(start > 0 && end > start, "toggleDirectory 必须可定位");
 	const body = app.slice(start, end);
-	// updater 必须是纯函数：React StrictMode 会跑两遍，副作用写进 updater 就发两次 IPC。
-	// 旧实现是 setFiles((current) => { if (已加载) return; void api.files.list(...); return current; })。
-	assert.doesNotMatch(body, /setFiles\(\s*\([^)]*\)\s*=>\s*\{[^}]*api\.files/, "setFiles updater 里不得发 IPC");
-	assert.doesNotMatch(body, /setFiles\(\s*\([^)]*\)\s*=>\s*\{[^}]*console\./, "setFiles updater 里不得写日志");
-	// 「已加载就跳过」的判据直接在作用域里读当前树（而不是在 updater 里读 current）。
-	assert.match(body, /if\s*\(findLoadedDirectory\(files, path\)\) return;/, "跳过判据必须在 updater 之外");
-	// 拉回来的 merge 本身幂等，重复点击不会把树重建一遍。
-	assert.match(body, /setFiles\(\(tree\) => mergeFileTreeChildren\(tree, path, children\)\)/);
+	// StrictMode 双跑不得发两次 files:list：toggle 只同步 controller，加载由 controller 的代次管。
+	assert.doesNotMatch(body, /setFiles|api\.files/);
+	assert.match(body, /controller\.toggle\(relative\)/);
+	assert.match(body, /drillCompactChain/);
 });
 
 test("missing project directories clear stale files and refresh project presence", () => {
-	const sync = readFileSync("src/renderer/src/hooks/useProjectSync.ts", "utf8");
 	const app = readFileSync("src/renderer/src/hooks/files/useProjectFileTreeController.ts", "utf8");
 	const i18n = [readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8"), readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8")].join("\n");
 
-	assert.match(sync, /message\.includes\("PROJECT_DIRECTORY_MISSING"\)/);
-	// 目录被外部删除时必须清掉陈旧文件树，且这一清空要落在 PROJECT_DIRECTORY_MISSING 分支里；
-	// 已经是空树时复用原数组（内容没变就不推进文件树内容代次，避免白跑一轮 Git 着色重拉）。
-	assert.match(sync, /if\s*\(projectDirectoryMissing\)\s*\{[\s\S]*?setFiles\(\s*\(current\)\s*=>\s*\(current\.length === 0 \? current : \[\]\)\s*\)/);
-	assert.match(sync, /void refreshProjects\(\)\.catch\(\(\) => undefined\);/);
-	assert.match(app, /projectDirectoryMissing[\s\S]*?refreshProjects\(\)\.catch/);
-	// PROJECT_DIRECTORY_MISSING 的项目自愈/提示文案在文件树控制器里。
-	const controller = readFileSync("src/renderer/src/hooks/files/useProjectFileTreeController.ts", "utf8");
-	assert.match(controller, /projectDirectoryMissing[\s\S]*?refreshProjects\(\)\.catch/);
+	// 目录被外部删除时：清掉陈旧投影（空树复用原引用，避免推进内容代次），并刷新项目 presence。
+	assert.match(app, /setFiles\(\(current\) => \(current\.length === 0 \? current : \[\]\)\)/);
+	assert.match(app, /code\.includes\("PROJECT_DIRECTORY_MISSING"\)/);
+	assert.match(app, /if \(projectDirectoryMissing\) void refreshProjectsRef\.current\(\)\.catch\(\(\) => undefined\);/);
 	assert.match(i18n, /"app\.projectDirectoryMissing"/);
 });
 
@@ -103,9 +92,9 @@ test("project file tree effect does not retrigger on an unstable toast helper", 
 	// 文件树 effect 只应跟当前项目走。showToast 若是每次 render 新建的函数
 	// 又写进 deps，会每帧 setFiles([]) 把 React 更新深度打满——点击会话后
 	// 设置/关窗点不动，正是 applog 里 Maximum update depth 的根因。
-	const effectStart = app.indexOf("先立刻清空旧树");
+	const effectStart = app.indexOf("项目切换：先清空旧树");
 	assert.notEqual(effectStart, -1, "file-tree switch effect should still exist");
-	const deps = app.slice(effectStart, effectStart + 2500).match(/\}, \[activeProjectId[^\]]*\]\)/);
+	const deps = app.slice(effectStart, effectStart + 3000).match(/\}, \[activeProjectId[^\]]*\]\)/);
 	assert.ok(deps, "file-tree effect should keep an explicit dependency list");
 	assert.doesNotMatch(deps[0], /showToast|refreshProjects/);
 	assert.match(appShell, /const showToast = useCallback\(/);

@@ -1,3 +1,5 @@
+import type { Op } from "../op";
+
 export type RemoteHostListItem = {
 	id: string;
 	label: string;
@@ -12,7 +14,9 @@ export type RemoteHostRepairSummary = {
 	hostIds: string[];
 };
 
-export type RemoteHostListResult = { ok: true; status: "ready" | "needs-repair"; hosts: RemoteHostListItem[]; repair?: RemoteHostRepairSummary[] } | { ok: false; code: "REMOTE_FEATURE_DISABLED" | "REMOTE_HOST_LIST_UNAVAILABLE" };
+export type RemoteHostListResult =
+	| { ok: true; status: "ready" | "needs-repair"; hosts: RemoteHostListItem[] /** 当前连接状态（仅主进程有实时状态的会话）：视图重新挂载时用来补一次快照。 */; states?: Record<string, RemoteHostConnectionState>; repair?: RemoteHostRepairSummary[] }
+	| { ok: false; code: "REMOTE_FEATURE_DISABLED" | "REMOTE_HOST_LIST_UNAVAILABLE" };
 
 /**
  * 连接开关的状态。这是**主机的连接状态**，与 Agent 的 send state 分开建模（设计文档 §10）：
@@ -46,6 +50,17 @@ export type RemoteHostOperationFailure = { ok: false; hostId: string; code: stri
 
 export type RemoteHostConnectResult = { ok: true; hostId: string; state: RemoteHostConnectionState } | RemoteHostOperationFailure;
 
+/**
+ * remove 的结果：成功即本机 profile/pin 已退役（远端数据不受影响）。
+ * 仍被项目/会话引用时返回 REMOTE_HOST_REFERENCED，由调用方先移除引用。
+ */
+export type RemoteHostRemoveResult = { ok: true; hostId: string } | RemoteHostOperationFailure;
+
+/** 目录浏览只返回目录名与是否符号链接；文件、大小与内容都不出主进程。 */
+export type RemoteDirectoryEntry = { name: string; isSymlink: boolean };
+
+export type RemoteDirectoryListResult = { ok: true; hostId: string; path: string; entries: RemoteDirectoryEntry[]; truncated: boolean } | RemoteHostOperationFailure;
+
 /** disconnect 的结果：成功或稳定码（主机 id 非法、功能未启用等）。 */
 export type RemoteHostDisconnectResult = { ok: true; hostId: string } | RemoteHostOperationFailure;
 
@@ -65,15 +80,26 @@ export type RemoteHostConfigCandidate = {
 };
 
 /** 扫描结果。`skipped` 让 UI 能解释「为什么某台主机没出现」，而不是静默少一项。 */
-export type RemoteHostConfigScanResult = { ok: true; candidates: RemoteHostConfigCandidate[]; skipped: { alias: string; reason: "wildcard" | "invalid" | "unsupported-directive" }[]; user: string } | { ok: false; code: string };
+export type RemoteHostConfigScanResult = { ok: true; candidates: RemoteHostConfigCandidate[]; skipped: { alias: string; reason: "wildcard" | "invalid" | "unsupported-directive" }[]; user: string; identityFiles: string[] } | { ok: false; code: string };
 
 /** 手动添加的字段（与扫描候选共用同一套提交路径）。 */
+/** 编辑补丁：只带要改的字段；缺省字段保持原值。 */
+export type RemoteHostUpdatePatch = { label?: string; hostName?: string; user?: string; port?: number; identityFile?: string; authMethod?: "password" };
+
+export type RemoteHostUpdateResult = { ok: true; hostId: string; endpointChanged: boolean; verified: boolean } | (RemoteHostOperationFailure & { saved?: true });
+
+/** 编辑表单初值；`secret: null` 表示没有保存口令（或本机无法解密）。 */
+export type RemoteHostEditDraft = { label: string; hostName: string; user?: string; port?: number; identityFile?: string; authMethod?: "password" };
+export type RemoteHostEditDraftResult = { ok: true; hostId: string; draft: RemoteHostEditDraft; secret: string | null } | RemoteHostOperationFailure;
+
 export type RemoteHostAddInput = {
 	label: string;
 	hostName: string;
 	user?: string;
 	port?: number | null;
 	identityFile?: string | null;
+	/** `password` pins the key first and authenticates later with an in-memory secret. */
+	authMethod?: "password";
 };
 
 /**
@@ -84,6 +110,9 @@ export type RemoteHostAddInput = {
  * 不会在这里被静默接受）。
  */
 export type RemoteHostAddResult = { ok: true; hostId: string; status: "verified" } | { ok: false; code: string };
+
+/** Result of the native file picker used for a private key. The path is absolute; nothing is read here. */
+export type RemoteHostPickIdentityFileResult = { ok: true; path: string } | { ok: false; code: string };
 
 /**
  * 连接状态变化推送。
@@ -162,10 +191,10 @@ export type RemoteProjectEnrollRequest = { requestId: string; expiresAt: number;
 export type RemoteProjectEnrollMode = "existing" | "create";
 
 /** 发起登记的结果：`pending` 表示已推送确认、等用户回答。create 模式的目标尚不存在，故不回显 canonicalPath。 */
-export type RemoteProjectEnrollResult = { ok: true; status: "pending"; hostId: string; canonicalPath?: string } | { ok: false; code: string };
+export type RemoteProjectEnrollResult = Op<{ status: "pending"; hostId: string; canonicalPath?: string }>;
 
 /** 回答登记确认的结果；批准时回显新项目的 stable id。 */
-export type RemoteProjectEnrollAnswerResult = { ok: true; enrolled: boolean; projectId?: string } | { ok: false; code: string };
+export type RemoteProjectEnrollAnswerResult = Op<{ enrolled: boolean; projectId?: string }>;
 
 /**
  * 「新建空远端项目」确认请求（独立于既有目录的登记确认：动作、broker 表与推送通道都分开）。
@@ -177,7 +206,7 @@ export type RemoteProjectEnrollAnswerResult = { ok: true; enrolled: boolean; pro
 export type RemoteProjectCreateRequest = { requestId: string; expiresAt: number; hostId: string; requestedPath: string; parentPath: string; leaf: string };
 
 /** 回答 create 确认的结果；批准并成功登记时回显新项目的 stable id。 */
-export type RemoteProjectCreateAnswerResult = { ok: true; enrolled: boolean; projectId?: string } | { ok: false; code: string };
+export type RemoteProjectCreateAnswerResult = Op<{ enrolled: boolean; projectId?: string }>;
 
 /**
  * 按 projectId 的只读远端浏览（Phase 3 第二段）。
@@ -186,10 +215,14 @@ export type RemoteProjectCreateAnswerResult = { ok: true; enrolled: boolean; pro
  * `ProjectStore` 中该项目持有的 canonical `remotePath`，因此可以跨重启恢复。渲染层只给
  * `projectId` 与**相对路径**，由 main 解析 host/root；绝对路径与 `..` 在触达 reader 前被拒。
  */
-export type RemoteProjectListResult = { ok: true; entries: RemoteWorkspaceEntry[] } | { ok: false; code: string };
+/**
+ * `revision` 是目录事实的版本：值被替换或标脏时递增。两个读者拿到同一个数 = 看到同一份事实，
+ * 所以树与面板不再各自「再问一遍确认一下」。
+ */
+export type RemoteProjectListResult = Op<{ entries: RemoteWorkspaceEntry[]; revision: number }>;
 
 /** 读项目内文件的结果；`contentBase64` 跨 IPC 传二进制。 */
-export type RemoteProjectReadResult = { ok: true; contentBase64: string; bytes: number; mtimeMs: number } | { ok: false; code: string };
+export type RemoteProjectReadResult = Op<{ contentBase64: string; bytes: number; mtimeMs: number }>;
 
 /**
  * 下载结果。
@@ -197,7 +230,8 @@ export type RemoteProjectReadResult = { ok: true; contentBase64: string; bytes: 
  * `canceled` 是用户动作而不是失败：界面不该为「点了取消」弹错误。
  * `path` 只在成功时出现，是本机绝对路径（远端路径不进这个结构）。
  */
-export type RemoteProjectDownloadResult = { ok: true; path: string; bytes: number } | { ok: false; code: string; canceled?: true };
+/** 下载：`canceled` 是用户的动作而不是失败——把它放在成功载荷里，失败分支就只剩稳定码。 */
+export type RemoteProjectDownloadResult = Op<{ canceled: true } | { canceled?: false; path: string; bytes: number }>;
 
 /**
  * 上传结果。
@@ -205,7 +239,7 @@ export type RemoteProjectDownloadResult = { ok: true; path: string; bytes: numbe
  * `uploaded` 只列真正写到远端的文件名（不含远端路径），`failed` 逐项说明哪个没传上去、为什么——
  * 多选上传里一个失败不该让整批结果变成一个笼统的布尔值。
  */
-export type RemoteProjectUploadResult = { ok: true; uploaded: Array<{ name: string; bytes: number }>; failed: Array<{ name: string; code: string }> } | { ok: false; code: string; canceled?: true };
+export type RemoteProjectUploadResult = Op<{ canceled: true } | { canceled?: false; uploaded: Array<{ name: string; bytes: number }>; failed: Array<{ name: string; code: string }> }>;
 
 /** 一条文件名匹配；`path` 是**相对项目根**的 POSIX 路径，渲染层不得当成本机路径。 */
 export type RemoteProjectSearchEntry = { path: string; name: string; kind: RemoteWorkspacePathKind; bytes?: number };
@@ -216,7 +250,7 @@ export type RemoteProjectSearchEntry = { path: string; name: string; kind: Remot
  * `truncated` 必须如实呈现：它表示遍历在某一项上限处收束（匹配数 / 已扫描条目 / 深度 / 单目录条目），
  * 因此界面可以说「结果已截断」，而不是把一屏结果伪装成完整答案。
  */
-export type RemoteProjectSearchResult = { ok: true; entries: RemoteProjectSearchEntry[]; scanned: number; truncated: boolean } | { ok: false; code: string };
+export type RemoteProjectSearchResult = Op<{ entries: RemoteProjectSearchEntry[]; scanned: number; truncated: boolean }>;
 
 /**
  * 一条远端会话文件（Phase 3 第三段，只读发现）。
@@ -239,9 +273,43 @@ export type RemoteSessionEntry = {
  * 刻意是项目级而不是主机级：漂移属于某一个项目的持久路径，若把它升级成主机级 needs-attention，
  * 一个目录被挪动就会阻断同主机上所有其他项目的读取。`needs-attention` 时 `code` 是稳定的失败码。
  */
-export type RemoteProjectRootStatusResult = { ok: true; status: "ok" | "needs-attention"; code?: string } | { ok: false; code: string };
+export type RemoteProjectRootStatusResult = Op<{
+	status: "ok" | "needs-attention";
+	code?: string;
+	/**
+	 * 最近一次 helper 握手声明的能力（只读诊断用）：渲染层据此判断远端内容搜索等功能是否可用。
+	 * 旧 helper 不声明或连接尚未建立时缺席——缺席表示「未知/不支持」，一律走能力回退，不猜。
+	 */
+	helperCapabilities?: readonly string[];
+}>;
 
-export type RemoteSessionScanResult = { ok: true; entries: RemoteSessionEntry[] } | { ok: false; code: string };
+/**
+ * 一次事实失效的范围（目录/Git 共用）。路径是**项目根相对**路径；`status` 的 `repoPath` 也是项目相对。
+ *
+ * 这是跨 IPC 推送的载荷，所以放在契约层：主进程只标脏，读仍由活跃消费者发起。
+ */
+export type RemoteProjectFactsScope =
+	| { kind: "dir"; path: string }
+	| { kind: "repos" }
+	| { kind: "status"; repoPath: string }
+	/**
+	 * 整棵树的事实失效（Git 写成功后使用）：子树条目可能整块变化，但不是「根目录事件」——根事件只重读根层。
+	 * 渲染层收到后重读根与全部已加载目录，保留展开集与 currentDir；不用于普通文件写。
+	 */
+	| { kind: "tree" };
+
+/**
+ * 事实变化通知：至少携带 projectId、generation 与被标脏的 scopes。
+ *
+ * `generation` 是连接代（稳定 helper 身份）；渲染层跨代一律丢弃缓存。空串表示主进程当时不持有
+ * 稳定身份（例如断连后），渲染层仍以“同一个项目有一次失效”为准。
+ */
+export type RemoteProjectFactsChange = { projectId: string; generation: string; scopes: RemoteProjectFactsScope[] };
+
+export type RemoteSessionScanValue = { entries: RemoteSessionEntry[] };
+export type RemoteSessionScanResult = ({ ok: true } & RemoteSessionScanValue) | { ok: false; code: string };
+/** IPC 结果面（T9）：scanner 内部仍用扁平结果（受保护测试），这里只做边界封装。 */
+export type RemoteSessionScanIpcResult = Op<RemoteSessionScanValue>;
 
 /**
  * 一条远端会话的**按需**标题（Phase 3 第四批；I1 把 origin 拆成三档）。
@@ -260,6 +328,10 @@ export type RemoteSessionScanResult = { ok: true; entries: RemoteSessionEntry[] 
  * 但调用方/界面必须能知道「这次没有看到文件尾」——权威名可能就藏在尾窗口里。只在真的降级时出现，
  * 缺省（undefined）即正常；旧读取方忽略这个字段也不会把它当错误。
  */
-export type RemoteSessionTitleResult = { ok: true; title: string; titleOrigin: "authoritative" | "inferred" | "fallback"; tailDegraded?: boolean } | { ok: false; code: string };
+export type RemoteSessionTitleValue = { title: string; titleOrigin: "authoritative" | "inferred" | "fallback"; tailDegraded?: boolean };
+export type RemoteSessionTitleResult = ({ ok: true } & RemoteSessionTitleValue) | { ok: false; code: string };
+export type RemoteSessionTitleIpcResult = Op<RemoteSessionTitleValue>;
 
-export type RemoteSessionRegisterResult = { ok: true; sessionId: string; created: boolean; remoteSessionId: string; remotePath: string } | { ok: false; code: string };
+export type RemoteSessionRegisterValue = { sessionId: string; created: boolean; remoteSessionId: string; remotePath: string };
+export type RemoteSessionRegisterResult = ({ ok: true } & RemoteSessionRegisterValue) | { ok: false; code: string };
+export type RemoteSessionRegisterIpcResult = Op<RemoteSessionRegisterValue>;

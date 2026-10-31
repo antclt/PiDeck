@@ -202,6 +202,67 @@ test("a refresh drops history, refs and detail facts without reloading them", as
 	assert.equal(calls.length, 3, "the refresh itself reloads nothing");
 });
 
+test("a silent status refresh updates facts without dropping diff, history, refs or the selection", async () => {
+	// P0-3：5 秒轮询必须走 refreshStatus，而不是 refresh——后者会整体替换 state（loading=true）
+	// 并清掉 history/refs/diff 与选中行，等于每隔 5 秒把用户正在看的东西收走一次。
+	let branch = "main";
+	const f = fixture({
+		remoteSnapshot: async () => ({ ok: true, snapshot: { ...snapshot, branch } }),
+		remoteLog: async () => ({ ok: true, page: { commits: [historyRow(oid("1"), "first")], hasMore: false } }),
+		remoteRefs: async () => ({ ok: true, refs: { head: oid("1"), branch: "main", refs: [] } }),
+		remoteCommitDetail: async (_id, value) => ({ ok: true, detail: detailFor(value) }),
+	});
+	await f.reads.refresh();
+	await f.reads.loadHistory();
+	await f.reads.loadRefs();
+	await f.reads.openCommitDetail(oid("1"));
+	await f.reads.openDiff("index", target);
+	const before = f.current();
+
+	branch = "feature";
+	await f.reads.refreshStatus();
+	const after = f.current();
+	assert.equal(after.snapshot.branch, "feature", "external changes are picked up");
+	assert.equal(after.loading, false, "a silent tick never flashes loading");
+	assert.equal(after.diffLoading, false);
+	assert.deepEqual(plain(after.history), plain(before.history), "history rows stay");
+	assert.deepEqual(plain(after.refs), plain(before.refs), "refs stay");
+	assert.equal(after.detailOid, oid("1"), "the selected commit stays selected");
+	assert.deepEqual(plain(after.diff), plain(before.diff), "an open diff stays open");
+});
+
+test("a connection invalidation pauses the silent status refresh until a successful explicit refresh", async () => {
+	// 语义来源：显式重连不得自己重放一次读（e2e 断言「重连后 workingTree 仍为 0，用户点刷新才出现」）。
+	// 暂停位由 invalidateConnection 置上；只有一次成功快照读的 refresh() 才解除。
+	let result = { ok: true, snapshot };
+	let reads = 0;
+	const f = fixture({
+		remoteSnapshot: async () => {
+			reads += 1;
+			return result;
+		},
+	});
+	await f.reads.refresh();
+	assert.equal(reads, 1);
+
+	f.reads.invalidateConnection();
+	await f.reads.refreshStatus();
+	assert.equal(reads, 1, "被作废的连接不得自己读回来");
+
+	result = { ok: false, code: "SSH_HOST_DISCONNECTED" };
+	await f.reads.refresh();
+	assert.equal(reads, 2, "显式刷新只读它自己那一次");
+	await f.reads.refreshStatus();
+	assert.equal(reads, 2, "失败的显式刷新不解除暂停");
+
+	result = { ok: true, snapshot: { ...snapshot, branch: "feature" } };
+	await f.reads.refresh();
+	assert.equal(reads, 3);
+	await f.reads.refreshStatus();
+	assert.equal(reads, 4, "成功的显式刷新之后静默轮询恢复");
+	assert.equal(f.current().snapshot.branch, "feature");
+});
+
 test("commit detail answers the last click, and an answer for another commit is refused", async () => {
 	const f = fixture({ remoteCommitDetail: async (id, value) => ({ ok: true, detail: detailFor(value) }) });
 	await Promise.all([f.reads.openCommitDetail(oid("a")), f.reads.openCommitDetail(oid("b"))]);

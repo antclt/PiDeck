@@ -7,6 +7,27 @@ import { SshHostPinStore } from "./SshHostPinStore";
 export type RemoteHostCatalogView = { snapshot: RemoteHostStoreState; findings: readonly HostRepairFinding[] };
 
 /**
+ * 移除连接专用：打开带引用登记表的可写 store，并保留 pin store 到调用方收尾。
+ *
+ * 与只读目录共用同一组 store 选项（pin + 引用扫描 + 退役清理），否则 `retire()` 会因为
+ * 无法证明「没有项目/会话仍指向这台主机」而拒绝——那正是移除必须过的门。
+ */
+export async function openRemoteHostStoreForRetire(userDataDir: string, options: { readonly onHostRetired?: HostRetiredHook } = {}): Promise<{ store: RemoteHostStore; dispose: () => void }> {
+	const pinStore = new SshHostPinStore(userDataDir);
+	try {
+		const store = await RemoteHostStore.open(userDataDir, {
+			pinStore,
+			referenceRegistry: createRemoteHostReferenceRegistry(join(userDataDir, "session-catalog.json"), join(userDataDir, "projects.json")),
+			...(options.onHostRetired === undefined ? {} : { onHostRetired: options.onHostRetired }),
+		});
+		return { store, dispose: () => pinStore.dispose() };
+	} catch (error) {
+		pinStore.dispose();
+		throw error;
+	}
+}
+
+/**
  * Read the local catalog and repair evidence without enrolling, deleting or reconnecting a host.
  *
  * `onHostRetired` (optional) is forwarded to the host store's retire-time cleanup — the same entry

@@ -4,7 +4,9 @@ import { dirname, isAbsolute, join } from "node:path";
 import { parseSshResolvedRoute } from "./SshRouteDigest";
 
 export type SshCommandResult = { exitCode: number; stdout: string; stderr?: string };
-export type SshCommandRunner = (executable: string, args: string[]) => Promise<SshCommandResult>;
+/** Per-invocation options. `signal` aborts the child process (used to cancel a running probe/upload attempt). */
+export type SshCommandOptions = { signal?: AbortSignal };
+export type SshCommandRunner = (executable: string, args: string[], options?: SshCommandOptions) => Promise<SshCommandResult>;
 
 /**
  * Main-owned OpenSSH client binding: absolute ssh/scp binaries from one installation plus the
@@ -113,7 +115,8 @@ function resolveWindowsSshPath(options: SshClientRuntimeOptions, env: NodeJS.Pro
 	throw new Error("SSH_CLIENT_MISSING");
 }
 
-function mapProcessError(error: { code?: unknown; killed?: boolean } | null): Error | null {
+function mapProcessError(error: { code?: unknown; killed?: boolean; name?: unknown } | null): Error | null {
+	if (error?.name === "AbortError" || error?.code === "ABORT_ERR") return new Error("SSH_HOST_COMMAND_CANCELLED");
 	if (error?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") return new Error("SSH_HOST_COMMAND_OUTPUT_TOO_LARGE");
 	if (error?.code === "ETIMEDOUT" || error?.killed) return new Error("SSH_HOST_COMMAND_TIMEOUT");
 	if (error?.code === "ENOENT" || error?.code === "EACCES") return new Error("SSH_CLIENT_UNAVAILABLE");
@@ -121,11 +124,13 @@ function mapProcessError(error: { code?: unknown; killed?: boolean } | null): Er
 }
 
 function createRunner(executable: string, env: NodeJS.ProcessEnv, timeoutMs: number): SshCommandRunner {
-	return (target, args) => {
+	return (target, args, options) => {
 		if (target !== executable) throw new Error("SSH_CLIENT_EXECUTABLE_MISMATCH");
 		if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string")) throw new Error("SSH_CLIENT_ARGUMENT_INVALID");
+		const signal = options?.signal;
+		if (signal?.aborted === true) throw new Error("SSH_HOST_COMMAND_CANCELLED");
 		return new Promise((resolve, reject) => {
-			execFile(executable, args, { encoding: "utf8", timeout: timeoutMs, maxBuffer: 256 * 1024, windowsHide: true, shell: false, env }, (error, stdout, stderr) => {
+			execFile(executable, args, { encoding: "utf8", timeout: timeoutMs, maxBuffer: 256 * 1024, windowsHide: true, shell: false, env, ...(signal === undefined ? {} : { signal }) }, (error, stdout, stderr) => {
 				const mapped = mapProcessError(error);
 				if (mapped) return reject(mapped);
 				resolve({ exitCode: error ? (typeof error.code === "number" ? error.code : -1) : 0, stdout, stderr });
@@ -257,10 +262,7 @@ function errorCode(error: unknown): string | undefined {
 	return typeof message === "string" && /^[A-Z][A-Z0-9_]{2,63}$/.test(message) ? message : undefined;
 }
 
-/** Probe `ssh -V` (OpenSSH prints its banner on stderr) through the bound runner; returns a redacted version. */
-export async function runSshClientSelfCheck(client: SshClientRuntime, options: { run?: SshCommandRunner } = {}): Promise<{ version: string }> {
-	if (!client || typeof client.sshPath !== "string" || typeof client.run !== "function") throw new Error("SSH_CLIENT_CONTEXT_REQUIRED");
-	const run = options.run ?? client.run;
+async function probeSshClientVersion(client: SshClientRuntime, run: SshCommandRunner): Promise<{ version: string }> {
 	const result = await run(client.sshPath, ["-V"]);
 	const banner = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
 	if (result.exitCode !== 0 || !banner) throw new Error("SSH_CLIENT_VERSION_UNSUPPORTED");
@@ -268,4 +270,51 @@ export async function runSshClientSelfCheck(client: SshClientRuntime, options: {
 	if (!match) throw new Error("SSH_CLIENT_VERSION_UNSUPPORTED");
 	if (Number(match[1]) < MIN_OPENSSH_MAJOR) throw new Error("SSH_CLIENT_VERSION_UNSUPPORTED");
 	return { version: match[0] };
+}
+
+/**
+ * `ssh -V` reports the installation, not the connection: one client binding can only ever answer with the
+ * same banner. A single connect used to spawn it once per pinned invocation (five times per cold connect),
+ * so the promise is cached per client object. Concurrent callers share one process; a failed probe is
+ * dropped instead of poisoning later retries.
+ */
+const selfCheckCache = new WeakMap<SshClientRuntime, Promise<{ version: string }>>();
+
+/**
+ * Bind a client to extra environment variables (e.g. the askpass bridge).
+ *
+ * The env allowlist is the reason this exists: the sanitized environment is shared by every ssh process, and
+ * a password attempt needs `SSH_ASKPASS`/`SSH_ASKPASS_REQUIRE` that no other attempt may inherit. A per-host
+ * view keeps those two variables scoped to the host that actually holds an in-memory secret.
+ */
+export function withClientEnv(client: SshClientRuntime, extra: Readonly<Record<string, string>>): SshClientRuntime {
+	if (!client || typeof client.run !== "function" || typeof client.sshPath !== "string") throw new Error("SSH_CLIENT_CONTEXT_REQUIRED");
+	const env: NodeJS.ProcessEnv = { ...client.env };
+	for (const [key, value] of Object.entries(extra)) {
+		// Only plain variable names can be added; a NUL would truncate inside the child.
+		if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || typeof value !== "string" || value.length === 0 || value.includes("\0")) throw new Error("SSH_CLIENT_ARGUMENT_INVALID");
+		env[key] = value;
+	}
+	return Object.freeze({
+		sshPath: client.sshPath,
+		scpPath: client.scpPath,
+		env: Object.freeze(env),
+		run: createRunner(client.sshPath, env, MAX_COMMAND_TIMEOUT_MS),
+		runScp: createRunner(client.scpPath, env, MAX_COMMAND_TIMEOUT_MS),
+	});
+}
+
+/** Probe `ssh -V` (OpenSSH prints its banner on stderr) through the bound runner; returns a redacted version. */
+export async function runSshClientSelfCheck(client: SshClientRuntime, options: { run?: SshCommandRunner } = {}): Promise<{ version: string }> {
+	if (!client || typeof client.sshPath !== "string" || typeof client.run !== "function") throw new Error("SSH_CLIENT_CONTEXT_REQUIRED");
+	// An injected runner is a test seam: caching would hide the calls a test is counting.
+	if (options.run !== undefined) return probeSshClientVersion(client, options.run);
+	const cached = selfCheckCache.get(client);
+	if (cached !== undefined) return { ...(await cached) };
+	const pending = probeSshClientVersion(client, client.run).catch((error: unknown) => {
+		selfCheckCache.delete(client);
+		throw error;
+	});
+	selfCheckCache.set(client, pending);
+	return { ...(await pending) };
 }

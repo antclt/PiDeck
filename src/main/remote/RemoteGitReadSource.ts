@@ -51,6 +51,8 @@ export const REMOTE_GIT_READ_SOURCE = String.raw`import{createGitWriteProgram,cr
 	const cp = process.getBuiltinModule("node:child_process");
 	const crypto = process.getBuiltinModule("node:crypto");
 	const MAX_STATUS = 1048576, MAX_RESOURCES = 4096, MAX_TEXT = 262144, MAX_STDERR = 65536;
+	/* check-ignore output for 64 relative paths: one NUL-terminated entry each, capped well above any legal input. */
+	const MAX_CHECK_IGNORE = 262144;
 	const MAX_INDEX = 16777216, MAX_METADATA = 20000, MAX_DEPTH = 32, MAX_PATH = 4096;
 	const MAX_REPOS = 50, MAX_REPO_DEPTH = 4, MAX_REPO_VISITED = 512;
 	const scopes = new Set();
@@ -68,7 +70,7 @@ export const REMOTE_GIT_READ_SOURCE = String.raw`import{createGitWriteProgram,cr
 		return value;
 	}
 	/* Reads and managed writes may name a repository other than the project root; git.init and git.repos stay root-only. */
-	const READ_REPO = new Set(["git.status", "git.workspaceDiff", "git.log", "git.commitDetail", "git.refs", "git.refFileDiff", "git.compare", "git.recoveryList", "git.syncFacts"]);
+	const READ_REPO = new Set(["git.status", "git.workspaceDiff", "git.log", "git.commitDetail", "git.refs", "git.refFileDiff", "git.compare", "git.recoveryList", "git.syncFacts", "git.checkIgnore"]);
 	/* Every write program already runs entirely from ctx.cwd, so the same anchored scope can carry a write to a nested repository. */
 	const WRITE_REPO = new Set(["git.stage", "git.unstage", "git.commit", "git.createBranch", "git.switchBranch", "git.discard", "git.recoveryRestore", "git.recoveryDrop", "git.fetch", "git.push", "git.pull"]);
 	/* The optional scope: absent or empty is the root; any other shape is refused before a walk, a link check or a Git child. */
@@ -239,9 +241,13 @@ export const REMOTE_GIT_READ_SOURCE = String.raw`import{createGitWriteProgram,cr
 			return metadata(stats) + ":" + crypto.createHash("sha256").update(bytes).digest("hex");
 		} catch (error) { if (error.message === "PATH_NOT_FOUND" || error.code === "ENOENT") return null; throw error; }
 	}
-	function execute(ctx, args, limit, allowed) {
+	function execute(ctx, args, limit, allowed, keepPathspecMagic) {
 		ctx.check();
-		const prefix = ["--no-pager", "--no-optional-locks", "--literal-pathspecs", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false", "-c", "color.ui=false"];
+		/* check-ignore refuses --literal-pathspecs outright (git 2.34: "magic pathspec prefix not supported"),
+		   so that one command keeps the default pathspec parsing. Its inputs cannot become magic: the path rule
+		   below refuses a leading "-" and the caller refuses a leading ":", which is the only way a pathspec
+		   becomes a revision or a magic expression. */
+		const prefix = keepPathspecMagic ? ["--no-pager", "--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false", "-c", "color.ui=false"] : ["--no-pager", "--no-optional-locks", "--literal-pathspecs", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false", "-c", "color.ui=false"];
 		return new Promise(function (resolve, reject) {
 			let child;
 			try { child = cp.spawn(ctx.executable, prefix.concat(args), { cwd: ctx.cwd, env: ctx.env, shell: false, detached: true, stdio: ["ignore", "pipe", "pipe"] }); } catch { reject(failure("GIT_COMMAND_FAILED")); return; }
@@ -286,6 +292,23 @@ export const REMOTE_GIT_READ_SOURCE = String.raw`import{createGitWriteProgram,cr
 	async function rawStatus(ctx) {
 		const result = await execute(ctx, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", "."], MAX_STATUS);
 		return { bytes: result.bytes, resources: resources(result.bytes) };
+	}
+	/*
+	 * git check-ignore --no-index -- <paths>: ask Git, never reimplement its matching.
+	 *
+	 * Three deliberate choices:
+	 * - --no-index: a path already in the index is still judged against the patterns, so "ignored by rule"
+	 *   stays a fact even when git status reports the file as tracked;
+	 * - argv instead of stdin: the frame protocol owns one direction (stdout) and gains no new stream;
+	 * - exit 1 is a NORMAL answer (nothing matched), so only other exit codes are failures.
+	 * Output is one ignored path per line. -z is unusable here: git 2.34 refuses it without --stdin, and this
+	 * worker deliberately keeps a single direction (a path carrying a newline is already refused by the path
+	 * rule, so line separation is unambiguous).
+	 */
+	async function checkIgnore(ctx, params) {
+		const result = await execute(ctx, ["check-ignore", "--no-index", "--"].concat(params.paths), MAX_CHECK_IGNORE, [1], true);
+		const ignored = new Set(text(result.bytes).split("\n").filter(function (line) { return line !== ""; }));
+		return { ignored: params.paths.map(function (path) { return ignored.has(path); }) };
 	}
 	async function validateConfiguration(ctx) {
 		const version = text((await execute(ctx, ["--version"], 1024)).bytes);
@@ -537,6 +560,7 @@ export const REMOTE_GIT_READ_SOURCE = String.raw`import{createGitWriteProgram,cr
 		if (params.method === "git.refs") return unchangedRead(ctx, first, firstHead, refs(ctx));
 		if (params.method === "git.refFileDiff") return unchangedRead(ctx, first, firstHead, refFileDiff(ctx, params));
 		if (params.method === "git.compare") return unchangedRead(ctx, first, firstHead, compare(ctx, params));
+		if (params.method === "git.checkIgnore") return unchangedRead(ctx, first, firstHead, checkIgnore(ctx, params));
 		const status = await rawStatus(ctx);
 		return unchangedRead(ctx, first, firstHead, params.method === "git.status" ? { status: status.bytes.toString("base64"), head: firstHead.head, branch: firstHead.branch, revision: writer.fingerprint(ctx, first, firstHead, status) } : readDiff(ctx, params, status, firstHead));
 	}
@@ -564,6 +588,22 @@ export const REMOTE_GIT_READ_SOURCE = String.raw`import{createGitWriteProgram,cr
 		}
 		if (method === "git.commitDetail") { if (keys.length !== 1 || !keys.includes("oid")) throw failure("GIT_RESULT_INVALID"); return { method: method, oid: readHash(params.oid) }; }
 		if (method === "git.refs") { if (keys.length) throw failure("GIT_RESULT_INVALID"); return { method: method }; }
+		if (method === "git.checkIgnore") {
+			/* Position-for-position: the answer is the same length and order as the request, so exactly one
+			   field is allowed here and every entry is cleaned by the same relative-path rule as any other path. */
+			if (keys.length !== 1 || !keys.includes("paths")) throw failure("GIT_RESULT_INVALID");
+			const paths = params.paths;
+			if (!Array.isArray(paths) || paths.length === 0 || paths.length > 64) throw failure("GIT_RESULT_INVALID");
+			const read = [];
+			for (let index = 0; index < paths.length; index += 1) {
+				const cleaned = relative(paths[index]);
+				/* A leading colon is a pathspec magic/revision expression; only check-ignore keeps magic on, so it is
+				   refused here rather than trusted to stay literal. */
+				if (cleaned.charAt(0) === ":") throw failure("PATH_OUTSIDE_ROOT");
+				read.push(cleaned);
+			}
+			return { method: method, paths: read };
+		}
 		if (method === "git.refFileDiff") {
 			if (keys.length !== 3 || !keys.includes("base") || !keys.includes("head") || !keys.includes("path")) throw failure("GIT_RESULT_INVALID");
 			return { method: method, base: params.base === null ? null : readHash(params.base), head: readHash(params.head), path: relative(params.path) };

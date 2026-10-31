@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { bootstrapTargetLayout, type RemoteBootstrapTarget } from "./RemoteBootstrapContract";
 import { REMOTE_BOOTSTRAP_BUNDLE_DIR_NAME, type RemoteBundleManifest } from "./RemoteHelperContract";
-import { runBootstrapFinalize, type BootstrapSession } from "./RemoteBootstrapTransfer";
+import { runBootstrapFinalize, runBootstrapVerify, type BootstrapSession } from "./RemoteBootstrapTransfer";
 import { buildBundleManifest, withPrivateBundleUploadPlan, type BundleUploadInput } from "./RemoteBootstrapUpload";
 import { REMOTE_HELPER_ARTIFACTS, REMOTE_HELPER_ENTRY_FILE_NAME } from "./RemoteHelperEntry";
 import { isRemoteRunnerAbsolutePath, REMOTE_RUNNER_CODE_INPUT_INVALID } from "./RemoteRunnerContract";
@@ -11,12 +11,21 @@ import { REMOTE_RUNNER_ENTRY_FILE_NAME, REMOTE_RUNNER_ENTRY_SHA256, REMOTE_RUNNE
 import { REMOTE_TERMINAL_RUNNER_ENTRY_FILE_NAME } from "./RemoteTerminalRunnerEntry";
 import type { SshProcessExit, SshProcessLauncher } from "./RemoteHostConnectionTypes";
 
+/** Cancellation of one deployment attempt: the same stable code the bootstrap session uses. */
+export const REMOTE_BOOTSTRAP_ABORTED = "BOOTSTRAP_ABORTED";
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+	if (signal?.aborted === true) throw new Error(REMOTE_BOOTSTRAP_ABORTED);
+}
+
 /** One ready staging entry and one freshly preflighted scp invocation. The caller owns the entry session. */
 export type PreparedBundleDeployment = BundleUploadInput & {
 	hostId: string;
 	generation: number;
 	launcher: SshProcessLauncher;
 	session: BootstrapSession;
+	/** Cancels the upload/finalize wait; the entry session itself is stopped by its owner. */
+	signal?: AbortSignal;
 };
 
 /**
@@ -27,7 +36,7 @@ export type PreparedBundleDeployment = BundleUploadInput & {
  * (`./bundles/<bundleSha256>`) — never absolute, so a caller cannot mistake it for a deploy root. Both are
  * inputs to `resolveHelperEntryPath`/`deployedRunnerPath`, which is where they turn into a remote path.
  */
-export type PreparedBundleResult = { bundleSha256: string; deployRoot: string; active: string };
+export type PreparedBundleResult = { bundleSha256: string; deployRoot: string; active: string /** True when the frozen entry re-proved the already active bundle and nothing was transferred. */; reused?: boolean };
 
 /**
  * Compute the audited bundle identity before starting the bootstrap entry, so ready can be verified. Both
@@ -95,19 +104,30 @@ export function deployedTerminalRunnerPath(input: { deployRoot: string; bundleSh
 async function awaitUploadExit(launcher: SshProcessLauncher, input: PreparedBundleDeployment, invocation: BundleUploadInput["connection"]): Promise<SshProcessExit> {
 	const handle = await launcher.start({ hostId: input.hostId, generation: input.generation, invocation, timeoutMs: SCP_TIMEOUT_MS, maxOutputBytes: 64 * 1024 });
 	let observed = false;
+	let onAbort: (() => void) | undefined;
 	try {
 		return await new Promise<SshProcessExit>((resolve) => {
 			let unsubscribe: (() => void) | undefined;
+			onAbort = (): void => {
+				// Terminate only this upload's own process; the exit report then settles the wait below.
+				void handle.stop("abort").catch(() => undefined);
+			};
 			const finish = (exit: SshProcessExit): void => {
 				if (observed) return;
 				observed = true;
+				input.signal?.removeEventListener("abort", onAbort as () => void);
 				unsubscribe?.();
 				resolve(exit);
 			};
+			// Register first, then read the signal: an abort that landed while start() was spawning must
+			// still terminate this process and never leave the wait suspended.
+			input.signal?.addEventListener("abort", onAbort, { once: true });
+			if (input.signal?.aborted === true) onAbort();
 			unsubscribe = handle.onExit(finish);
 			if (observed) unsubscribe();
 		});
 	} finally {
+		if (onAbort !== undefined) input.signal?.removeEventListener("abort", onAbort);
 		if (!observed) await handle.stop("abort").catch(() => undefined);
 	}
 }
@@ -118,13 +138,31 @@ export async function deployPreparedBundle(input: PreparedBundleDeployment): Pro
 		throw new Error("BOOTSTRAP_INPUT_INVALID");
 	let finalized = false;
 	try {
+		throwIfAborted(input.signal);
 		return await withPrivateBundleUploadPlan(input, async (plan) => {
+			throwIfAborted(input.signal);
+			// Reuse first (F3): the frozen entry re-proves the already active content-addressed directory
+			// against this manifest. A verified answer means no upload at all; an installed but different
+			// directory is a conflict and must never be silently replaced or "repaired" by a fresh upload.
+			const verdict = await runBootstrapVerify(input.session, plan.manifest, { executableNames: plan.executableNames, target: input.target, timeoutMs: FINALIZE_TIMEOUT_MS, ...(input.signal === undefined ? {} : { signal: input.signal }) });
+			throwIfAborted(input.signal);
+			if (verdict.status === "verified") {
+				finalized = true;
+				return { bundleSha256: plan.manifest.bundleSha256, deployRoot: input.ready.deployRoot, active: verdict.active, reused: true };
+			}
+			if (verdict.status === "conflict") throw new Error("BOOTSTRAP_ACTIVE_CONFLICT");
+			if (verdict.status === "timeout") throw new Error("BOOTSTRAP_FINALIZE_UNCONFIRMED");
+			if (verdict.status === "error") throw new Error(verdict.code === "BOOTSTRAP_ACTIVE_CONFLICT" || verdict.code === "BOOTSTRAP_FINALIZE_UNCONFIRMED" ? verdict.code : "BOOTSTRAP_REMOTE_REJECTED");
+			if (verdict.status !== "absent") throw new Error(REMOTE_BOOTSTRAP_ABORTED);
 			const invocation = { ...input.connection, executable: plan.invocation.executable, args: plan.invocation.args, env: plan.invocation.env, cwd: plan.invocation.cwd };
 			const exit = await awaitUploadExit(input.launcher, input, invocation);
+			// A cancel during the transfer terminates the upload process; no finalize may follow it.
+			throwIfAborted(input.signal);
 			if (exit.kind !== "exited" || exit.code !== 0) throw new Error("BOOTSTRAP_UPLOAD_FAILED");
-			const outcome = await runBootstrapFinalize(input.session, plan.manifest, { executableNames: plan.executableNames, target: input.target, timeoutMs: FINALIZE_TIMEOUT_MS });
+			throwIfAborted(input.signal);
+			const outcome = await runBootstrapFinalize(input.session, plan.manifest, { executableNames: plan.executableNames, target: input.target, timeoutMs: FINALIZE_TIMEOUT_MS, ...(input.signal === undefined ? {} : { signal: input.signal }) });
 			if (outcome.status === "timeout" || (outcome.status === "error" && outcome.code === "BOOTSTRAP_FINALIZE_UNCONFIRMED")) throw new Error("BOOTSTRAP_FINALIZE_UNCONFIRMED");
-			if (outcome.status !== "finalized") throw new Error(outcome.status === "aborted" ? "BOOTSTRAP_ABORTED" : "BOOTSTRAP_REMOTE_REJECTED");
+			if (outcome.status !== "finalized") throw new Error(outcome.status === "aborted" ? REMOTE_BOOTSTRAP_ABORTED : "BOOTSTRAP_REMOTE_REJECTED");
 			finalized = true;
 			return { bundleSha256: plan.manifest.bundleSha256, deployRoot: input.ready.deployRoot, active: outcome.active };
 		});

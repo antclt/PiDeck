@@ -386,6 +386,9 @@ import { GitRefsWatcher } from "./git/GitRefsWatcher";
 import { WorktreeService } from "./git/WorktreeService";
 import { ConfigManager } from "./config/ConfigManager";
 import { ConfigBackupManager } from "./config/ConfigBackupManager";
+import { createPiResourceManagerPool, type PiResourceManagerPool } from "./config/PiResourceManagerPool";
+import { createPiResourceManagerFactories } from "./config/piResourceFactories";
+import { createPiResourceTargetResolver } from "./config/PiResourceTargetResolver";
 import { TokendanceCatalogStore } from "./config/tokendanceCatalog";
 import { installTokendanceProvider } from "./config/tokendanceInstaller";
 import { TokendanceAuthStore } from "./config/tokendanceAuth";
@@ -422,7 +425,12 @@ import { ResourceImportManager } from "./resourceImport/ResourceImportManager";
 import { toWslLinuxPath, toWindowsHostPath } from "./wsl/WslPaths";
 import { registerProjectsIpc } from "./ipc/projectsIpc";
 import { registerRemoteHostIpc } from "./ipc/remoteHostIpc";
+import { registerWslHostIpc } from "./ipc/wslHostIpc";
+import { createWslHostReferenceRegistry } from "./wsl/WslHostReferences";
+import { createWslHostStore } from "./wsl/WslHostStore";
+import { resolveProjectWslIdentity } from "./wsl/WslProjectEnvironment";
 import { registerRemoteProjectIpc } from "./ipc/remoteProjectIpc";
+import { createRemoteFactsHub } from "./remote/RemoteFactsNotifications";
 import { registerRemoteProjectFileIpc } from "./ipc/remoteProjectFileIpc";
 import { registerRemoteProjectTransferIpc } from "./ipc/remoteProjectTransferIpc";
 import { registerRemoteProjectEntryIpc } from "./ipc/remoteProjectEntryIpc";
@@ -440,7 +448,7 @@ import { createRemoteSessionDelete } from "./remote/RemoteSessionDelete";
 import { createRemotePiConfigBackend } from "./config/RemotePiConfigBackend";
 import { createRemoteSessionHistoryWriter, type RemoteSessionMessageMutationPort } from "./remote/RemoteSessionHistoryWriter";
 import { exportRemoteSessionHtml, REMOTE_SESSION_EXPORT_LIMITS } from "./remote/RemoteSessionHtmlExport";
-import { createRemoteSessionScanner } from "./sessions/RemoteSessionScanner";
+import { createRemoteSessionScanner, type RemoteSessionCommandTransportPort } from "./sessions/RemoteSessionScanner";
 import type { SshSessionLocator } from "../shared/projectLocation";
 import { matchRemoteSessionProject } from "./remote/remoteSessionProjectMatch";
 import { openRemoteHostCatalogView } from "./remote/RemoteHostCatalogView";
@@ -672,6 +680,14 @@ let sessionRuntimeCoordinator: SessionRuntimeCoordinator;
  */
 let remoteSessionMessageMutation: RemoteSessionMessageMutationPort | undefined;
 /**
+ * 远端一次性短命令传输（R1a）：扫描 / 会话根解析 / 登记用它替代 helper 会话，不再切 host 的活动 root。
+ *
+ * 为什么是模块级 let：它由 `registerIpc()` 与 pinned SSH 通道一起装配（那里才知道已验过的客户端），
+ * 而 `AgentManager` 的远端运行时端口比 `registerIpc()` 更早构造 — 与 `remoteProjectTrustService` 同理，
+ * 用解析器（`resolveRemoteTransport`）在**真正登记会话时**才求值，才不会捕获一个当时还不存在的对象。
+ */
+let remoteCommandTransport: RemoteSessionCommandTransportPort | undefined;
+/**
  * 远端项目 trust 决策服务（P4.4b）：决策表读写 + 主机 pin 事实 → 四态。
  *
  * 为什么是模块级 let：它同时在两处被拿去用——`registerIpc()`（trust 域 IPC 与主机退役清理钩子）和
@@ -753,6 +769,8 @@ let sessionStoreService: SessionStoreService | null = null;
 let xuePromptDbStore: XuePromptDbStore | null = null;
 let skillManager: SkillManager;
 let extensionManager: ExtensionManager;
+/** 资源作用域池（W1）：技能/提示词/扩展按 PiResourceTarget 路由；本机复用现有四个单例。 */
+let piResourcePool: PiResourceManagerPool | undefined;
 /** 后台更新检查服务（启动延迟 + 2h 周期，无配额方案）；null = 未初始化。 */
 let updateService: UpdateService | null = null;
 let projectResourceManager: ProjectResourceManager;
@@ -960,7 +978,7 @@ const foreignSyncDeps: DshForeignSyncDeps = {
 			dismissedPaths: projectStore.listDismissedPaths(),
 			pathExists: await defaultPathCheck(cwd),
 		}),
-	ensureProjectForCwd: (cwd) => projectStore.add(cwd, undefined, settingsStore.get().wslEnabled ? "wsl" : "windows"),
+	ensureProjectForCwd: (cwd) => projectStore.add(cwd),
 	ensureFallbackProject: () => projectStore.ensureExternalSessionsProject(mainCopy("project.externalSessions")),
 	createDraft: (input) => sessionCatalog.createDraft(input),
 	// 纠正归属时看现有标题是不是 cwd 兑底占位；有官方投影名时必须覆盖。
@@ -968,7 +986,7 @@ const foreignSyncDeps: DshForeignSyncDeps = {
 		const existing = sessionCatalog.listEntries().find((entry) => entry.dshSessionId === dshSessionId);
 		return existing ? { title: existing.title } : undefined;
 	},
-	getEnvironment: () => (settingsStore.get().wslEnabled ? "wsl" : "native"),
+	getEnvironment: () => "native",
 	// 惰性：此对象在模块顶层创建，此时 settingsStore 尚未赋值，eager mainCopy 会崩。
 	fallbackTitle: () => mainCopy("session.dshUntitled"),
 	onError: (dshSessionId, error) => {
@@ -992,13 +1010,48 @@ function notifyCatalogRefreshed(projectIds: Iterable<string>): void {
 function broadcastVisibleProjects(): void {
 	const window = mainWindow;
 	if (!window || window.isDestroyed()) return;
-	const s = settingsStore.get();
-	const visible = s.wslEnabled ? projectStore.list().filter((p) => p.kind === "chat" || p.environment === "wsl") : projectStore.list().filter((p) => p.kind === "chat" || !p.environment || p.environment === "windows");
+	const visible = projectStore.list();
 	// 这里只广播 store 清单；渲染层接到事件后会再调用 projects:list 附加实时 presence。
 	// 直接把未检测版本写进 atom 会短暂抹掉 missing 标记，使失效目录看起来又恢复正常。
 	window.webContents.send(ipcChannels.projectsChanged, visible);
 	// 项目集变化同步重建托盘菜单（最近项目区），否则增删项目后菜单滞后。
 	refreshTrayContextMenu();
+}
+
+/**
+ * 第 14 步：WSL 项目按档案 distro/user 使用独立的 SessionScanner 实例。
+ *
+ * 旧实现靠全局 `sessionScanner.configureWsl()`，同一时刻只能扫一个发行版；两个 WSL 档案
+ * 并存时会互相覆盖。每个 `(distro,user)` 一份 scanner（含各自的摘要缓存），按需解析 home；
+ * 解析失败不缓存失败结果，下次请求重试。本机项目继续用主 `sessionScanner`。
+ */
+const wslSessionScanners = new Map<string, Promise<SessionScanner>>();
+
+async function wslSessionScannerFor(identity: { distro: string; user: string }): Promise<SessionScanner> {
+	const key = `${identity.distro}\u0000${identity.user}`;
+	const existing = wslSessionScanners.get(key);
+	if (existing) return existing;
+	const pending = (async () => {
+		const { resolveWslEnvironment } = await import("./wsl/WslEnvironment");
+		const environment = await resolveWslEnvironment(identity.distro, identity.user, {
+			warn: (message: string, detail: unknown) => void appLogger?.warn("wsl", String(message), { detail }),
+		});
+		const scanner = new SessionScanner(mainCopy);
+		await scanner.configureWsl(environment);
+		return scanner;
+	})();
+	wslSessionScanners.set(key, pending);
+	pending.catch(() => {
+		if (wslSessionScanners.get(key) === pending) wslSessionScanners.delete(key);
+	});
+	return pending;
+}
+
+async function sessionScannerForProject(project: Project | undefined): Promise<SessionScanner> {
+	if (project === undefined || !isLocalProject(project) || project.environment !== "wsl") return sessionScanner;
+	const identity = resolveProjectWslIdentity(project, settingsStore.get());
+	if (identity === undefined) return sessionScanner;
+	return wslSessionScannerFor(identity);
 }
 
 /**
@@ -1248,10 +1301,12 @@ async function createAnonymousSession(input: CreateAnonymousSessionInput): Promi
 		// Config read is best-effort.
 	}
 
+	const projectWsl = resolveProjectWslIdentity(project, settingsStore.get());
 	const session = sessionCatalog.createAnonymous({
 		projectId: project.id,
 		title: input.title?.trim() || mainCopy("session.anonymousTitle", { project: project.name }),
-		environment: settingsStore.get().wslEnabled ? "wsl" : "native",
+		environment: projectWsl !== undefined ? "wsl" : "native",
+		...(projectWsl !== undefined ? { wslDistro: projectWsl.distro, wslUser: projectWsl.user } : {}),
 		model,
 		thinkingLevel,
 	});
@@ -1754,7 +1809,9 @@ const imSessionRuntimeBindings: SessionRuntimeBindingGateway = {
 			const existing = sessionCatalog.get(input.existingSessionId);
 			if (existing) return { sessionId: existing.id };
 		}
-		const environment = settingsStore.get().wslEnabled ? "wsl" : "native";
+		const project = projectStore.get(input.projectId);
+		const projectWsl = resolveProjectWslIdentity(project, settingsStore.get());
+		const environment = projectWsl !== undefined ? "wsl" : "native";
 		if (input.sessionPath) {
 			const existing = sessionCatalog.findByFilePath(input.sessionPath, environment);
 			if (existing) return { sessionId: existing.id };
@@ -1766,8 +1823,7 @@ const imSessionRuntimeBindings: SessionRuntimeBindingGateway = {
 				filePath: input.sessionPath,
 				// 已存在的会话文件：标题按权威名落库（有历史就不会再有自动命名），只透传渠道标志。
 				channel: input.channel,
-				wslDistro: environment === "wsl" ? settingsStore.get().wslDistro : undefined,
-				wslUser: environment === "wsl" ? settingsStore.get().wslUser : undefined,
+				...(projectWsl !== undefined ? { wslDistro: projectWsl.distro, wslUser: projectWsl.user } : {}),
 			});
 			return { sessionId: restored.id };
 		}
@@ -1812,7 +1868,7 @@ const imSessionRuntimeBindings: SessionRuntimeBindingGateway = {
 		if (input.agent.status === "error" || input.agent.status === "closed") {
 			throw new Error(`Cannot bind terminal Feishu runtime: ${input.agent.id}`);
 		}
-		const environment = input.agent.sessionEnvironment ?? (settingsStore.get().wslEnabled ? "wsl" : "native");
+		const environment = input.agent.sessionEnvironment ?? "native";
 		const source = input.agent.sessionSource ?? "pi";
 		let sessionId: string | undefined;
 		if (input.existingSessionId) {
@@ -3313,7 +3369,11 @@ function registerIpc() {
 				client,
 				// 内置扩展快照的来源：与本地 `-e` 注入同一份「当前生效」字节（覆盖层优先，整份校验）。
 				builtInExtensionRoots: resolveBuiltInExtensionRoots(),
-				onDisconnect: (hostId) => remoteTerminalManager?.closeHost(hostId),
+				onDisconnect: (hostId) => {
+					remoteTerminalManager?.closeHost(hostId);
+					// helper 的 watcher 已随会话一起死：丢掉登记，不把旧 watchId 当有效。
+					remoteProjectFacts?.onHostDisconnected(hostId);
+				},
 				// Push every transition to the window: `connect()` only returns the state it reached, so
 				// anything afterwards (degradation, reconnect, the shutdown after ready) is invisible without
 				// this, and the UI ends up showing a stale state.
@@ -3321,6 +3381,8 @@ function registerIpc() {
 					if (!mainWindow || mainWindow.isDestroyed()) return;
 					mainWindow.webContents.send(ipcChannels.remoteHostStateChanged, { hostId, state: state.state });
 				},
+				// helper 1.24.0 的变更事件：只标脏事实，不触发装载（重读仍由读的人决定）。
+				onHelperEvent: (entry) => remoteProjectFacts?.onHelperEvent(entry),
 			});
 			remoteHostService = service;
 			quitCleanup.register("remote-host", () => remoteHostService?.dispose());
@@ -3356,6 +3418,8 @@ function registerIpc() {
 		// 主机退役时同时清掉它的 trust 决策（与 pin 清理同一位置、同一重试语义）。
 		list: () => openRemoteHostCatalogView(app.getPath("userData"), { onHostRetired: (hostId) => remoteProjectTrustService?.forgetHost(hostId) ?? Promise.resolve() }),
 		service: remoteHostServiceIfEnabled,
+		// 移除连接与列表共用同一组退役清理：pin 删除后 trust 决策也要跟着清。
+		onHostRetired: (hostId) => remoteProjectTrustService?.forgetHost(hostId) ?? Promise.resolve(),
 		// The add-host flow holds a pin store across two IPC calls (offer, then the user's answer), so its
 		// lifetime is the process, not a call. Registering disposal here keeps the broker's timers from
 		// outliving the app.
@@ -3363,11 +3427,36 @@ function registerIpc() {
 	});
 	// 远端项目域（登记/回答/列表/读取/搜索）与 hosts 域分开注册：同一个连接服务端口，不同域的 handler。
 	// 远端 trust 域（决策表的清单/写入/撤销）同样分开：它不动 SSH，只读写桌面配置 + 已确认的 pin 事实。
+	// WSL 连接档案：只读写本机清单；移除前扫描项目/会话的 wslHostId 引用（字段在第 11/12 步接入）。
+	registerWslHostIpc({
+		userDataDir: app.getPath("userData"),
+		references: createWslHostReferenceRegistry({
+			projectsFile: join(app.getPath("userData"), "projects.json"),
+			sessionCatalogFile: join(app.getPath("userData"), "session-catalog.json"),
+		}),
+		// 档案被改名/换 distro/移除后，资源池里对应实例必须失效；闭包在 registerIpc 执行时取值，
+		// 池在稍后构造（晚绑定），调用发生在用户操作档案时，因此一定能拿到实例。
+		onProfileChanged: (hostId) => piResourcePool?.invalidate(hostId),
+	});
+	/**
+	 * 目录事实层的失效入口（W3）：项目域注册时才创建，文本保存的注册在它之前，因此用晚绑定转发。
+	 * 只标脏、不装载——一次保存不会额外产生任何远端往返。
+	 */
+	let remoteProjectFacts:
+		| {
+				afterWrite(projectId: string, paths: readonly string[]): void;
+				onHelperEvent(entry: { hostId: string; watchId: string; paths: readonly string[] }): void;
+				onHostDisconnected(hostId: string): void;
+		  }
+		| undefined;
+	/** 目录与 Git 共用的事实变化通知出口（T4）：订阅按 sender + project，事件只标脏。 */
+	const remoteFactsEvents = createRemoteFactsHub(ipcChannels.remoteProjectFactsChanged);
 	registerRemoteProjectTrustIpc({ enabled: remoteExperimentEnabled, trust: () => remoteProjectTrustService });
-	registerRemoteProjectIpc({
+	const remoteProjectIpc = registerRemoteProjectIpc({
 		enabled: remoteExperimentEnabled,
 		userDataDir: app.getPath("userData"),
 		service: remoteHostServiceIfEnabled,
+		factsEvents: remoteFactsEvents,
 		// 远端项目登记端口（Phase 3 第二段）：canonical 值已由 IPC 层校验/确认，这里只做持久化
 		// 与按 projectId 取 locator。只暴露 ssh 项目，本机项目不经过这条入口。
 		projects: {
@@ -3381,9 +3470,14 @@ function registerIpc() {
 			},
 		},
 	});
+	remoteProjectFacts = remoteProjectIpc;
+	quitCleanup.register("remote-project-ipc", () => remoteProjectIpc.dispose());
 	const remoteGitReads = registerRemoteGitReadIpc({
 		enabled: remoteExperimentEnabled,
 		service: remoteHostServiceIfEnabled,
+		factsEvents: remoteFactsEvents,
+		// P0-1：Git 写成功/结果未知时，主进程目录事实缓存与渲染层文件树一起失效（tree scope）。
+		onTreeInvalidated: (projectId) => remoteProjectIpc.invalidateTree(projectId),
 		trusted: async (target) => (await remoteProjectTrustService?.trustOverride({ hostId: target.hostId, remoteRoot: target.remotePath })) === "approve",
 		locator: (projectId) => {
 			const project = projectStore.get(projectId);
@@ -3397,6 +3491,11 @@ function registerIpc() {
 		locator: (projectId) => {
 			const project = projectStore.get(projectId);
 			return project && isRemoteProject(project) ? project.locator : undefined;
+		},
+		afterWrite: (projectId, paths) => {
+			remoteProjectFacts?.afterWrite(projectId, paths);
+			// P0-2：文件保存/新建/改名/删除/还原也会改变工作树状态：失效该项目所有已缓存仓库的 status。
+			remoteGitReads.invalidateProject(projectId);
 		},
 	});
 	// 本机 ↔ 远端文件传输（上传走 stdin 分块，支持二进制；下载走只读 reader + 保存对话框）。
@@ -3418,12 +3517,39 @@ function registerIpc() {
 			const project = projectStore.get(projectId);
 			return project && isRemoteProject(project) ? project.locator : undefined;
 		},
+		// 写成功后只标脏目录事实（W3）：一次写不产生任何远端往返，下一次读自然重新装载。
+		afterWrite: (projectId, paths) => {
+			remoteProjectIpc.afterWrite(projectId, paths);
+			// P0-2：文件面写同样让 Git status 失效（与文本保存同一条出口）。
+			remoteGitReads.invalidateProject(projectId);
+		},
 	});
 	quitCleanup.register("remote-project-entries", remoteProjectEntries.dispose);
+	/**
+	 * 远端短命令的统一执行入口（会话读取/写入/归档/扫描四条链共用）：每次重新过 `buildPinnedSshInvocation`
+	 * （pin 文件/指纹、路由摘要、严格配置复查）。超时归传输层：`SshClientRuntime.run` 的 execFile 自带
+	 * 30 s 上限与 256 KiB 输出上限（远端历史窗口上界 128 KiB 就是为后者留的余量）。
+	 *
+	 * 定义在装配点之前（而不是就地定义）：会话扫描/登记也走它（R1a），而它们的装配代码在下面靠前的位置。
+	 */
+	const runPinnedRemoteCommand = async ({ hostId, remoteCommand }: { hostId: string; remoteCommand: string }) => {
+		const client = await remoteSshClientIfEnabled();
+		const invocation = await buildPinnedSshInvocation(app.getPath("userData"), hostId, "ssh-batch", { client, remoteCommand });
+		const result = await client.run(invocation.executable, invocation.args);
+		// stderr 也要回传：pi 对未知旗标的抱怨随版本在 stdout 或 stderr（模型目录的降级判据要用它），
+		// 丢掉就等于把「不认这个旗标」误判成「远端没有模型」。
+		return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr ?? "" };
+	};
+	/** 同一入口的端口形状：远端会话扫描/根解析/登记用它换掉 helper 会话（不切 host 的活动 root）。 */
+	remoteCommandTransport = { runRemoteCommand: runPinnedRemoteCommand };
+
 	// 远端 Session 只读发现与登记（Phase 3 第三段）。通道名由装配注入（与 contentStoreIpc 的 ChannelGroup 同一先例）。
 	registerRemoteSessionIpc({
 		enabled: remoteExperimentEnabled,
 		service: remoteHostServiceIfEnabled,
+		// R1a：扫描 / 根解析 / register / title 走一次性 pinned SSH 短命令（与读/写/归档同一条通道），
+		// 不再借 helper 会话 —— 否则每次刷新会话列表都会把用户项目的活动 root 切走再连回来。
+		transport: () => remoteCommandTransport,
 		catalog: () => sessionCatalog,
 		// 归属必须按**会话所在目录**判定：取该主机上的 ssh 项目作候选，用 pi 的目录编码与会话路径第一段比对。
 		// 判不出来（多候选且都没命中）⇒ undefined，由 scanner 以既有稳定码 REMOTE_SESSION_PROJECT_UNRESOLVED
@@ -3582,10 +3708,7 @@ function registerIpc() {
 		});
 	}
 
-	const catalogIdentityContext = () => {
-		const { wslEnabled, wslDistro, wslUser } = settingsStore.get();
-		return wslEnabled ? { wslDistro, wslUser } : {};
-	};
+	const catalogIdentityContext = () => ({});
 
 	registerEditorsIpc({
 		settingsStore,
@@ -3737,6 +3860,9 @@ function registerIpc() {
 		sessionCatalog,
 		mainCopy: mainCopy as (key: string, params?: Record<string, string | number>) => string,
 		getMainWindow: () => mainWindow,
+		userDataDir: app.getPath("userData"),
+		// 项目关闭时退订它的目录订阅；连接/窗口级清理分别在 onDisconnect 与 quitCleanup 里。
+		onProjectRemoved: (projectId) => remoteProjectIpc.closeProject(projectId),
 		resolveWslEnvironment: async (distro, user) => {
 			const { resolveWslEnvironment } = await import("./wsl/WslEnvironment");
 			return resolveWslEnvironment(distro, user, {
@@ -4001,20 +4127,6 @@ function registerIpc() {
 	});
 
 	/**
-	 * 远端短命令的统一执行入口（读取与归档两条链共用）：每次重新过 `buildPinnedSshInvocation`
-	 * （pin 文件/指纹、路由摘要、严格配置复查）。超时归传输层：`SshClientRuntime.run` 的 execFile 自带
-	 * 30 s 上限与 256 KiB 输出上限（远端历史窗口上界 128 KiB 就是为后者留的余量）。
-	 */
-	const runPinnedRemoteCommand = async ({ hostId, remoteCommand }: { hostId: string; remoteCommand: string }) => {
-		const client = await remoteSshClientIfEnabled();
-		const invocation = await buildPinnedSshInvocation(app.getPath("userData"), hostId, "ssh-batch", { client, remoteCommand });
-		const result = await client.run(invocation.executable, invocation.args);
-		// stderr 也要回传：pi 对未知旗标的抱怨随版本在 stdout 或 stderr（模型目录的降级判据要用它），
-		// 丢掉就等于把「不认这个旗标」误判成「远端没有模型」。
-		return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr ?? "" };
-	};
-
-	/**
 	 * 远端会话根判定（远端读取与远端归档共用）：走**与扫描/登记同一份**实现。
 	 * pi 的 user-level `settings.json` 可以把会话根换掉，各自再拼一次 `<home>/.pi/agent/sessions` 就会在
 	 * 那些机器上读/写错文件（那是「读到了别人的历史」级别的问题，不是少一点）。
@@ -4022,7 +4134,7 @@ function registerIpc() {
 	const resolveRemoteSessionRoot = async (hostId: string): Promise<{ ok: true; root: string } | { ok: false; code: string }> => {
 		const port = await remoteHostServiceIfEnabled();
 		if (port === undefined) return { ok: false, code: "REMOTE_CONNECTION_SERVICE_UNAVAILABLE" };
-		return await createRemoteSessionScanner({ port, catalog: sessionCatalog }).resolveSessionRoot(hostId);
+		return await createRemoteSessionScanner({ port, catalog: sessionCatalog, transport: remoteCommandTransport }).resolveSessionRoot(hostId);
 	};
 
 	/**
@@ -4252,6 +4364,7 @@ function registerIpc() {
 		projectStore,
 		settingsStore,
 		sessionScanner,
+		resolveWslSessionScanner: (identity) => wslSessionScannerFor(identity),
 		sessionCatalog,
 		// 会话 ↔ 智能体绑定：绑定的会话每次发送注入角色设定（pi/acp 隐藏 agentMessage，
 		// dsh 退化为可见前缀，由 sessionIpc 的 composeAgentInstruction 统一组合）。
@@ -4512,12 +4625,14 @@ function registerIpc() {
 					if (!isLocalProject(project)) return;
 					try {
 						const settings = settingsStore.get();
+						const wsl = resolveProjectWslIdentity(project, settings);
 						let projectPath = project.path;
-						if (settings.wslEnabled && settings.wslDistro) {
+						if (wsl !== undefined) {
 							projectPath = projectPath.replace(/^([A-Za-z]):\\/, (_: string, drive: string) => `/mnt/${drive.toLowerCase()}/`).replace(/\\/g, "/");
 						}
-						const summaries = await sessionScanner.list(projectPath);
-						await sessionCatalog.mergeScanned(project.id, summaries, settings.wslEnabled ? { wslDistro: settings.wslDistro, wslUser: settings.wslUser } : {});
+						const scanner = wsl !== undefined ? await wslSessionScannerFor(wsl) : sessionScanner;
+						const summaries = await scanner.list(projectPath);
+						await sessionCatalog.mergeScanned(project.id, summaries, wsl !== undefined ? { wslDistro: wsl.distro, wslUser: wsl.user } : {});
 					} catch (error) {
 						void appLogger.warn("session", "Catalog prewarm scan failed", {
 							projectId: project.id,
@@ -4748,6 +4863,7 @@ function registerIpc() {
 		projectResourceManager,
 		agentManager,
 		skillManager,
+		piResourcePool,
 		appLogger,
 		rpcLogger,
 		sessionRuntimeCoordinator,
@@ -4758,7 +4874,8 @@ function registerIpc() {
 		isProjectTrusted: async (projectId, projectRoot) => {
 			const project = projectStore.get(projectId);
 			const settings = settingsStore.get();
-			const trustPath = project?.environment === "wsl" && process.platform === "win32" && settings.wslEnabled && settings.wslDistro ? toWslLinuxPath(projectRoot, { distro: settings.wslDistro }) : projectRoot;
+			const trustWslDistro = project?.environment === "wsl" ? (project?.wslDistro ?? settings.wslDistro) : undefined;
+			const trustPath = process.platform === "win32" && trustWslDistro ? toWslLinuxPath(projectRoot, { distro: trustWslDistro }) : projectRoot;
 			return (await configManager.getProjectTrustDecision(trustPath)) === true;
 		},
 		// pi 环境引导：便携 Node 安装器的真实 IO（下载/解压与 DSH runtime 同源，
@@ -4880,16 +4997,8 @@ function registerIpc() {
 			setFeishuConfigDefaultBotName(feishuT(currentFeishuLocale(), "bridge.defaultBotName"));
 		},
 		notifyTitleBarChange: (window) => settingsStore.notifyTitleBarChange(window),
-		setSessionCatalogIdentityContext: (ctx) => sessionCatalog.setIdentityContext(ctx),
-		resolveWslEnvironment: async (distro, user, logger) => {
-			const { resolveWslEnvironment: resolveWsl } = await import("./wsl/WslEnvironment");
-			return resolveWsl(distro, user, logger);
-		},
-		configureSessionScannerWsl: (env) => sessionScanner.configureWsl(env),
-		clearSessionScannerWsl: () => sessionScanner.clearWsl(),
-		configureSkillManagerWsl: (env) => skillManager.configureWsl(env),
 		// 技能正文读取：注入路径白名单上下文（全局技能目录 + 已注册项目根），
-		// 由 readSkillContent 完成校验后读 SKILL.md；WSL 项目按主机路径读取。
+		// 由 readSkillContent 完成校验后读 SKILL.md；WSL 项目按项目档案 distro 转主机路径。
 		readSkillContent: (skillPath) =>
 			readSkillContent(skillPath, {
 				globalSkillPaths: skillManager.getLocations().map((location) => location.path),
@@ -4897,10 +5006,10 @@ function registerIpc() {
 					.list()
 					.filter(isLocalProject)
 					.map((project) => {
-						const settings = settingsStore.get();
-						if (process.platform === "win32" && project.environment === "wsl" && settings.wslEnabled && settings.wslDistro) {
+						const distro = project.environment === "wsl" ? (project.wslDistro ?? settingsStore.get().wslDistro) : undefined;
+						if (process.platform === "win32" && distro !== undefined) {
 							try {
-								return toWindowsHostPath(project.path, { distro: settings.wslDistro });
+								return toWindowsHostPath(project.path, { distro });
 							} catch {
 								return project.path;
 							}
@@ -4908,14 +5017,6 @@ function registerIpc() {
 						return project.path;
 					}),
 			}),
-		configurePromptManagerWsl: (env) => promptManager.configureWsl(env),
-		configureExtensionManagerWsl: (env) => extensionManager.configureWsl(env),
-		configureConfigManagerWsl: (env) => configManager.configureWsl(env),
-		configureXuePromptManagerWsl: (env) => xuePromptManager.configureWsl(env),
-		configureAgentManagerWsl: (env) => agentManager.configureWsl(env),
-		// DSH host 同样需要 WSL 环境：它拿到的 workspace 路径必须是 Windows 主机路径
-		// （WSL 模式下项目是 /mnt/...，host 的 realpath 会算到 C:\mnt 而报 ENOENT）。
-		configureDshHostWsl: (env) => dshHost.configureWsl(env),
 		sessionCommandIpcError,
 		// 重启路径需要同步 isQuitting / 停服务，避免 closeToTray 吞掉 relaunch
 		webServiceManager,
@@ -4937,14 +5038,16 @@ function registerIpc() {
 		skillManager,
 		xuePromptManager,
 		extensionManager,
+		piResourcePool,
 		projectResourceManager,
 		configManager,
 		projectTrustPath: (projectRoot, projectId) => {
 			const project = projectStore.get(projectId);
 			const settings = settingsStore.get();
-			if (project?.environment === "wsl" && process.platform === "win32" && settings.wslEnabled && settings.wslDistro) {
+			const trustWslDistro = project?.environment === "wsl" ? (project?.wslDistro ?? settings.wslDistro) : undefined;
+			if (process.platform === "win32" && trustWslDistro !== undefined) {
 				try {
-					return toWslLinuxPath(projectRoot, { distro: settings.wslDistro });
+					return toWslLinuxPath(projectRoot, { distro: trustWslDistro });
 				} catch {
 					return projectRoot;
 				}
@@ -5029,6 +5132,13 @@ function registerIpc() {
 		getFileIndexService: () => fileIndexService,
 		appLogger,
 		openExternalUrl,
+		// 公共文件读（T6）：ssh 项目的目录页与批量 stat 走只读 fs 面，不经过 entry 令牌。
+		remoteFiles: {
+			directoryPage: (projectId, path, force) => remoteProjectIpc.directoryPage(projectId, path, force),
+			pathsExist: (projectId, paths) => remoteProjectIpc.pathsExist(projectId, paths),
+			// 远端内容搜索按 hello capabilities 门控：旧 helper 返回 null（渲染层回退“仅文件名”），不发无效请求。
+			searchContent: (projectId, query) => remoteProjectIpc.searchContent(projectId, query),
+		},
 	});
 	registerClipboardIpc({ appLogger });
 	// 资源管理器右键菜单（HKCU）：菜单显示名跟随主进程 locale（可能随设置语言切换）
@@ -5631,9 +5741,10 @@ app
 				// ProjectResourceManager 只在本地项目上工作（远端资源发现属 Phase 4）。
 				if (!isLocalProject(project)) throw new Error("UNSUPPORTED_PROJECT_LOCATION");
 				const settings = settingsStore.get();
-				if (process.platform === "win32" && project.environment === "wsl" && settings.wslEnabled && settings.wslDistro) {
+				const resourceWslDistro = project.environment === "wsl" ? (project.wslDistro ?? settings.wslDistro) : undefined;
+				if (process.platform === "win32" && resourceWslDistro !== undefined) {
 					try {
-						return toWindowsHostPath(project.path, { distro: settings.wslDistro });
+						return toWindowsHostPath(project.path, { distro: resourceWslDistro });
 					} catch {
 						return project.path;
 					}
@@ -5644,7 +5755,8 @@ app
 				getProjectTrustDecision: async (project) => {
 					if (!isLocalProject(project)) throw new Error("UNSUPPORTED_PROJECT_LOCATION");
 					const settings = settingsStore.get();
-					const cwd = process.platform === "win32" && project.environment === "wsl" && settings.wslEnabled && settings.wslDistro ? toWslLinuxPath(project.path, { distro: settings.wslDistro }) : project.path;
+					const projectWslDistro = project.environment === "wsl" ? (project.wslDistro ?? settings.wslDistro) : undefined;
+					const cwd = process.platform === "win32" && projectWslDistro !== undefined ? toWslLinuxPath(project.path, { distro: projectWslDistro }) : project.path;
 					return configManager.getProjectTrustDecision(cwd);
 				},
 				getGlobalDisabledResourceNames: () => {
@@ -5735,6 +5847,8 @@ app
 				resolveService: () => remoteHostServiceResolver?.(),
 				// 远端会话身份登记（P4.2 收口）的正门：catalog 也是懒取（AgentManager 比它更早装配）。
 				resolveCatalog: () => sessionCatalog,
+				// 登记时的会话根解析同样走一次性命令（R1a）：不在会话启动路径上切 host 的活动 root。
+				resolveRemoteTransport: () => remoteCommandTransport,
 				settings: () => settingsStore.get(),
 				// runner 1.1.0 起支持 init 帧 env：安全门可以拿到 PIDECK_SECURITY_CONFIG。
 				envChannelAvailable: true,
@@ -6134,7 +6248,7 @@ app
 				return (settings.acpTools ?? []).filter((tool) => tool.enabled).map((tool) => ({ id: tool.id, name: tool.name }));
 			},
 			listProjects: () => projectStore.list().filter(isLocalProject),
-			createProject: (path) => projectStore.add(path, undefined, settingsStore.get().wslEnabled ? "wsl" : "windows"),
+			createProject: (path) => projectStore.add(path),
 			deleteProject: async (projectId) => {
 				if (!projectStore.get(projectId) || projectStore.get(projectId)?.kind === "chat") return false;
 				const childIds = projectStore.listWorktreeChildren(projectId).map((child) => child.id);
@@ -6146,9 +6260,9 @@ app
 				const snapshot = force ? await piModelCapabilityCache?.refresh() : await piModelCapabilityCache?.ensure();
 				return snapshot?.models ?? (force ? refreshModelList(piLocator, settingsStore, configManager) : fetchModelList(piLocator, settingsStore, configManager));
 			},
-			listSessions: (projectId) => {
+			listSessions: async (projectId) => {
 				const project = projectStore.get(projectId);
-				return sessionScanner.list(project?.path);
+				return (await sessionScannerForProject(project)).list(project?.path);
 			},
 			listCatalogSessions: async (projectId) => {
 				// 与桌面 sessionsListCatalog 同规则：重发/编辑 fork 化后被替换的旧会话
@@ -6165,12 +6279,13 @@ app
 				if (!isLocalProject(project)) throw new Error("UNSUPPORTED_PROJECT_LOCATION");
 				let projectPath = project.path;
 				const settings = settingsStore.get();
-				if (settings.wslEnabled && settings.wslDistro) {
+				const wsl = resolveProjectWslIdentity(project, settings);
+				if (wsl !== undefined) {
 					projectPath = projectPath.replace(/^([A-Za-z]):\\/, (_: string, drive: string) => `/mnt/${drive.toLowerCase()}/`).replace(/\\/g, "/");
 				}
-				const summaries = await sessionScanner.list(projectPath);
-				const { wslEnabled, wslDistro, wslUser } = settings;
-				const scanned = await sessionCatalog.mergeScanned(projectId, summaries, wslEnabled ? { wslDistro, wslUser } : {});
+				const scanner = wsl !== undefined ? await wslSessionScannerFor(wsl) : sessionScanner;
+				const summaries = await scanner.list(projectPath);
+				const scanned = await sessionCatalog.mergeScanned(projectId, summaries, wsl !== undefined ? { wslDistro: wsl.distro, wslUser: wsl.user } : {});
 				// 同上：supersededBy 隐藏规则与桌面列表一致（mergeScanned 可能重新接上被打标的旧会话）
 				const records = scanned.filter((record) => !record.supersededBy);
 				const bindings = sessionRuntimeCoordinator.attachCatalogRuntimes(records);
@@ -6183,6 +6298,7 @@ app
 			createSessionDraft: async (input) => {
 				const project = projectStore.get(input.projectId);
 				if (!project) throw new Error(mainCopy("project.notFound"));
+				const projectWsl = resolveProjectWslIdentity(project, settingsStore.get());
 				// 后端白名单（渲染层输入不可信）：只认 dsh/acp，其余按 pi；acp 必须带工具 id。
 				const backend = input.backend === "dsh" ? "dsh" : input.backend === "acp" ? "acp" : undefined;
 				const acpToolId = backend === "acp" && typeof input.acpToolId === "string" ? input.acpToolId : undefined;
@@ -6192,7 +6308,8 @@ app
 				const draft = await sessionCatalog.createDraft({
 					projectId: input.projectId,
 					title: input.title?.trim() || mainCopy("session.newTitle"),
-					environment: settingsStore.get().wslEnabled ? "wsl" : "native",
+					environment: projectWsl !== undefined ? "wsl" : "native",
+					...(projectWsl !== undefined ? { wslDistro: projectWsl.distro, wslUser: projectWsl.user } : {}),
 					backend,
 					acpToolId,
 					model: !acp && input.model ? createSessionModelPreference(input.model.provider, input.model.modelId, input.model.modelName) : undefined,
@@ -6520,7 +6637,8 @@ app
 			},
 			(channel, payload) => mainWindow?.webContents.send(channel, payload),
 			projectStore,
-			() => settingsStore.get(),
+			// 第 14 步：原生终端不再读取旧全局 WSL 开关；WSL 终端的身份只来自项目档案。
+			() => ({}),
 		);
 		// C12：退出清理登记（before-quit 统一 runAll）
 		quitCleanup.register("terminal", () => terminalManager?.closeAll());
@@ -6575,7 +6693,7 @@ app
 		const initialSessionSettings = settingsStore.get();
 		sessionCatalog = new SessionCatalog(
 			join(app.getPath("userData"), "session-catalog.json"),
-			initialSessionSettings.wslEnabled ? { wslDistro: initialSessionSettings.wslDistro, wslUser: initialSessionSettings.wslUser } : {},
+			{},
 			// 会话路径统一绝对化：pi 的 sessionDir 配置为相对路径（如 ".pi/sessions"）时，
 			// get_state 返回的 sessionFile 是相对 cwd 的；与扫描器绝对路径 originKey 不一致
 			// 会导致同一会话在侧栏出现两条记录。加载与写入边界都经此归一化。
@@ -6587,7 +6705,15 @@ app
 			// 占位标题回填 + 会话头有效性校验：未打开过的 pi 会话也能在侧栏显示首条消息标题
 			// （不再永远 Untitled）；同一次有界读头部顺带校验首条记录是否带 type 头，
 			// 把 pi-subagents transcript 等无 type 头的产物挡在 catalog 之外（#168）。
-			(filePath, options) => sessionScanner.inferSessionNameAndValidity(filePath, options),
+			async (filePath, options) => {
+				// WSL 会话文件是发行版内的 Linux 路径，宿主 Node 读不到；按合并上下文里的 distro/user
+				// 选对应 scanner 读头部。本机会话继续用主 scanner。
+				if (options?.wslDistro && options?.wslUser) {
+					const scanner = await wslSessionScannerFor({ distro: options.wslDistro, user: options.wslUser });
+					return scanner.inferSessionNameAndValidity(filePath, options);
+				}
+				return sessionScanner.inferSessionNameAndValidity(filePath, options);
+			},
 			// 远端会话登记（ensureRemoteSession）也写 hostId 引用，用同一道门。
 			{ referenceGuard: remoteReferenceWriteGuard },
 		);
@@ -6705,7 +6831,8 @@ app
 					if (!project || project.kind === "chat" || !isLocalProject(project)) return null;
 					const root = project.path;
 					const settings = settingsStore.get();
-					const trustPath = process.platform === "win32" && project.environment === "wsl" && settings.wslEnabled && settings.wslDistro ? toWslLinuxPath(root, { distro: settings.wslDistro }) : root;
+					const resourceWslDistro = project.environment === "wsl" ? (project.wslDistro ?? settings.wslDistro) : undefined;
+					const trustPath = process.platform === "win32" && resourceWslDistro !== undefined ? toWslLinuxPath(root, { distro: resourceWslDistro }) : root;
 					return { root, trusted: (await configManager.getProjectTrustDecision(trustPath)) === true };
 				},
 			},
@@ -7104,39 +7231,54 @@ app
 		});
 
 		// 根据已加载的 WSL 设置配置会话扫描器，使其能同时扫描 WSL 中的 pi 会话目录
+		/**
+		 * 第 14 步：不再根据全局设置切换单例管理器的 WSL HOME。
+		 *
+		 * 会话扫描按项目档案使用独立 scanner（wslSessionScannerFor），spawn 由 AgentManager 的
+		 * 每次启动覆盖值决定；这里只把旧的全局状态清掉，避免残留一个发行版影响其它项目。
+		 * 配置/资源页按目标路由：WSL 目标解析发行版 HOME，不回退本机；生产代码里不再有全局
+		 * configureWsl 切换共享单例的路径（W1 起用 PiResourceManagerPool）。
+		 */
+		// 资源作用域池（W1）：本机复用既有四个单例；WSL 目标每次请求重读档案（cache key 含 hostId/distro/user），
+		// 档案改 distro/user 或移除后旧实例自动失效重建，绝不回退本机 HOME。
+		piResourcePool = createPiResourceManagerPool({
+			resolver: createPiResourceTargetResolver({
+				listProfiles: async () => (await createWslHostStore(app.getPath("userData"))).list(),
+				resolveEnvironment: async (distro, user) => {
+					const { resolveWslEnvironment } = await import("./wsl/WslEnvironment");
+					return resolveWslEnvironment(distro, user, { warn: (message, details) => void appLogger?.warn("wsl", message, details) });
+				},
+				localHome: () => app.getPath("home"),
+			}),
+			local: {
+				skills: () => skillManager,
+				prompts: () => promptManager,
+				extensions: () => extensionManager,
+				xuePrompts: () => xuePromptManager,
+			},
+			create: createPiResourceManagerFactories({
+				translate: mainCopy,
+				// WSL 扩展包开关的恢复快照（skills/prompts 不需要）；未装配时 WSL 包开关会明确失败而不是静默成功。
+				...(piResourceStateStore ? { resourceState: piResourceStateStore } : {}),
+				extension: {
+					locator: piLocator,
+					getSettings: () => settingsStore.get(),
+					getPiDeckSettings: () => settingsStore.get(),
+					patchPiDeckSettings: (patch) => settingsStore.update(patch),
+					builtInRoots: resolveBuiltInExtensionRoots(),
+				},
+				xuePrompts: {
+					overlayDir: () => promptStoreUpdater.resolveEffectiveOverlayDir(),
+					dbStore: xuePromptDbStore ?? undefined,
+					xueIndex: xueIndexService ?? undefined,
+				},
+			}),
+		});
 		const syncWslConfig = async () => {
-			const { wslEnabled, wslDistro, wslUser } = settingsStore.get();
-			if (wslEnabled && wslDistro && wslUser) {
-				const { resolveWslEnvironment: resolveWsl2 } = await import("./wsl/WslEnvironment");
-				const wslEnv = await resolveWsl2(wslDistro, wslUser, {
-					warn: (msg: string, detail: unknown) => void appLogger?.warn("wsl", String(msg), { detail }),
-				});
-				await sessionScanner.configureWsl(wslEnv);
-				agentManager.configureWsl(wslEnv);
-				// DSH host 是 Windows 原生进程：WSL 项目的 workspace 路径与会话目录编码
-				// 都要按主机路径算，否则 workspace.resolve 失败、会话建不出来。
-				dshHost.configureWsl(wslEnv);
-				skillManager.configureWsl(wslEnv);
-				promptManager.configureWsl(wslEnv);
-				extensionManager.configureWsl(wslEnv);
-				if (configManager) configManager.configureWsl(wslEnv);
-				if (xuePromptManager) xuePromptManager.configureWsl(wslEnv);
-				// 窗口已起来后再异步探测 WSL which，点会话时 resolveCommand 才能命中 wsl:// 缓存。
-				void piLocator.warmWslCommand(wslDistro, wslUser).catch((error) => {
-					void appLogger?.warn("app", "WSL pi which warmup failed", error);
-				});
-			} else {
-				sessionScanner.clearWsl();
-				agentManager.configureWsl(null);
-				dshHost.configureWsl(null);
-				skillManager.configureWsl(null);
-				promptManager.configureWsl(null);
-				extensionManager.configureWsl(null);
-				if (configManager) configManager.configureWsl(null);
-				if (xuePromptManager) xuePromptManager.configureWsl(null);
-			}
+			sessionScanner.clearWsl();
+			agentManager.configureWsl(null);
+			dshHost.configureWsl(null);
 		};
-
 		// 先注册 IPC 并创建窗口：WSL 探测 / pi settings / 代理 / Web 服务都可能卡住或抛错，
 		// 不能挡在 createWindow 前面（打包便携版表现为「启动没反应」，dev 因热路径较短不易复现）。
 		// 模型请求快照端点：只绑 127.0.0.1，起不来就静默跳过（快照不工作，pi 与 PiDeck 照常）。
@@ -7551,15 +7693,8 @@ async function removeStalePiDeckExtension(extensionName: string, homeDir?: strin
 async function migrateLegacyBuiltInExtensions(): Promise<void> {
 	const { BUILT_IN_EXTENSIONS } = await import("./extensions/builtInExtensions");
 	const legacyNames = [...BUILT_IN_EXTENSIONS, "pi-deck-project-trust.ts", "pi-deck-file-capture.ts"];
-	const homes = [app.getPath("home")];
-	const wslSettings = settingsStore.get();
-	if (wslSettings.wslEnabled && wslSettings.wslDistro && wslSettings.wslUser) {
-		homes.push(`\\\\wsl$\\${wslSettings.wslDistro}\\home\\${wslSettings.wslUser}`);
-	}
-	for (const home of homes) {
-		for (const name of legacyNames) {
-			await removeStalePiDeckExtension(name, home).catch(() => undefined);
-		}
+	for (const name of legacyNames) {
+		await removeStalePiDeckExtension(name).catch(() => undefined);
 	}
 }
 
@@ -7568,21 +7703,11 @@ async function migrateLegacyBuiltInExtensions(): Promise<void> {
  * 具体边界（不覆盖不可解析文件、只补缺失键、锁内原子写）在 config/piSettingsDefaults.ts。
  */
 async function ensureAllPiSettingsDefaults(): Promise<void> {
-	const s = settingsStore.get();
 	let piVersion = "";
 	if (piLocator) {
-		piVersion = (await piLocator.check(undefined, s.wslEnabled, s.wslDistro, s.wslUser).catch(() => null))?.version ?? "";
+		piVersion = (await piLocator.check().catch(() => null))?.version ?? "";
 	}
-
-	// Windows 本地
-	const winDir = join(app.getPath("home"), ".pi", "agent");
-	await ensurePiSettingsDefaults(winDir, piVersion).catch(() => undefined);
-
-	// WSL（如果已配置）
-	if (s.wslEnabled && s.wslDistro && s.wslUser) {
-		const wslDir = join(`\\\\wsl$\\${s.wslDistro}\\home\\${s.wslUser}`, ".pi", "agent");
-		await ensurePiSettingsDefaults(wslDir, piVersion).catch(() => undefined);
-	}
+	await ensurePiSettingsDefaults(join(app.getPath("home"), ".pi", "agent"), piVersion).catch(() => undefined);
 }
 
 // 子进程（含 GPU/utility）异常退出：Mac 上偶发“整窗闪一下”，需要留下 reason/exitCode。

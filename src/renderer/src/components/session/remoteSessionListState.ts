@@ -109,10 +109,12 @@ export function readScanResponse(raw: unknown): RemoteSessionScanOutcome {
 	if (!isRecord(raw)) return { kind: "rejected" };
 	if (raw.ok === false) return typeof raw.code === "string" && STABLE_CODE.test(raw.code) ? { kind: "failed", code: raw.code } : { kind: "rejected" };
 	if (raw.ok !== true) return { kind: "rejected" };
-	if (!Array.isArray(raw.entries)) return { kind: "rejected" };
+	// 迁移期：新 IPC 是 Op（{ok:true,value}），旧 scanner/夹具是扁平形状。有 value 就只读 value。
+	const payload = isRecord(raw.value) ? raw.value : raw;
+	if (!Array.isArray(payload.entries)) return { kind: "rejected" };
 	const entries: RemoteSessionEntryView[] = [];
 	const seen = new Set<string>();
-	for (const value of raw.entries) {
+	for (const value of payload.entries) {
 		const entry = readEntryView(value);
 		if (entry === undefined) return { kind: "rejected" };
 		if (seen.has(entry.remoteSessionId)) return { kind: "rejected" };
@@ -131,11 +133,12 @@ export function readRegisterResponse(raw: unknown, expectedRemoteSessionId: stri
 	if (!isRecord(raw)) return { kind: "rejected" };
 	if (raw.ok === false) return typeof raw.code === "string" && STABLE_CODE.test(raw.code) ? { kind: "failed", code: raw.code } : { kind: "rejected" };
 	if (raw.ok !== true) return { kind: "rejected" };
-	const sessionId = raw.sessionId;
+	const payload = isRecord(raw.value) ? raw.value : raw;
+	const sessionId = payload.sessionId;
 	if (typeof sessionId !== "string" || sessionId.length === 0 || sessionId.length > MAX_ID_LENGTH || CONTROL_CHARS.test(sessionId)) return { kind: "rejected" };
-	if (typeof raw.created !== "boolean") return { kind: "rejected" };
-	if (raw.remoteSessionId !== expectedRemoteSessionId) return { kind: "rejected" };
-	return { kind: "ok", sessionId, created: raw.created, remoteSessionId: expectedRemoteSessionId };
+	if (typeof payload.created !== "boolean") return { kind: "rejected" };
+	if (payload.remoteSessionId !== expectedRemoteSessionId) return { kind: "rejected" };
+	return { kind: "ok", sessionId, created: payload.created, remoteSessionId: expectedRemoteSessionId };
 }
 
 /** 只带 locator 的最小结构（SessionRecord / SessionSummary 都结构上满足）。 */

@@ -9,6 +9,8 @@ export type RemoteHostProfile = SshDraftRoute & {
 	createdAt: string;
 	updatedAt: string;
 	identityFile?: string;
+	/** `password` means the host is authenticated from an in-memory secret; the secret itself is never stored. */
+	authMethod?: "password";
 	remotePiCommand?: string;
 	remoteNodeCommand?: string;
 	browseRoots?: string[];
@@ -23,7 +25,7 @@ export type DecodedRemoteHostSnapshot = Omit<RemoteHostSnapshot, "schemaVersion"
 
 export const HOST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
-const ALLOWED_PROFILE_KEYS = new Set(["id", "label", "sshHost", "port", "user", "proxyJump", "identityFile", "remotePiCommand", "remoteNodeCommand", "browseRoots", "connectTimeoutMs", "createdAt", "updatedAt", "lastConnectedAt", "verifiedEndpoint", "verifiedAt", "disabledAt"]);
+const ALLOWED_PROFILE_KEYS = new Set(["id", "label", "sshHost", "port", "user", "proxyJump", "identityFile", "authMethod", "remotePiCommand", "remoteNodeCommand", "browseRoots", "connectTimeoutMs", "createdAt", "updatedAt", "lastConnectedAt", "verifiedEndpoint", "verifiedAt", "disabledAt"]);
 const ENDPOINT_KEYS = new Set(["hostName", "port", "user", "pinAlias", "routeDigest", "knownHostsSha256", "hostKeyFingerprints"]);
 
 function invalid(): never {
@@ -67,6 +69,7 @@ function readProfile(value: unknown): RemoteHostProfile {
 	if (value.verifiedAt !== undefined && (!validDate(value.verifiedAt) || value.verifiedAt < value.createdAt)) invalid();
 	if (value.disabledAt !== undefined && (!validDate(value.disabledAt) || value.disabledAt < value.createdAt)) invalid();
 	if (value.lastConnectedAt !== undefined && !validDate(value.lastConnectedAt)) invalid();
+	if (value.authMethod !== undefined && value.authMethod !== "password") invalid();
 	if (value.identityFile !== undefined && (typeof value.identityFile !== "string" || !isAbsolute(value.identityFile) || /[\x00-\x1f\x7f]/.test(value.identityFile))) invalid();
 	if (value.remotePiCommand !== undefined && !validToken(value.remotePiCommand)) invalid();
 	if (value.remoteNodeCommand !== undefined && !validToken(value.remoteNodeCommand)) invalid();
@@ -93,6 +96,7 @@ function readProfile(value: unknown): RemoteHostProfile {
 		createdAt: value.createdAt,
 		updatedAt: value.updatedAt,
 		...(value.identityFile !== undefined ? { identityFile: value.identityFile } : {}),
+		...(value.authMethod !== undefined ? { authMethod: value.authMethod } : {}),
 		...(value.remotePiCommand !== undefined ? { remotePiCommand: value.remotePiCommand } : {}),
 		...(value.remoteNodeCommand !== undefined ? { remoteNodeCommand: value.remoteNodeCommand } : {}),
 		...(value.browseRoots !== undefined ? { browseRoots: [...value.browseRoots] } : {}),

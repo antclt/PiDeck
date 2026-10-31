@@ -524,11 +524,8 @@ export function App() {
 		refreshAllProjects,
 		refreshWorktrees,
 		refreshProjectSessions,
-		refreshFiles,
 		refreshProjectTree,
 		syncDshForeignSessionsIfEnabled,
-		beginFileTreeRequest,
-		isFileTreeRequestCurrent,
 	} = useProjectSync({
 		projects,
 		activeProjectId,
@@ -877,13 +874,8 @@ export function App() {
 	// 文件树是纯本机能力：远端项目没有本机 path，hook 需要据此跳过一切本地 files:list。
 	const isLocalProjectId = useCallback((projectId: string) => projects.some((project) => project.id === projectId && isLocalProject(project)), [projects]);
 	const { expandedDirs, refreshVisibleFiles, restoreExpandedDirs, drillCompactChain, toggleDirectory, collapseAllDirectories } = useProjectFileTreeController({
-		files,
 		setFiles,
-		refreshFiles,
-		beginFileTreeRequest,
-		isFileTreeRequestCurrent,
 		activeProjectId,
-		activeProjectIdRef,
 		isLocalProjectId,
 		compactMiddlePackagesEnabled,
 		agentsRef,
@@ -1160,6 +1152,8 @@ export function App() {
 		saveEditorFileContent,
 		closeEditorTab,
 		selectEditorTab,
+		markEditorTabDirty,
+		isEditorTabDirty,
 		promotePreviewEditorTab,
 		allowSaveEditorTab,
 		previewEditorTabId,
@@ -1603,7 +1597,8 @@ export function App() {
 				// 避免出现「菜单看似切换，首次发送后又回到默认档位」。
 				// 后端取引导页输入框当前选择（composer 经 ensureSessionId 传入，已做可用性
 				// 回落）；没有显式选择就是设置默认后端。不再读 localStorage 的「上次选择」。
-				const draftBackend = target?.backend ?? effectiveAgentBackend;
+				// 远端项目只跑主机上的 pi：即使欢迎页残留 dsh/acp 偏好，也不能把本地 runtime 绑到远端项目。
+				const draftBackend = isRemoteProject(project) ? "pi" : (target?.backend ?? effectiveAgentBackend);
 				const acpToolId = target?.acpToolId;
 				// 模型偏好按后端分开取（issue #253）：DSH 的模型是 host route 名，不在 models.json，
 				// 必须作为显式 model 直接带给 host；pi 的偏好走 welcomeModel（launchDefaults 会按
@@ -2991,7 +2986,7 @@ export function App() {
 					<ResizablePanel id="empty-main" minSize={200} className="flex min-h-0 flex-col">
 						{/* 无会话空态：引导页 = 新建页面形态（居中 ComposerArea + 虚拟会话），
                 不登记 Tab；首次发送才由 ensureSessionForSend 创建真实会话并落 Tab */}
-						<ProjectEmptyState activeProject={activeProject} projects={projects} onAddProject={() => void addProject()} onSelectProject={selectProjectCommand} onOpenTerminal={!isLanWeb && terminalTarget ? () => setTerminalOpenForOwner(true) : undefined} />
+						<ProjectEmptyState activeProject={activeProject} projects={projects} onAddProject={() => void addProject()} onSelectProject={selectProjectCommand} onOpenTerminal={!isLanWeb && terminalTarget ? () => setTerminalOpenForOwner(true) : undefined} onCreateSession={createSessionDraftWithTab} />
 					</ResizablePanel>
 					{!isLanWeb && terminalDockVisible && terminalTarget && (
 						<TerminalDockPanel
@@ -3077,11 +3072,32 @@ export function App() {
 		if (workbenchHasGitDiff) dismissGitDiff();
 		selectEditorTab(id);
 	};
+	// 文件 tab 关闭保护（Wave 5）：dirty tab 直接关闭 = 静默丢改动。自动保存有 1.5s
+	// debounce 且可能失败（网络盘/权限），不能假设「关的时候已经存过了」。确认框文案
+	// 与 ConfigModal「放弃更改」同语义；dirty 集来自 FileDiffViewer 上报。
+	const requestCloseEditorTab = (id: string) => {
+		if (!isEditorTabDirty(id)) {
+			closeEditorTab(id);
+			return;
+		}
+		const tab = editorTabs.find((t) => t.id === id);
+		const label = tab?.label ?? tab?.filePath.split(/[/\\]/).pop() ?? id;
+		overlays.showConfirm({
+			title: t("editor.dirtyCloseTitle"),
+			message: t("editor.dirtyCloseMessage", { file: label }),
+			confirmLabel: t("config.discardChanges"),
+			danger: true,
+			onConfirm: () => {
+				overlays.clearConfirm();
+				closeEditorTab(id);
+			},
+		});
+	};
 	const closeWorkbenchTab = (id: string) => {
 		if (id.startsWith("git-diff:")) {
 			if (simpleMode) dismissGitDiff();
 			else closeGitDiff();
-		} else closeEditorTab(id);
+		} else requestCloseEditorTab(id);
 	};
 	const toggleSimpleContent = () => setSimpleContentExpanded((value) => !value);
 	// 页面式插件面板伪 Tab：tab 模式下挂进 SessionTabsBar（打开时会话 Tab 退非选中，
@@ -3115,7 +3131,7 @@ export function App() {
 					closeGitDiff();
 					return;
 				}
-				closeEditorTab(tabId);
+				requestCloseEditorTab(tabId);
 			}}
 			onPromoteEditorPreview={promotePreviewEditorTab}
 		/>
@@ -3127,6 +3143,7 @@ export function App() {
 			maxFileSizeMB={settings.maxEditorFileSizeMB}
 			editorTabs={editorTabs}
 			onDirty={promotePreviewEditorTab}
+			onDirtyChange={markEditorTabDirty}
 			gitDiff={workbenchHasGitDiff && gitDrawerDiff ? gitDrawerDiff : null}
 			gitDiffDisplayMode={simpleMode ? workbenchLayout : gitDiffDisplayMode}
 			onToggleGitDiffMode={simpleMode ? toggleSimpleContent : toggleGitDiffDisplayMode}
@@ -3135,7 +3152,7 @@ export function App() {
 			editorMode={simpleMode ? workbenchLayout : editorMode}
 			onToggleEditorMode={simpleMode ? toggleSimpleContent : activeTab?.preserveDrawer ? undefined : toggleEditorMode}
 			onCloseEditor={() => {
-				if (simpleMode && activeTab) closeEditorTab(activeTab.id);
+				if (simpleMode && activeTab) requestCloseEditorTab(activeTab.id);
 				else closeEditor();
 			}}
 			readContent={readEditorFileContent}

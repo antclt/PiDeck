@@ -306,6 +306,7 @@ export const SessionRuntimeInjector = React.memo(function SessionRuntimeInjector
 					}
 					enqueueSessionPrompt={services.enqueueSessionPrompt}
 					gitInfo={paneGit.gitInfo}
+					gitUnavailable={paneGit.gitUnavailable}
 					onSwitchBranch={paneGit.switchBranch}
 					ensureSessionId={services.ensureSessionId}
 					// Ask 现由 SessionView 钉在时间线列底部（与输入框同级），不再进时间线滚动内容。

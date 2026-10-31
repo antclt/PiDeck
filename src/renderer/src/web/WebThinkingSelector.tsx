@@ -13,8 +13,10 @@ import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { WebBottomSheet } from "./WebBottomSheet";
 
-/** pi 支持的思考档位（顺序即展示顺序）；与桌面 thinking 选择一致。 */
-export const WEB_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+import { THINKING_LEVELS } from "@/components/session/sessionPickerOptions";
+
+/** pi 支持的思考档位（顺序即展示顺序）；单源自桌面 THINKING_LEVELS，桌面加档位 Web 自动跟随。 */
+export const WEB_THINKING_LEVELS = THINKING_LEVELS.map((level) => level.value);
 
 export function webThinkingLabel(level: string) {
 	switch (level) {

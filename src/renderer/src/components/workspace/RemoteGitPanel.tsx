@@ -14,6 +14,7 @@ import { Input } from "../ui-shadcn/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui-shadcn/select";
 import { Textarea } from "../ui-shadcn/textarea";
 import { FileTree } from "../app/git/GitResourceTree";
+import { RemoteGitCapabilityNote } from "./RemoteGitCapabilityNote";
 import { RemoteGitCompareSection } from "./RemoteGitCompareSection";
 import { RemoteGitTrustGate } from "./RemoteGitTrustGate";
 
@@ -133,7 +134,7 @@ export function RemoteGitPanel({ project }: { project: RemoteProject }) {
 	const refreshAll = () => {
 		// The snapshot read rebuilds the view state and drops the sync facts: read them only after it settles, or a
 		// fast facts answer can be wiped by the snapshot and the bar sits on "loading" forever (G5b regression run).
-		void refresh().then(() => loadSync());
+		void refresh(true).then(() => loadSync());
 		// The explicit refresh gesture is also when a repository that appeared or disappeared natively is re-discovered.
 		void reloadRepos();
 	};
@@ -192,15 +193,12 @@ export function RemoteGitPanel({ project }: { project: RemoteProject }) {
 						<ArrowLeft size={14} />
 					</Button>
 				) : null}
-				<span className="min-w-0 flex-1 truncate font-medium">{t("remoteGit.title")}</span>
+				<span className="min-w-0 flex-1 truncate font-medium">{t("git.sourceControl")}</span>
 				<Button variant="ghost" size="icon-sm" onClick={refreshAll} disabled={state.loading || state.diffLoading || state.mutating} aria-label={t("remoteGit.refresh")}>
 					<RefreshCw size={14} />
 				</Button>
 			</div>
-			{/*
-			 * G5d/G5e repository scope: shown once discovery found more than one repository, or a rootless project with
-			 * nested ones. A nested choice reads AND writes that repository; only init stays root-only.
-			 */}
+			{/* G5d/G5e repo scope: multiple/rootless repos; a nested scope reads+writes; only init stays root-only. */}
 			{showRepoScope ? (
 				<div data-testid="remote-git-repo-scope" className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1">
 					<span className="shrink-0 text-xs text-text-secondary">{t("remoteGit.repoScope")}</span>
@@ -218,6 +216,7 @@ export function RemoteGitPanel({ project }: { project: RemoteProject }) {
 					</Select>
 				</div>
 			) : null}
+			<RemoteGitCapabilityNote kind="repoScope" context={{ repoCount: repos?.length ?? 0 }} />
 			{reposTruncated ? (
 				<p data-testid="remote-git-repos-truncated" className="shrink-0 border-b border-border px-3 py-1 text-xs text-text-secondary">
 					{t("remoteGit.repoReposTruncated")}
@@ -228,7 +227,7 @@ export function RemoteGitPanel({ project }: { project: RemoteProject }) {
 				<div className="flex h-6 items-center gap-1">
 					<span className="min-w-0 flex-1 truncate text-text-secondary" data-testid="remote-git-sync-facts">
 						{syncFacts === undefined
-							? t("remoteGit.syncLoading")
+							? t("remoteGit.loading")
 							: `${syncFacts.branch ?? t("remoteGit.detached")}${syncFacts.upstream === null ? "" : " → " + syncFacts.upstream}${syncFacts.ahead > 0 ? " · " + t("remoteGit.syncAhead", { n: syncFacts.ahead }) : ""}${syncFacts.behind > 0 ? " · " + t("remoteGit.syncBehind", { n: syncFacts.behind }) : ""}`}
 					</span>
 					<Button type="button" variant="ghost" size="sm" data-testid="remote-git-sync-fetch" disabled={!canFetch} onClick={() => syncRemote && fetchRemote(syncRemote)}>
@@ -274,17 +273,16 @@ export function RemoteGitPanel({ project }: { project: RemoteProject }) {
 					</p>
 				)}
 			</div>
-			<p className="shrink-0 border-b border-border px-3 py-2 text-xs text-text-secondary">{t(snapshot && (snapshot.mutationToken || snapshot.commitToken || snapshot.branchToken || snapshot.switchToken || snapshot.discardToken) ? "remoteGit.managedIndex" : "remoteGit.readOnly")}</p>
 			{snapshot && !viewingDiff ? (
 				<div className="shrink-0 space-y-2 border-b border-border px-3 py-2">
-					<Textarea data-testid="remote-git-commit-message" aria-label={t("remoteGit.commitMessage")} placeholder={t("remoteGit.commitPlaceholder")} value={message} rows={2} disabled={busy || snapshot.commitToken === undefined} onChange={(event) => setMessage(event.target.value)} />
+					<Textarea data-testid="remote-git-commit-message" aria-label={t("remoteGit.commitMessage")} placeholder={t("remoteGit.commitMessage")} value={message} rows={2} disabled={busy || snapshot.commitToken === undefined} onChange={(event) => setMessage(event.target.value)} />
 					<div className="flex items-center gap-2">
 						<Button type="button" size="sm" disabled={!canCommit} onClick={() => commit(message)}>
 							{t("remoteGit.commitAction")}
 						</Button>
 						{messageBytes > 0 ? <span className="text-xs text-text-secondary">{messageBytes}/4096</span> : null}
 					</div>
-					<p className="text-xs text-text-secondary">{t("remoteGit.commitHint")}</p>
+					<RemoteGitCapabilityNote kind="commit" context={{ commitVisible: true }} />
 				</div>
 			) : null}
 			{state.loading || state.diffLoading || state.mutating ? (
@@ -507,7 +505,7 @@ export function RemoteGitPanel({ project }: { project: RemoteProject }) {
 						</button>
 						{historyOpen ? (
 							<>
-								<p className="px-3 pb-1 text-xs text-text-secondary">{t("remoteGit.historyReadOnly")}</p>
+								<RemoteGitCapabilityNote kind="history" context={{ historyOpen }} />
 								{state.historyLoading ? <p className="px-3 text-xs text-text-secondary">{t("remoteGit.loading")}</p> : null}
 								{state.historyErrorCode ? (
 									<p role="alert" className="px-3 text-xs text-danger">

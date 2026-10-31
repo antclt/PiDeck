@@ -313,7 +313,7 @@ export class ExtensionManager {
 	/** Before self-update existed, bare `pi update` updated packages only. Keep that safe compatibility. */
 	async updateExtensions(): Promise<PiCliUpdateResult> {
 		const settings = { ...this.getSettings() };
-		const status = await this.locator.check(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
+		const status = await this.locator.check(settings.customPiPath);
 		if (!status.installed) throw new Error(this.translate("mainExtension.piNotInstalled"));
 		if (!parsePiVersion(status.version)) throw new Error(this.translate("mainExtension.piVersionUnknown"));
 		const args = supportsPiSelfUpdate(status.version) ? ["update", "--extensions"] : ["update"];
@@ -495,7 +495,7 @@ export class ExtensionManager {
 	private async detectPiVersion(): Promise<string | null> {
 		try {
 			const settings = this.getSettings();
-			const status = await this.locator.check(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
+			const status = await this.locator.check(settings.customPiPath);
 			if (status.installed && status.version) {
 				this.piVersion = status.version;
 				return status.version;
@@ -514,12 +514,8 @@ export class ExtensionManager {
 			finalArgs.push("--no-approve");
 		}
 		const settings = options.settings ?? this.getSettings();
-		// 设置页装扩展可以等 WSL which；不能在 resolveCommand 里同步卡住主进程。
-		if (settings.wslEnabled && settings.wslDistro && settings.wslUser) {
-			await this.locator.warmWslCommand(settings.wslDistro, settings.wslUser);
-		}
 		const runtimeCwd = options.cwd && this.wslEnvironment ? toWslLinuxPath(options.cwd, this.wslEnvironment) : options.cwd;
-		const command = this.locator.resolveCommand(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
+		const command = this.locator.resolveCommand(settings.customPiPath);
 		const invocation = this.locator.createInvocation(command, finalArgs, {
 			wslCwd: this.wslEnvironment && runtimeCwd ? runtimeCwd : undefined,
 		});

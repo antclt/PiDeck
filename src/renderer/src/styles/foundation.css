@@ -1563,6 +1563,21 @@ select:focus-visible {
 .custom-titlebar-enabled button {
   -webkit-app-region: no-drag;
 }
+/* Radix 浮层（菜单 / 下拉 / 弹出框 / 提示框）portal 到 body，不在 .custom-titlebar-enabled
+   作用域内——上面那批规则全部以 .custom-titlebar-enabled 开头，一个都匹配不到。
+   Electron 的拖拽命中不看 z-index：它把页面报上来的 app-region 矩形按顺序合成一张 SkRegion
+   （drag 并集、no-drag 差集，见 ui/gfx/draggable_region.h；矩形按布局树/DOM 顺序收集），
+   后出现的矩形覆盖先出现的。长菜单被 flip+shift 顶到视口上沿时，首项压在 .window-drag-layer
+   的 40px 热区里，浮层 z 960 > 热区 900 也照样点不动；而 portal 到 body 的浮层排在 shell 之后，
+   所以这里显式 no-drag 就能反超热区（app-region 不继承，后代要逐个声明）。
+   与 toast 同一个坑，修法一致。定位侧另由 ui-shadcn 的 titlebarCollisionPadding 让开热区，
+   这里是兜底（子菜单 SubContent 不走 portal，也不经过那个 helper）。
+   注意：非 Radix 的 createPortal 浮层（如 FeishuLinkIndicator / morphing-search）不在此选择器内，
+   若压在热区上需各自声明。 */
+[data-radix-popper-content-wrapper],
+[data-radix-popper-content-wrapper] * {
+  -webkit-app-region: no-drag;
+}
 /* 抽屉开合的 grid 过渡随布局换装移除（#115 U5）；drawer-open/drawer-collapsed
    class 保留仅为语义/选择器兼容。 */
 

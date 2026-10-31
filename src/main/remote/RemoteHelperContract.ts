@@ -125,6 +125,33 @@ export const REMOTE_HELPER_METHOD_ECHO = "echo";
 export const REMOTE_HELPER_METHOD_CANCEL = "cancel";
 /** Read-only workspace methods: the first batch of helpers that actually touches the remote filesystem. */
 export const REMOTE_HELPER_METHOD_FS_STAT = "fs.stat";
+/**
+ * Batched form of `fs.stat` (helper 1.22.0): one bounded frame describes up to
+ * REMOTE_HELPER_MAX_STAT_MANY_PATHS entries with exactly the per-path rules of the single call. It exists
+ * because a session list costs one round trip per file without it; nothing about *which* paths are scanned
+ * moves into the helper.
+ */
+export const REMOTE_HELPER_METHOD_FS_STAT_MANY = "fs.statMany";
+/**
+ * Git 权威的忽略判定（helper 1.23.0）：`{ paths }` → `{ ignored: boolean[] }`，与请求**逐位对应**。
+ * 为什么放在 helper 而不在 main 自己写匹配器：`.gitignore` 的语义（取反、嵌套、`core.excludesFile`、
+ * `info/exclude`、linked worktree 的 common dir）只有 git 自己是权威；重写一遍必然与 `git status` 打架。
+ */
+export const REMOTE_HELPER_METHOD_GIT_CHECK_IGNORE = "git.checkIgnore";
+/**
+ * 目录订阅（helper 1.24.0）：`fs.watch { paths } → { watchId }` / `fs.unwatch { watchId } → { closed }`。
+ * 变更以**事件帧**（无 `id`、带 `watchId`）单向推送，主进程只做失效，不触发装载。
+ */
+export const REMOTE_HELPER_METHOD_FS_WATCH = "fs.watch";
+export const REMOTE_HELPER_METHOD_FS_UNWATCH = "fs.unwatch";
+/** 一个 helper 会话同时允许的 watcher 数；超出直接拒绝而不是排队。 */
+export const REMOTE_HELPER_MAX_WATCHES = 4;
+/** 一次订阅里最多几个目录。 */
+export const REMOTE_HELPER_MAX_WATCH_PATHS = 32;
+/** 连续写合并窗口（毫秒）。 */
+export const REMOTE_HELPER_WATCH_DEBOUNCE_MS = 150;
+/** 一次判定的路径数上限（与 `fs.statMany` 同量级，够填满一屏目录）。 */
+export const REMOTE_HELPER_MAX_CHECK_IGNORE_PATHS = 64;
 export const REMOTE_HELPER_METHOD_FS_LIST = "fs.list";
 export const REMOTE_HELPER_METHOD_FS_READ = "fs.read";
 /**
@@ -165,7 +192,7 @@ export type RemoteGitReposResult = { repos: readonly RemoteGitRepoEntry[]; trunc
  * child is started. A test pins the three method lists against each other.
  */
 export const REMOTE_GIT_REPO_PATH_MAX_BYTES = 4096;
-export const REMOTE_GIT_REPO_READ_METHODS = ["git.status", "git.workspaceDiff", "git.log", "git.commitDetail", "git.refs", "git.refFileDiff", "git.compare", "git.recoveryList", "git.syncFacts"] as const;
+export const REMOTE_GIT_REPO_READ_METHODS = ["git.status", "git.workspaceDiff", "git.log", "git.commitDetail", "git.refs", "git.refFileDiff", "git.compare", "git.recoveryList", "git.syncFacts", "git.checkIgnore"] as const;
 export const REMOTE_GIT_REPO_WRITE_METHODS = ["git.stage", "git.unstage", "git.commit", "git.createBranch", "git.switchBranch", "git.discard", "git.recoveryRestore", "git.recoveryDrop", "git.fetch", "git.push", "git.pull"] as const;
 export const REMOTE_GIT_STATUS_MAX_BYTES = 1024 * 1024;
 export const REMOTE_GIT_MAX_RESOURCES = 4096;
@@ -313,9 +340,13 @@ export type RemoteGitWorkspaceDiffResult = { originalContent: string; modifiedCo
 export const REMOTE_HELPER_CAPABILITIES = [
 	"echo",
 	"fs.stat",
+	"fs.statMany",
 	"fs.list",
 	"fs.read",
 	"fs.searchNames",
+	"fs.searchContent",
+	"fs.watch",
+	"fs.unwatch",
 	"git.status",
 	"git.workspaceDiff",
 	"git.stage",
@@ -338,6 +369,7 @@ export const REMOTE_HELPER_CAPABILITIES = [
 	"git.pull",
 	"git.init",
 	"git.repos",
+	"git.checkIgnore",
 	"terminal.prepare",
 	"config.read",
 	"config.patch",
@@ -348,6 +380,12 @@ export type RemoteHelperCapability = (typeof REMOTE_HELPER_CAPABILITIES)[number]
  * so an over-long path is a PROTOCOL_INVALID refusal rather than an ENAMETOOLONG round trip.
  */
 export const REMOTE_HELPER_MAX_PATH_LENGTH = 4096;
+/**
+ * Paths per `fs.statMany` request. It bounds both directions: the caller sends few enough paths for one
+ * frame, and the helper answers without splitting a batch, so a full 2000-file listing is <= 32 round trips
+ * instead of 2000 while each entry still counts as its own logical unit.
+ */
+export const REMOTE_HELPER_MAX_STAT_MANY_PATHS = 64;
 /**
  * `fs.list` answers in one frame, so the entry count is capped instead of paged: past the cap the whole
  * call is refused with RESULT_TOO_LARGE, never truncated into a listing that silently looks complete.
@@ -369,6 +407,36 @@ export const REMOTE_HELPER_MAX_SEARCH_SCANNED = 20000;
 export const REMOTE_HELPER_MAX_SEARCH_DEPTH = 12;
 /** Query ceiling for `fs.searchNames`, counted in characters and checked before any filesystem access. */
 export const REMOTE_HELPER_MAX_SEARCH_QUERY_LENGTH = 128;
+/**
+ * Bounded content search (helper 1.25.0). `fs.searchContent` is the first read that actually opens file
+ * bodies, so every bound is a literal of the frozen artifact and repeated here under test:
+ * - matches: at most 200 answered; the walk stops at the match that fills the ceiling;
+ * - files: at most 2000 files read, bytes: at most 16 MiB read in total, and one file larger than 1 MiB is
+ *   skipped (its bytes are never read) — each limit sets `truncated` with the `reason` that stopped it;
+ * - time: at most 8 s of scanning, checked at entry/file boundaries, so a slow filesystem cannot hold a
+ *   helper slot for the whole request deadline;
+ * - depth: 12 segments below the request path, the same ceiling the filename walk uses;
+ * - a file whose first 8 KiB contain a NUL byte is binary and is skipped without being decoded; invalid
+ *   UTF-8 is skipped too. Skips are not truncation: they say "this file is not text", not "the tree was cut".
+ * - a snippet is at most 200 characters of the matched line, and a match names only its relative path,
+ *   line (1-based) and column (0-based): no file body ever travels back in a result.
+ */
+export const REMOTE_HELPER_METHOD_FS_SEARCH_CONTENT = "fs.searchContent";
+export const REMOTE_HELPER_MAX_CONTENT_MATCHES = 200;
+export const REMOTE_HELPER_MAX_CONTENT_SCANNED_FILES = 2000;
+export const REMOTE_HELPER_MAX_CONTENT_SCANNED_BYTES = 16 * 1024 * 1024;
+export const REMOTE_HELPER_MAX_CONTENT_FILE_BYTES = 1024 * 1024;
+export const REMOTE_HELPER_MAX_CONTENT_BINARY_PROBE_BYTES = 8 * 1024;
+export const REMOTE_HELPER_MAX_CONTENT_TIME_MS = 8000;
+export const REMOTE_HELPER_MAX_CONTENT_DEPTH = 12;
+export const REMOTE_HELPER_MAX_CONTENT_SNIPPET_LENGTH = 200;
+/**
+ * Directories the content walk never descends into: VCS metadata, package installs and PiDeck's own trash are
+ * not project text sources, and `.git`/`node_modules` alone can exhaust the whole file/byte budget before a
+ * single source file is reached. They are skipped by name at any depth; a user file inside them is intentionally
+ * outside this search, which is the same set the remote file tree hides.
+ */
+export const REMOTE_HELPER_CONTENT_SKIPPED_DIRECTORIES = [".git", ".hg", ".svn", "node_modules", ".pideck-trash"] as const;
 /** Bounded concurrency plus a bounded waiting room: past both, a request is refused, never buffered. */
 export const REMOTE_HELPER_MAX_QUEUED_REQUESTS = 64;
 /**
@@ -427,6 +495,15 @@ export type RemoteHelperPathKind = "file" | "directory" | "other";
 export type RemoteHelperStatParams = { path: string };
 /** `bytes` is the entry's own size (the link's size for a symlink) and `mtimeMs` its modification time. */
 export type RemoteHelperStatResult = { kind: RemoteHelperPathKind; bytes: number; mtimeMs: number };
+/**
+ * `paths` is 1..REMOTE_HELPER_MAX_STAT_MANY_PATHS relative POSIX paths, each checked exactly like
+ * RemoteHelperStatParams. Any unusable path refuses the whole request with that path's own code: a batch is
+ * all-or-nothing, which is what keeps its result comparable to calling `fs.stat` once per entry.
+ */
+export type RemoteHelperStatManyParams = { paths: readonly string[] };
+/** Entries are in request order and echo the requested path; an index is never implied by omission. */
+export type RemoteHelperStatManyEntry = { path: string; kind: RemoteHelperPathKind; bytes: number; mtimeMs: number };
+export type RemoteHelperStatManyResult = { entries: readonly RemoteHelperStatManyEntry[] };
 
 export type RemoteHelperListParams = { path: string };
 /** `bytes` is present for regular files only; a symlink is `other` and is never followed. */
@@ -453,6 +530,37 @@ export type RemoteHelperSearchEntry = { path: string; name: string; kind: Remote
  * three ceilings stopped the walk, which is the only case in which the answer is not the whole tree.
  */
 export type RemoteHelperSearchResult = { entries: readonly RemoteHelperSearchEntry[]; scanned: number; truncated: boolean };
+/**
+ * `fs.searchContent` (helper 1.25.0): the bounded content read. `path` names the directory to walk and is
+ * checked exactly as `fs.list` checks one; `query` is a 1..128 character literal matched case-insensitively
+ * inside each line; `maxMatches` is optional and clamped to 1..REMOTE_HELPER_MAX_CONTENT_MATCHES.
+ */
+export type RemoteHelperSearchContentParams = { path: string; query: string; maxMatches?: number };
+/**
+ * One line match: `path` is the relative POSIX path inside the root, `line` is 1-based, `column` is the
+ * 0-based character offset of the match in that line, and `snippet` is at most
+ * REMOTE_HELPER_MAX_CONTENT_SNIPPET_LENGTH characters of the same line. The file body never travels back.
+ */
+export type RemoteHelperSearchContentMatch = { path: string; name: string; line: number; column: number; snippet: string };
+/**
+ * The reason a bounded answer is not the whole tree. `file-size` means one file was skipped because it is
+ * larger than REMOTE_HELPER_MAX_CONTENT_FILE_BYTES (its bytes were never read); binary and invalid UTF-8
+ * skips are deliberately not truncation and carry no reason.
+ */
+export type RemoteHelperSearchContentReason = "matches" | "files" | "bytes" | "time" | "depth" | "file-size";
+/**
+ * `matchedFiles` counts distinct files with at least one match, `scannedFiles` every file whose bytes were
+ * read (including binary/invalid UTF-8 skips) and `scannedBytes` every byte handed to the decoder, so the
+ * three fields describe work actually done. `reason` is present exactly when `truncated` is true.
+ */
+export type RemoteHelperSearchContentResult = {
+	matches: readonly RemoteHelperSearchContentMatch[];
+	matchedFiles: number;
+	scannedFiles: number;
+	scannedBytes: number;
+	truncated: boolean;
+	reason?: RemoteHelperSearchContentReason;
+};
 
 /**
  * `offset` and `bytes` are safe non-negative integers; `bytes` is at most REMOTE_HELPER_MAX_CHUNK_BYTES,
@@ -653,14 +761,23 @@ export type RemoteBootstrapFileMode = (typeof REMOTE_BOOTSTRAP_FILE_MODES)[numbe
 export type RemoteBootstrapFinalizeBeginFrame = { v: 1; op: "finalize-begin"; files: number; bundleSha256: string };
 export type RemoteBootstrapFinalizeFileFrame = { v: 1; op: "finalize-file"; name: string; sha256: string; bytes: number; mode: RemoteBootstrapFileMode };
 export type RemoteBootstrapFinalizeCommitFrame = { v: 1; op: "finalize-commit" };
+/**
+ * Read-only reuse check (plan F3): the same declaration frames, but instead of a commit the entry is asked
+ * to re-prove the already active `<target>/<bundleSha256>` directory. It answers `verified` (main skips the
+ * upload), `verify-miss` with `reason: absent` (continue with the upload) or `conflict` (stop: an installed
+ * but different directory is never overwritten), or an `error` frame.
+ */
+export type RemoteBootstrapFinalizeVerifyFrame = { v: 1; op: "finalize-verify" };
 export type RemoteBootstrapAbortFrame = { v: 1; op: "abort" };
-export type RemoteBootstrapInboundFrame = RemoteBootstrapFinalizeBeginFrame | RemoteBootstrapFinalizeFileFrame | RemoteBootstrapFinalizeCommitFrame | RemoteBootstrapAbortFrame;
+export type RemoteBootstrapInboundFrame = RemoteBootstrapFinalizeBeginFrame | RemoteBootstrapFinalizeFileFrame | RemoteBootstrapFinalizeCommitFrame | RemoteBootstrapFinalizeVerifyFrame | RemoteBootstrapAbortFrame;
 
 export type RemoteBootstrapReadyFrame = { v: 1; op: "ready"; protocolVersion: number; bundleSha256: string; nonce: string; deployRoot: string; staging: string; stagingMode: "0700" };
 export type RemoteBootstrapFinalizedFrame = { v: 1; op: "finalized"; active: string; files: number };
+export type RemoteBootstrapVerifiedFrame = { v: 1; op: "verified"; active: string; files: number };
+export type RemoteBootstrapVerifyMissFrame = { v: 1; op: "verify-miss"; reason: "absent" | "conflict" };
 export type RemoteBootstrapAbortedFrame = { v: 1; op: "aborted"; reason: "requested" | "eof" };
 export type RemoteBootstrapErrorFrame = { v: 1; op: "error"; code: string };
-export type RemoteBootstrapResultFrame = RemoteBootstrapReadyFrame | RemoteBootstrapFinalizedFrame | RemoteBootstrapAbortedFrame | RemoteBootstrapErrorFrame;
+export type RemoteBootstrapResultFrame = RemoteBootstrapReadyFrame | RemoteBootstrapFinalizedFrame | RemoteBootstrapVerifiedFrame | RemoteBootstrapVerifyMissFrame | RemoteBootstrapAbortedFrame | RemoteBootstrapErrorFrame;
 
 export const REMOTE_BOOTSTRAP_FINALIZE_ERROR_CODES = ["BOOTSTRAP_INPUT_INVALID", "BOOTSTRAP_ENTRY_OP_UNSUPPORTED", "BOOTSTRAP_FINALIZE_INCOMPLETE", "BOOTSTRAP_FILE_MISMATCH", "BOOTSTRAP_MODE_INVALID", "BOOTSTRAP_ACTIVE_CONFLICT", "BOOTSTRAP_INTERNAL"] as const;
 export type RemoteBootstrapFinalizeErrorCode = (typeof REMOTE_BOOTSTRAP_FINALIZE_ERROR_CODES)[number];

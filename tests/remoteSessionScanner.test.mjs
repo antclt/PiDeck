@@ -24,14 +24,15 @@ function fileEntry(name, bytes = 10) {
 }
 
 /**
- * 远端替身：只认识 fs.list / fs.stat（扫描不需要 fs.read）。
+ * 远端替身：只认识 fs.list / fs.stat / fs.statMany（扫描不需要 fs.read）。
  * listings[path] 是目录项数组，或 (params) => 数组（也可抛错）；files[path] 是 { bytes, mtimeMs, kind }。
  * 所有返回值都是**精确字段集**——多一个字段 reader 就会按协议违例拒绝，这正是要被测到的边界。
+ * statMany 与真实 helper 同语义：按请求顺序回显 path，任何一条不可用就整批拒绝。
  */
 function fakeRemote(options = {}) {
 	const listings = options.listings ?? {};
 	const files = options.files ?? {};
-	const calls = { home: [], sessions: [], list: [], stat: [], read: [], probe: [] };
+	const calls = { home: [], sessions: [], list: [], stat: [], statBatches: [], read: [], probe: [] };
 	let inFlight = 0;
 	let maxInFlight = 0;
 	const port = {
@@ -65,6 +66,17 @@ function fakeRemote(options = {}) {
 						} finally {
 							inFlight -= 1;
 						}
+					}
+					if (method === "fs.statMany") {
+						calls.stat.push(...params.paths);
+						calls.statBatches.push([...params.paths]);
+						const described = [];
+						for (const path of params.paths) {
+							const file = files[path];
+							if (file === undefined) throw new Error("PATH_NOT_FOUND");
+							described.push({ path, kind: file.kind ?? "file", bytes: file.bytes ?? 0, mtimeMs: file.mtimeMs ?? 0 });
+						}
+						return { entries: described };
 					}
 					if (method === "fs.stat") {
 						calls.stat.push(params.path);
@@ -299,8 +311,8 @@ test("IPC：实验开关关掉时连服务都不构建", async () => {
 		},
 		channels: CHANNELS,
 	});
-	assert.deepEqual(plain(await handlers.get(CHANNELS.scan)({}, HOST)), { ok: false, code: "REMOTE_FEATURE_DISABLED" });
-	assert.deepEqual(plain(await handlers.get(CHANNELS.register)({}, HOST, "a.jsonl")), { ok: false, code: "REMOTE_FEATURE_DISABLED" });
+	assert.deepEqual(plain(await handlers.get(CHANNELS.scan)({}, HOST)), { ok: false, code: "REMOTE_FEATURE_DISABLED", outcome: "rejected" });
+	assert.deepEqual(plain(await handlers.get(CHANNELS.register)({}, HOST, "a.jsonl")), { ok: false, code: "REMOTE_FEATURE_DISABLED", outcome: "rejected" });
 	assert.equal(called, false);
 });
 
@@ -315,8 +327,8 @@ test("IPC：非法 hostId 在边界就被拒，不进服务", async () => {
 		channels: CHANNELS,
 	});
 	for (const bad of ["", "not-a-uuid", "../../etc/passwd", undefined, 42]) {
-		assert.deepEqual(plain(await handlers.get(CHANNELS.scan)({}, bad)), { ok: false, code: "REMOTE_SESSION_HOST_ID_INVALID" });
-		assert.deepEqual(plain(await handlers.get(CHANNELS.register)({}, bad, "a.jsonl")), { ok: false, code: "REMOTE_SESSION_HOST_ID_INVALID" });
+		assert.deepEqual(plain(await handlers.get(CHANNELS.scan)({}, bad)), { ok: false, code: "REMOTE_SESSION_HOST_ID_INVALID", outcome: "rejected" });
+		assert.deepEqual(plain(await handlers.get(CHANNELS.register)({}, bad, "a.jsonl")), { ok: false, code: "REMOTE_SESSION_HOST_ID_INVALID", outcome: "rejected" });
 	}
 	assert.equal(called, false);
 });
@@ -325,7 +337,7 @@ test("IPC：扫描返回列表级元数据（无正文、无远端路径以外�
 	const { port } = fakeRemote({ listings: { ".": [fileEntry("s.jsonl", 12)] }, files: { "s.jsonl": { bytes: 12, mtimeMs: 5 } } });
 	const handlers = ipcFor({ enabled: true, service: () => port, channels: CHANNELS });
 	const result = await handlers.get(CHANNELS.scan)({}, HOST);
-	assert.deepEqual(plain(result), { ok: true, entries: [{ remoteSessionId: "s.jsonl", remotePath: "s.jsonl", name: "s", size: 12, mtimeMs: 5 }] });
+	assert.deepEqual(plain(result), { ok: true, value: { entries: [{ remoteSessionId: "s.jsonl", remotePath: "s.jsonl", name: "s", size: 12, mtimeMs: 5 }] } });
 });
 
 test("IPC：登记把远端 id 与装配给的项目归属交给 catalog，返回稳定 sessionId", async () => {
@@ -339,8 +351,8 @@ test("IPC：登记把远端 id 与装配给的项目归属交给 catalog，返�
 	};
 	const handlers = ipcFor({ enabled: true, service: () => port, catalog: () => catalog, projectIdForHost: () => "project-1", channels: CHANNELS });
 	const id = "2026-02-03T10-00-00_abc.jsonl";
-	assert.deepEqual(plain(await handlers.get(CHANNELS.register)({}, HOST, id)), { ok: true, sessionId: "stable-1", created: true, remoteSessionId: id, remotePath: id });
-	assert.deepEqual(plain(await handlers.get(CHANNELS.register)({}, HOST, id)), { ok: true, sessionId: "stable-1", created: false, remoteSessionId: id, remotePath: id });
+	assert.deepEqual(plain(await handlers.get(CHANNELS.register)({}, HOST, id)), { ok: true, value: { sessionId: "stable-1", created: true, remoteSessionId: id, remotePath: id } });
+	assert.deepEqual(plain(await handlers.get(CHANNELS.register)({}, HOST, id)), { ok: true, value: { sessionId: "stable-1", created: false, remoteSessionId: id, remotePath: id } });
 	assert.deepEqual(plain(ensured[0]), { projectId: "project-1", hostId: HOST, remoteSessionId: id, remotePath: id, title: "2026-02-03T10-00-00_abc", updatedAt: 999 });
 	// 两次登记各自都在远端确认了一次这条 id 现在是文件。
 	assert.deepEqual(calls.stat, [id, id]);
@@ -356,13 +368,13 @@ test("IPC：非字符串 remoteSessionId 被边界拒绝", async () => {
 		},
 		channels: CHANNELS,
 	});
-	assert.deepEqual(plain(await handlers.get(CHANNELS.register)({}, HOST, 7)), { ok: false, code: "REMOTE_SESSION_ID_INVALID" });
+	assert.deepEqual(plain(await handlers.get(CHANNELS.register)({}, HOST, 7)), { ok: false, code: "REMOTE_SESSION_ID_INVALID", outcome: "rejected" });
 	assert.equal(called, false);
 });
 
 test("IPC：服务构建失败与缺失都是稳定码", async () => {
 	const missing = ipcFor({ enabled: true, service: () => undefined, channels: CHANNELS });
-	assert.deepEqual(plain(await missing.get(CHANNELS.scan)({}, HOST)), { ok: false, code: "REMOTE_CONNECTION_SERVICE_UNAVAILABLE" });
+	assert.deepEqual(plain(await missing.get(CHANNELS.scan)({}, HOST)), { ok: false, code: "REMOTE_CONNECTION_SERVICE_UNAVAILABLE", outcome: "rejected" });
 	const broken = ipcFor({
 		enabled: true,
 		service: () => {
@@ -370,7 +382,56 @@ test("IPC：服务构建失败与缺失都是稳定码", async () => {
 		},
 		channels: CHANNELS,
 	});
-	assert.deepEqual(plain(await broken.get(CHANNELS.scan)({}, HOST)), { ok: false, code: "REMOTE_CONNECTION_SERVICE_UNAVAILABLE" });
+	assert.deepEqual(plain(await broken.get(CHANNELS.scan)({}, HOST)), { ok: false, code: "REMOTE_CONNECTION_SERVICE_UNAVAILABLE", outcome: "rejected" });
 	const service = ipcFor({ enabled: true, service: () => ({ remoteHome: async () => "/home/dev" }), channels: CHANNELS });
-	assert.deepEqual(plain(await service.get(CHANNELS.scan)({}, HOST)), { ok: false, code: "REMOTE_SESSION_SCANNER_OPTIONS_INVALID" });
+	assert.deepEqual(plain(await service.get(CHANNELS.scan)({}, HOST)), { ok: false, code: "REMOTE_SESSION_SCANNER_OPTIONS_INVALID", outcome: "rejected" });
+});
+
+/*
+ * F4：session list 的元数据是**批量**取的（64 条/批）。请求数随文件数增长得慢一两个数量级，而候选项、
+ * 预算、顺序和归属仍然全部由扫描器决定。
+ */
+test("扫描：2000 个文件的元数据最多 32 次请求，每批不超过 64 条", async () => {
+	const listing = [];
+	const files = {};
+	for (let index = 0; index < 2000; index += 1) {
+		const name = `2026-01-01T00-00-00_id${String(index).padStart(4, "0")}.jsonl`;
+		listing.push(fileEntry(name, index));
+		files[name] = { bytes: index, mtimeMs: index };
+	}
+	const { port, calls } = fakeRemote({ listings: { ".": listing }, files });
+	const result = await createRemoteSessionScanner({ port }).scan(HOST);
+	assert.equal(result.ok, true, JSON.stringify(result));
+	assert.equal(result.entries.length, 2000);
+	assert.ok(calls.statBatches.length <= 32, `expected at most 32 metadata requests, saw ${calls.statBatches.length}`);
+	assert.equal(Math.ceil(2000 / 64), 32);
+	for (const batch of calls.statBatches) assert.ok(batch.length > 0 && batch.length <= 64, `batch of ${batch.length}`);
+	assert.equal(
+		calls.statBatches.reduce((sum, batch) => sum + batch.length, 0),
+		2000,
+		"every candidate is described exactly once",
+	);
+	assert.deepEqual(calls.stat.slice().sort(), listing.map((entry) => entry.name).sort());
+});
+
+test("扫描：不足一批的文件只发一次请求，空目录一条元数据请求都不发", async () => {
+	const small = fakeRemote({
+		listings: { ".": [fileEntry("a.jsonl", 9), fileEntry("b.jsonl", 3)] },
+		files: { "a.jsonl": { bytes: 9, mtimeMs: 1 }, "b.jsonl": { bytes: 3, mtimeMs: 2 } },
+	});
+	const scanned = await createRemoteSessionScanner({ port: small.port }).scan(HOST);
+	assert.equal(scanned.ok, true);
+	assert.deepEqual(
+		plain(scanned.entries).map((entry) => entry.remoteSessionId),
+		["a.jsonl", "b.jsonl"],
+		"request order is preserved inside one batch",
+	);
+	assert.equal(small.calls.statBatches.length, 1);
+	assert.deepEqual(small.calls.statBatches[0], ["a.jsonl", "b.jsonl"]);
+
+	const empty = fakeRemote({ listings: { ".": [] } });
+	const none = await createRemoteSessionScanner({ port: empty.port }).scan(HOST);
+	assert.equal(none.ok, true);
+	assert.deepEqual(plain(none.entries), []);
+	assert.equal(empty.calls.statBatches.length, 0, "an empty candidate set must not send a metadata request at all");
 });

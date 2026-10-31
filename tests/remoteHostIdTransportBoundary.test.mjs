@@ -31,6 +31,7 @@ function fakeRemote() {
 		async request(method, params) {
 			frames.push({ method, params: plain(params ?? {}) });
 			if (method === "fs.list") return { entries: params.path === "." ? [{ name: "s.jsonl", kind: "file", bytes: 4 }] : [] };
+			if (method === "fs.statMany") return { entries: params.paths.map((path) => ({ path, kind: "file", bytes: 4, mtimeMs: 7 })) };
 			if (method === "fs.stat") return { kind: "file", bytes: 4, mtimeMs: 7 };
 			if (method === "fs.read")
 				return {

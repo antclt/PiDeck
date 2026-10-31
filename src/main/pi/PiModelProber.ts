@@ -198,11 +198,7 @@ export async function probePiModel(piLocator: PiLocator, settingsStore: Settings
 	const settings = settingsStore.get();
 	// 测试代理显式选择时覆盖探针设置（follow 原样返回，不产生新对象）。
 	const probeSettings = applyConfigProxyTarget(settings, proxyTarget);
-	// 拉测试可以等 WSL which；不能在 resolveCommand 里同步卡住主进程。
-	if (settings.wslEnabled && settings.wslDistro && settings.wslUser) {
-		await piLocator.warmWslCommand(settings.wslDistro, settings.wslUser);
-	}
-	const command = piLocator.resolveCommand(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
+	const command = piLocator.resolveCommand(settings.customPiPath);
 
 	// 老 pi 优雅降级：先用全集优化参数跑，命中 "Unknown option" 再退到最小核心集重试一次。
 	// 全集参数跑通即返回；模型真正的报错/超时不命中 unknown-option，直接返回不降级。

@@ -293,6 +293,9 @@ export type SessionTitleFetchOptions = {
 	includeTitle?: boolean;
 	/** true = 额外有界读取「文件内首条 user 文本」（legacy 存量自愈的第二指纹基准，见 #266）。 */
 	includeFirstUserText?: boolean;
+	/** WSL 项目补名：装配层据此选择对应发行版/用户的 scanner 读文件，而不是宿主 Node 读 Linux 路径。 */
+	wslDistro?: string;
+	wslUser?: string;
 };
 
 /** 标题刷新 + 会话头有效性校验：装配层注入（实现为 SessionScanner.inferSessionNameAndValidity，
@@ -1099,7 +1102,7 @@ export class SessionCatalog implements HostRebindStorePort {
 		});
 	}
 
-	createAnonymous(input: { projectId: string; title: string; environment: SessionEnvironment; model?: SessionModelPreference; thinkingLevel?: string }): SessionRecord {
+	createAnonymous(input: { projectId: string; title: string; environment: SessionEnvironment; wslDistro?: string; wslUser?: string; model?: SessionModelPreference; thinkingLevel?: string }): SessionRecord {
 		this.assertLoaded();
 		const now = Date.now();
 		const entry: SessionCatalogEntry = {
@@ -1111,8 +1114,8 @@ export class SessionCatalog implements HostRebindStorePort {
 			noSession: true,
 			source: "pi",
 			environment: input.environment,
-			wslDistro: input.environment === "wsl" ? this.identityContext.wslDistro : undefined,
-			wslUser: input.environment === "wsl" ? this.identityContext.wslUser : undefined,
+			wslDistro: input.environment === "wsl" ? (input.wslDistro ?? this.identityContext.wslDistro) : undefined,
+			wslUser: input.environment === "wsl" ? (input.wslUser ?? this.identityContext.wslUser) : undefined,
 			status: "active",
 			model: cloneModelPreference(input.model),
 			thinkingLevel: input.thinkingLevel,
@@ -1395,6 +1398,9 @@ export class SessionCatalog implements HostRebindStorePort {
 		projectId: string;
 		title: string;
 		environment: SessionEnvironment;
+		/** 第 12 步：WSL 项目按自己的档案记录身份；缺省时回退 identityContext（兼容旧调用）。 */
+		wslDistro?: string;
+		wslUser?: string;
 		source?: SessionSource;
 		backend?: AgentBackend;
 		model?: SessionModelPreference;
@@ -1494,8 +1500,9 @@ export class SessionCatalog implements HostRebindStorePort {
 				sideTask: input.sideTask ? true : undefined,
 				forked: input.forked ? true : undefined,
 				backend: input.backend,
-				wslDistro: input.environment === "wsl" ? this.identityContext.wslDistro : undefined,
-				wslUser: input.environment === "wsl" ? this.identityContext.wslUser : undefined,
+				// 第 12 步：显式身份优先；旧调用没有时仍回退全局上下文。
+				wslDistro: input.environment === "wsl" ? (input.wslDistro ?? this.identityContext.wslDistro) : undefined,
+				wslUser: input.environment === "wsl" ? (input.wslUser ?? this.identityContext.wslUser) : undefined,
 				// 带 dshSessionId = 导入已有 host 会话（数据在 $DSH_HOME），
 				// 不是「尚未发送」的草稿：置 active，重启清理/重新打开都按真实会话处理。
 				status: input.dshSessionId ? "active" : "draft",
@@ -2353,7 +2360,7 @@ export class SessionCatalog implements HostRebindStorePort {
 		const workers = Array.from({ length: Math.min(CONCURRENCY, wanted.length) }, async () => {
 			while (cursor < wanted.length) {
 				const item = wanted[cursor++];
-				const result = await this.fetchTitle!(item.filePath, { includeTitle: item.includeTitle }).catch(() => undefined);
+				const result = await this.fetchTitle!(item.filePath, { includeTitle: item.includeTitle, ...(context.wslDistro ? { wslDistro: context.wslDistro } : {}), ...(context.wslUser ? { wslUser: context.wslUser } : {}) }).catch(() => undefined);
 				if (!result) continue;
 				if (item.includeTitle && result.name) {
 					// fromSessionInfo=false 是首条消息弱回退（#266）：所有权只能算 fallback，
@@ -2376,7 +2383,12 @@ export class SessionCatalog implements HostRebindStorePort {
 					// 深读失败（WSL 超时/文件被占）只降级回「窗口兜底比对」并消费掉这一次机会，不像读盘失败那样保持可重试：
 					// 一条修不了的存量条目不值得每次扫描都再读 8MB。方向是安全的——最多保持原标题，不会写错。
 					const firstUserText = needsFirstUserText
-						? await this.fetchTitle!(item.filePath, { includeTitle: false, includeFirstUserText: true })
+						? await this.fetchTitle!(item.filePath, {
+								includeTitle: false,
+								includeFirstUserText: true,
+								...(context.wslDistro ? { wslDistro: context.wslDistro } : {}),
+								...(context.wslUser ? { wslUser: context.wslUser } : {}),
+							})
 								.then((extra) => extra?.firstUserText)
 								.catch(() => undefined)
 						: undefined;

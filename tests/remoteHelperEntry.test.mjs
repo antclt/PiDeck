@@ -38,6 +38,7 @@ const {
 	REMOTE_HELPER_MAX_SEARCH_MATCHES,
 	REMOTE_HELPER_MAX_SEARCH_QUERY_LENGTH,
 	REMOTE_HELPER_MAX_SEARCH_SCANNED,
+	REMOTE_HELPER_MAX_STAT_MANY_PATHS,
 	REMOTE_HELPER_MAX_QUEUED_REQUESTS,
 	REMOTE_HELPER_METHOD_CANCEL,
 	REMOTE_HELPER_METHOD_ECHO,
@@ -45,6 +46,7 @@ const {
 	REMOTE_HELPER_METHOD_FS_READ,
 	REMOTE_HELPER_METHOD_FS_SEARCH_NAMES,
 	REMOTE_HELPER_METHOD_FS_STAT,
+	REMOTE_HELPER_METHOD_FS_STAT_MANY,
 	REMOTE_HELPER_METHOD_GIT_REPOS,
 	REMOTE_HELPER_METHOD_HELLO,
 	REMOTE_HELPER_MAX_ECHO_TEXT_LENGTH,
@@ -60,7 +62,7 @@ const {
 	REMOTE_TERMINAL_TICKET_TTL_MS,
 	REMOTE_TERMINAL_TICKET_CLAIM_PATTERN,
 } = loadTsCommonJs("src/main/remote/RemoteHelperContract.ts");
-const { REMOTE_HELPER_ARTIFACTS, REMOTE_HELPER_ENTRY_FILE_NAME, REMOTE_HELPER_ENTRY_SHA256, REMOTE_HELPER_ENTRY_VERSION, REMOTE_HELPER_CONFIG_SHA256, REMOTE_HELPER_GIT_READ_SHA256, REMOTE_HELPER_GIT_SYNC_SHA256, REMOTE_HELPER_GIT_WRITE_SHA256, REMOTE_HELPER_INLINE_SOURCE } =
+const { REMOTE_HELPER_ARTIFACTS, REMOTE_HELPER_ENTRY_FILE_NAME, REMOTE_HELPER_ENTRY_SHA256, REMOTE_HELPER_ENTRY_VERSION, REMOTE_HELPER_CONFIG_SHA256, REMOTE_HELPER_SEARCH_CONTENT_SHA256, REMOTE_HELPER_GIT_READ_SHA256, REMOTE_HELPER_GIT_SYNC_SHA256, REMOTE_HELPER_GIT_WRITE_SHA256, REMOTE_HELPER_INLINE_SOURCE } =
 	loadTsCommonJs("src/main/remote/RemoteHelperEntry.ts");
 const { REMOTE_TERMINAL_RUNNER_ENTRY_SHA256 } = loadTsCommonJs("src/main/remote/RemoteTerminalRunnerEntry.ts");
 const { REMOTE_GIT_READ_SOURCE } = loadTsCommonJs("src/main/remote/RemoteGitReadSource.ts");
@@ -72,7 +74,7 @@ const HOST_ID = "01234567-89ab-4def-8123-456789abcdef";
 /** The helper never resolves HOME into a path, so a POSIX literal is the honest fixture on any platform. */
 const HELPER_HOME = "/home/pideck-helper";
 /** Frozen digest, pinned here as well as in the module: editing the source means editing both. */
-const FROZEN_SHA256 = "957cb0346a420bf9e875ba9031ce3b82991d4326be53959add774f8df102b872";
+const FROZEN_SHA256 = "04102d31c444c78fa0217de83f5f38eea10d48e539e8ea37ef83f382852b884d";
 const MAX_TEXT = 4096;
 const TEST_TIMEOUT_MS = 30_000;
 const GUARD_TIMEOUT_MS = 10_000;
@@ -270,6 +272,8 @@ function startHelper(t, options = {}) {
 	const lines = [];
 	const frames = [];
 	const diagnostics = [];
+	const events = [];
+	const eventWaiters = new Set();
 	const frameWaiters = new Set();
 	const exitWaiters = new Set();
 	let buffered = "";
@@ -291,6 +295,16 @@ function startHelper(t, options = {}) {
 		},
 		onDiagnostic: (entry) => {
 			diagnostics.push(plain(entry));
+		},
+		// W6-b：变更事件走无 id 帧，客户端把它们交给这个观察者（与请求应答永不相混）。
+		onEvent: (event) => {
+			events.push(plain(event));
+			for (const waiter of [...eventWaiters]) {
+				if (waiter.predicate(event)) {
+					eventWaiters.delete(waiter);
+					waiter.resolve(plain(event));
+				}
+			}
 		},
 	});
 	client.openConnection();
@@ -362,6 +376,26 @@ function startHelper(t, options = {}) {
 		lines,
 		frames,
 		diagnostics,
+		events,
+		/** Resolves with the first event frame matching the predicate (W6-b: 无 id 的推送帧). */
+		waitForEvent(predicate, timeoutMs = GUARD_TIMEOUT_MS) {
+			const already = events.find(predicate);
+			if (already !== undefined) return Promise.resolve(already);
+			return new Promise((resolve, reject) => {
+				const entry = {
+					predicate,
+					resolve: (event) => {
+						clearTimeout(timer);
+						resolve(event);
+					},
+				};
+				const timer = setTimeout(() => {
+					eventWaiters.delete(entry);
+					reject(new Error("timed out waiting for a helper event"));
+				}, timeoutMs);
+				eventWaiters.add(entry);
+			});
+		},
 		/** The root this helper was started with, or null for a host-only session. */
 		root: rootArgs.length > 0 ? rootArgs[1] : null,
 		stderr: () => stderr,
@@ -406,11 +440,12 @@ helperTest("every frozen bundle artifact is one byte-frozen ASCII line with its 
 	// programs that worker imports - and each one is content-addressed and pinned on its own. A change is only
 	// legitimate together with a deliberate update of that file's digest.
 	const expected = new Map([
-		["helper.mjs", { sha256: FROZEN_SHA256, builtins: ["node:fs", "node:path", "node:crypto"], imports: ["git-read.mjs", "config.mjs"] }],
+		["helper.mjs", { sha256: FROZEN_SHA256, builtins: ["node:fs", "node:path", "node:crypto"], imports: ["git-read.mjs", "config.mjs", "search-content.mjs"] }],
 		["git-read.mjs", { sha256: REMOTE_HELPER_GIT_READ_SHA256, builtins: ["node:child_process", "node:crypto"], imports: ["git-write.mjs", "git-sync.mjs"] }],
 		["git-write.mjs", { sha256: REMOTE_HELPER_GIT_WRITE_SHA256, builtins: [], imports: [] }],
 		["git-sync.mjs", { sha256: REMOTE_HELPER_GIT_SYNC_SHA256, builtins: [], imports: [] }],
 		["config.mjs", { sha256: REMOTE_HELPER_CONFIG_SHA256, builtins: [], imports: [] }],
+		["search-content.mjs", { sha256: REMOTE_HELPER_SEARCH_CONTENT_SHA256, builtins: [], imports: [] }],
 		["terminal-runner.mjs", { sha256: REMOTE_TERMINAL_RUNNER_ENTRY_SHA256, builtins: ["node:fs", "node:path", "node:child_process"], imports: [] }],
 	]);
 	assert.deepEqual(
@@ -497,10 +532,10 @@ helperTest("every frozen bundle artifact is one byte-frozen ASCII line with its 
 helperTest("the exported entry identity matches the frozen source", () => {
 	assert.equal(REMOTE_HELPER_ENTRY_FILE_NAME, "helper.mjs");
 	assert.match(REMOTE_HELPER_ENTRY_VERSION, /^\d+\.\d+\.\d+$/);
-	assert.equal(REMOTE_HELPER_ENTRY_VERSION, "1.21.2", "the remote config scope hardening is helper 1.21.2");
+	assert.equal(REMOTE_HELPER_ENTRY_VERSION, "1.25.0", "fs.searchContent is helper 1.25.0");
 	// The frozen source cannot import the contract, so its literals are checked against it here.
 	assert.ok(REMOTE_HELPER_INLINE_SOURCE.includes(`"${REMOTE_HELPER_ENTRY_VERSION}"`), "hello must report REMOTE_HELPER_ENTRY_VERSION");
-	for (const token of [REMOTE_HELPER_METHOD_HELLO, REMOTE_HELPER_METHOD_ECHO, REMOTE_HELPER_METHOD_CANCEL, REMOTE_HELPER_METHOD_FS_STAT, REMOTE_HELPER_METHOD_FS_LIST, REMOTE_HELPER_METHOD_FS_READ]) {
+	for (const token of [REMOTE_HELPER_METHOD_HELLO, REMOTE_HELPER_METHOD_ECHO, REMOTE_HELPER_METHOD_CANCEL, REMOTE_HELPER_METHOD_FS_STAT, REMOTE_HELPER_METHOD_FS_STAT_MANY, REMOTE_HELPER_METHOD_FS_LIST, REMOTE_HELPER_METHOD_FS_READ]) {
 		assert.ok(REMOTE_HELPER_INLINE_SOURCE.includes(`"${token}"`), token);
 	}
 	assert.ok(REMOTE_HELPER_INLINE_SOURCE.includes(String(REMOTE_HELPER_MAX_FRAME_BYTES)), "the frame cap must be visible in the frozen source");
@@ -1542,4 +1577,78 @@ helperTest("hello reports the canonical root, resolving a symlinked root to its 
 	assert.notEqual(result.root, linkedRoot, "a symlinked root must not be reported as itself");
 	assert.equal(result.root, realRoot, "the reported root is the resolved directory");
 	assert.equal(session.root, linkedRoot, "the fixture still records what it actually passed");
+});
+
+/*
+ * F4: `fs.statMany` is the batched form of `fs.stat` (docs/remote-functional-optimization-plan.md §3 F4).
+ * Per-path rules are the single call's own rules; the batch adds nothing but framing.
+ */
+
+linkHelperTest("fs.statMany describes a bounded path list in request order", async (t) => {
+	const fixture = createFsFixture(t);
+	const session = startHelper(t, { root: fixture.root });
+	const paths = ["alpha.txt", "sub", "inside-link", "empty.txt", "."];
+	const batch = await call(session, REMOTE_HELPER_METHOD_FS_STAT_MANY, { paths });
+	assert.deepEqual(Object.keys(batch), contractFields("RemoteHelperStatManyResult"));
+	assert.deepEqual(
+		batch.entries.map((entry) => entry.path),
+		paths,
+		"the answer is in request order and echoes every requested path",
+	);
+	const singles = [];
+	for (const path of paths) singles.push(await call(session, REMOTE_HELPER_METHOD_FS_STAT, { path }));
+	for (const [index, entry] of batch.entries.entries()) {
+		assert.deepEqual(Object.keys(entry).sort(), ["bytes", "kind", "mtimeMs", "path"]);
+		// Entry for entry identical to the single call: same classification, same bytes, same mtime.
+		assert.deepEqual({ kind: entry.kind, bytes: entry.bytes, mtimeMs: entry.mtimeMs }, singles[index]);
+	}
+	assert.equal(batch.entries[2].kind, "other", "a link stays the link itself, exactly as fs.stat reports it");
+	assert.equal(session.stderr(), "");
+});
+
+helperTest("fs.statMany refuses the whole batch when any single path is unusable", async (t) => {
+	const fixture = createFsFixture(t);
+	const session = startHelper(t, { root: fixture.root });
+	// All-or-nothing: a partial list would look complete while one entry silently went undescribed.
+	await expectRefusal(session, REMOTE_HELPER_METHOD_FS_STAT_MANY, { paths: ["alpha.txt", "sub/missing.txt"] }, "PATH_NOT_FOUND");
+	await expectRefusal(session, REMOTE_HELPER_METHOD_FS_STAT_MANY, { paths: ["../outside/secret.txt"] }, "PATH_OUTSIDE_ROOT");
+	await expectRefusal(session, REMOTE_HELPER_METHOD_FS_STAT_MANY, { paths: ["alpha.txt", "escape"] }, "PATH_OUTSIDE_ROOT");
+	await expectRefusal(session, REMOTE_HELPER_METHOD_FS_STAT_MANY, { paths: ["alpha.txt/child"] }, THROUGH_A_FILE);
+	// The list itself is part of the protocol shape.
+	for (const params of [undefined, {}, { paths: [] }, { paths: "alpha.txt" }, { paths: [7] }, { paths: [null] }, { paths: ["a\u0000b"] }, { paths: ["a".repeat(REMOTE_HELPER_MAX_PATH_LENGTH + 1)] }, { paths: Array.from({ length: REMOTE_HELPER_MAX_STAT_MANY_PATHS + 1 }, () => "alpha.txt") }]) {
+		await expectRefusal(session, REMOTE_HELPER_METHOD_FS_STAT_MANY, params, "PROTOCOL_INVALID");
+	}
+	// One path past the cap is the boundary: exactly the ceiling still answers.
+	const atCap = await call(session, REMOTE_HELPER_METHOD_FS_STAT_MANY, { paths: Array.from({ length: REMOTE_HELPER_MAX_STAT_MANY_PATHS }, () => "alpha.txt") });
+	assert.equal(atCap.entries.length, REMOTE_HELPER_MAX_STAT_MANY_PATHS);
+	assert.equal(session.stderr(), "");
+});
+
+/**
+ * W6-b：`fs.watch` 的推送路径。真实 helper 进程 + 生产客户端，断言「订阅 → 写文件 → 一个无 id 事件帧」，
+ * 以及事件帧永远不会被当成某个请求的应答（它没有 id）。
+ */
+helperTest("fs.watch pushes one debounced event frame and never settles a request", async (t) => {
+	// 只在 Linux 上跑真实 watcher：Windows 的 libuv fs-event 在临时目录里会触发断言（uv 的已知问题，
+	// 与协议无关），那时这条用例失败的原因会是运行环境而不是实现。Linux 侧的等价验证在 serve 上做过。
+	if (process.platform !== "linux") {
+		t.skip("real fs.watch events are only exercised on Linux");
+		return;
+	}
+	const helper = startHelper(t, { argvSeparator: true });
+	await guard(helper.client.request(REMOTE_HELPER_METHOD_HELLO), "hello");
+
+	const watched = await helper.client.request("fs.watch", { paths: ["", "."] });
+	assert.equal(typeof watched.watchId, "string");
+	assert.equal(watched.paths, 2);
+
+	writeFileSync(join(helper.root, "created.txt"), "x");
+	const event = await helper.waitForEvent((item) => item.watchId === watched.watchId);
+	assert.equal(event.watchId, watched.watchId);
+	assert.ok(event.paths.length >= 1, "事件必须带回请求时的路径标签");
+	for (const path of event.paths) assert.ok(path === "" || path === ".", `unexpected label ${path}`);
+
+	// 幂等关闭：第一次 closed:true，第二次 closed:false（不是错误）。
+	assert.deepEqual(plain(await helper.client.request("fs.unwatch", { watchId: watched.watchId })), { closed: true });
+	assert.deepEqual(plain(await helper.client.request("fs.unwatch", { watchId: watched.watchId })), { closed: false });
 });

@@ -36,7 +36,7 @@ const FILL_B = 0x42;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const plain = (value) => JSON.parse(JSON.stringify(value));
-const decode = (result) => Buffer.from(result.contentBase64, "base64");
+const decode = (result) => Buffer.from(result.value.contentBase64, "base64");
 const expected = (fill) => Buffer.alloc(FILE_SIZE, fill);
 
 /** 可控假远端：per-root 内容不同，尺寸与 mtime 相同（串根不会被收尾 stat 拦下）。 */
@@ -258,7 +258,7 @@ test("enrolling a project persists a real ssh record and the project is readable
 		assert.deepEqual(plain(stored.locator), { kind: "ssh", hostId: HOST_ID, remotePath: ROOT_A }, "the durable record must hold the main-held canonical locator");
 		const listed = await listProject(first, projectId);
 		assert.equal(listed.ok, true, "the fresh project must be listable right away: " + JSON.stringify(listed));
-		assert.ok(plain(listed.entries).some((entry) => entry.name === "data.txt"));
+		assert.ok(plain(listed.value.entries).some((entry) => entry.name === "data.txt"));
 		const opened = await readProject(first, projectId);
 		assert.equal(opened.ok, true, "and immediately readable: " + JSON.stringify(opened));
 		assert.ok(decode(opened).equals(expected(FILL_A)));
@@ -277,7 +277,7 @@ test("a directory that moved during the confirmation window is refused instead o
 		async ({ first }) => {
 			const { offered, requestId } = await offerEnroll(first, ROOT_A);
 			assert.equal(offered.ok, true, "the offer itself must succeed: " + JSON.stringify(offered));
-			assert.equal(offered.canonicalPath, ROOT_A);
+			assert.equal(offered.value.canonicalPath, ROOT_A);
 
 			const approved = await answerEnroll(first, requestId, "approve");
 			assert.equal(approved.ok, false, "a root that no longer resolves to itself must not be enrolled: " + JSON.stringify(approved));
@@ -392,5 +392,5 @@ async function enrollWithPush(lifecycle, candidatePath) {
 	assert.equal(push.payload.canonicalPath, candidatePath, "the main-held canonical path must be what the user confirms");
 	const approved = await lifecycle.handlers.get("remote:project-answer")({ sender: lifecycle.sender }, push.payload.requestId, "approve");
 	assert.equal(approved.ok, true, "enroll approve must succeed: " + JSON.stringify(approved));
-	return approved.projectId;
+	return approved.value.projectId;
 }

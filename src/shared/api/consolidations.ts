@@ -151,7 +151,7 @@ export const CONFIG_SUBSTORES = {
 	usageProbes: ["fetchUsage", "getUsageProbes", "saveUsageProbes", "installUsageSkill", "listUsageProbeStates", "testUsageProbe"],
 	resources: ["piResourcesSetBuiltin", "piResourcesSummary"],
 	vision: ["visionClearEvents", "visionClearLog", "visionGetConfig", "visionGetEvents", "visionGetLog", "visionSaveConfig"],
-	maintenance: ["applyProviderMigration", "previewProviderMigration", "installImageGenSkill", "testProvider", "export", "import"],
+	maintenance: ["applyProviderMigration", "previewProviderMigration", "installImageGenSkill", "testProvider", "export", "import", "watchaAccess", "watchaOpenAlipay"],
 } as const satisfies Record<ConfigSubstoreId, readonly string[]>;
 
 /** 子域方法名字面量联合（facadeTypes 的 Pick 视图用）。 */

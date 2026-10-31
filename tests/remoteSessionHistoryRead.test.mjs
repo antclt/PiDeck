@@ -151,6 +151,15 @@ test("a relative remote identity is joined onto the resolved session root, never
 	assert.equal(joinRemoteSessionRoot("/home/dev/.pi/agent/sessions", "a\\b.jsonl"), undefined);
 });
 
+test("a non-empty page carries an indexVersion so the disk page survives the runtime handoff", async () => {
+	// 没有这个字段，渲染层把磁盘页转成历史前缀时会因「无法证明同代」整段丢弃：
+	// 远端会话被运行时接管后只剩窗口段（用户实拍：重开只看得到最后一条消息）。
+	const remote = fakeRemote(conversation(40));
+	const page = await reader(remote, { windowBytes: 400 }).readPage({ hostId: HOST_ID, locator: sshLocator("/s/a.jsonl") });
+	assert.match(page.indexVersion, /^remote:\d+$/);
+	assert.equal(page.indexVersion, `remote:${remote.bytes.length}`);
+});
+
 test("the tail window reaches EOF, drops the half line at its start and reports the earlier cursor", async () => {
 	const remote = fakeRemote(conversation(40));
 	const page = await reader(remote, { windowBytes: 400 }).readPage({ hostId: HOST_ID, locator: sshLocator("/s/a.jsonl") });

@@ -48,6 +48,22 @@ export const SSH_LAUNCHER_STDIN_UNAVAILABLE = "SSH_LAUNCHER_STDIN_UNAVAILABLE";
 export const SSH_LAUNCHER_STDIN_LINE_INVALID = "SSH_LAUNCHER_STDIN_LINE_INVALID";
 export const SSH_LAUNCHER_STDIN_LINE_TOO_LARGE = "SSH_LAUNCHER_STDIN_LINE_TOO_LARGE";
 export const SSH_LAUNCHER_STDIN_WRITE_FAILED = "SSH_LAUNCHER_STDIN_WRITE_FAILED";
+/**
+ * The frame was refused because too much already-unsent data is queued for this process.
+ *
+ * The per-frame and read-side caps do not bound the *sending* side at all: `stdin.write()` accepts every
+ * frame and buffers it internally, so a peer that stops reading lets a synchronous writer grow the process
+ * heap without limit. This budget is charged against our own queue plus `writableLength`, and it is a
+ * caller error on purpose: a synchronous writer that ignores backpressure must fail loudly instead of
+ * quietly accumulating bytes. Awaitable writers (`write()` returns a promise when it had to wait) never hit
+ * it, because they stop at the budget until `drain`.
+ */
+export const SSH_LAUNCHER_STDIN_BACKLOG = "SSH_LAUNCHER_STDIN_BACKLOG";
+/**
+ * Ceiling for unsent stdin bytes (our queue + the Writable's own buffer). It stays above one project-upload
+ * chunk (~1.4 MB base64) so an awaited frame can always make progress, and far below the read-side caps.
+ */
+export const SSH_LAUNCHER_MAX_PENDING_STDIN_BYTES = 4 * 1024 * 1024;
 
 /**
  * How long start() waits for a child that reports neither "spawn" nor "error". The real spawner always
@@ -176,6 +192,7 @@ export function createSshProcessLauncher(options?: { spawn?: typeof import("node
 			const wantsStdin = request?.stdin === true;
 			const child = spawnPinnedChild(spawnProcess, target, wantsStdin);
 
+			/** Bounded read side and, below, the outbound queue that makes stdin backpressure observable. */
 			const listeners = new Set<(exit: SshProcessExit) => void>();
 			const outputDetachers: Array<() => void> = [];
 			// The read side owns its own bounds; an overflow is a terminal verdict here: a process that
@@ -190,6 +207,16 @@ export function createSshProcessLauncher(options?: { spawn?: typeof import("node
 			let startupTimer: ReturnType<typeof setTimeout> | undefined;
 			let stopPromise: Promise<void> | undefined;
 			let resolveStop: (() => void) | undefined;
+			/** Frames accepted by write() but not yet handed to stdin, in order. Bounded by the byte budget. */
+			const stdinQueue: StdinFrame[] = [];
+			let stdinQueuedBytes = 0;
+			let stdinFlushing = false;
+			/** Set while the Writable reported backpressure; only `drain` may resume writing. */
+			let stdinAwaitingDrain = false;
+			/** Set once this process may accept no more frames (stopped or settled). */
+			let stdinClosed = false;
+			/** Awaited writers waiting for the backlog to shrink below the budget. */
+			const stdinCapacityWaiters: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
 			let confirmStartup: (error?: Error) => void = () => {};
 			const startup = new Promise<void>((resolve, reject) => {
 				confirmStartup = (error?: Error): void => {
@@ -209,6 +236,10 @@ export function createSshProcessLauncher(options?: { spawn?: typeof import("node
 				child.off("error", onChildError);
 				child.off("exit", onChildExit);
 				child.off("close", onChildClose);
+				// No frame may reach a process that is being torn down: drop what is queued and release waiters.
+				stdinClosed = true;
+				dropStdinQueue(new Error(SSH_LAUNCHER_STDIN_WRITE_FAILED));
+				releaseStdinCapacity(new Error(SSH_LAUNCHER_STDIN_WRITE_FAILED));
 				// Close stdin while the guarded error listener is still attached: a late pipe error must stay caught.
 				endStdinQuietly();
 				for (const detach of outputDetachers.splice(0)) detach();
@@ -254,6 +285,8 @@ export function createSshProcessLauncher(options?: { spawn?: typeof import("node
 
 			function terminate(nextCause: TerminationCause, mode: "graceful" | "force"): void {
 				if (settled !== null) return;
+				// Frames still waiting behind the peer must not be flushed after the teardown started.
+				stdinClosed = true;
 				// First cause wins: whichever event ended the process is what the caller must see.
 				cause ??= nextCause;
 				// Node may report exit before its pipes have drained. A graceful stop must not discard
@@ -373,37 +406,151 @@ export function createSshProcessLauncher(options?: { spawn?: typeof import("node
 				return (chunk: unknown): void => output.feed(name, chunk);
 			}
 
+			/** One outbound frame accepted by write() and not yet handed to stdin. */
+			type StdinFrame = { line: string; bytes: number; written: boolean; failed: boolean; resolve?: () => void; reject?: (error: Error) => void };
+
 			/** A writable stdin exists only while the request asked for one and the child has not settled. */
 			function writableStdin(): NonNullable<ChildProcess["stdin"]> {
 				const stream = wantsStdin ? child.stdin : null;
-				if (settled !== null || processExited || stream === null || stream === undefined || stream.destroyed || stream.writableEnded || typeof stream.write !== "function") throw new Error(SSH_LAUNCHER_STDIN_UNAVAILABLE);
+				if (stdinClosed || settled !== null || processExited || stream === null || stream === undefined || stream.destroyed || stream.writableEnded || typeof stream.write !== "function") throw new Error(SSH_LAUNCHER_STDIN_UNAVAILABLE);
 				return stream;
+			}
+
+			/** Bytes this process is still holding for the peer: our own queue plus the Writable's buffer. */
+			function stdinBacklog(stream: { writableLength?: number }): number {
+				const buffered = typeof stream.writableLength === "number" && Number.isFinite(stream.writableLength) ? stream.writableLength : 0;
+				return stdinQueuedBytes + Math.max(buffered, 0);
+			}
+
+			function dropStdinQueue(error: Error): void {
+				for (const frame of stdinQueue.splice(0)) {
+					stdinQueuedBytes -= frame.bytes;
+					frame.failed = true;
+					frame.reject?.(error);
+				}
+				stdinQueuedBytes = 0;
+			}
+
+			function releaseStdinCapacity(error?: Error): void {
+				for (const waiter of stdinCapacityWaiters.splice(0)) {
+					if (error === undefined) waiter.resolve();
+					else waiter.reject(error);
+				}
+			}
+
+			function waitForStdinCapacity(): Promise<void> {
+				return new Promise<void>((resolve, reject) => {
+					stdinCapacityWaiters.push({ resolve, reject });
+				});
+			}
+
+			/**
+			 * Hand queued frames to stdin in order. Unbounded buffering is what this replaces: `write()` accepts
+			 * every frame (false only means "I buffered it"), so without this the queue would live inside Node's
+			 * Writable where the byte budget cannot see it. The first `false` stops the flush until `drain`.
+			 */
+			function flushStdinQueue(): void {
+				if (stdinFlushing) return;
+				if (stdinClosed || settled !== null) return;
+				const stream = wantsStdin ? child.stdin : null;
+				if (stream === null || stream === undefined) return;
+				stdinFlushing = true;
+				try {
+					while (stdinQueue.length > 0 && !stdinAwaitingDrain) {
+						const frame = stdinQueue[0];
+						let accepted: boolean;
+						try {
+							accepted = stream.write(`${frame.line}\n`) !== false;
+						} catch {
+							// EPIPE / ERR_STREAM_DESTROYED messages quote the failed payload, so only the stable code travels.
+							dropStdinQueue(new Error(SSH_LAUNCHER_STDIN_WRITE_FAILED));
+							releaseStdinCapacity(new Error(SSH_LAUNCHER_STDIN_WRITE_FAILED));
+							return;
+						}
+						stdinQueue.shift();
+						stdinQueuedBytes -= frame.bytes;
+						frame.written = true;
+						frame.resolve?.();
+						if (!accepted) stdinAwaitingDrain = true;
+					}
+				} finally {
+					stdinFlushing = false;
+				}
+				// A frame left the queue (or the peer drained): let awaited writers re-check the budget.
+				releaseStdinCapacity();
+			}
+
+			/** One frame's validation, shared by both write paths so their refusals cannot drift. */
+			function assertOutboundLine(line: string): number {
+				if (typeof line !== "string" || line.includes("\0") || line.includes("\n") || line.includes("\r")) throw new Error(SSH_LAUNCHER_STDIN_LINE_INVALID);
+				// An empty frame would put a bare newline on the wire; the inbound path treats blank lines as
+				// noise, so the outbound path must not manufacture them.
+				if (line.trim().length === 0) throw new Error(SSH_LAUNCHER_STDIN_LINE_INVALID);
+				const bytes = Buffer.byteLength(line, "utf8");
+				if (bytes > maxLineBytes) throw new Error(SSH_LAUNCHER_STDIN_LINE_TOO_LARGE);
+				return bytes;
+			}
+
+			/** Queue one already validated frame; answers the frame so the caller can observe delivery. */
+			function enqueueStdinFrame(line: string, bytes: number): StdinFrame {
+				const frame: StdinFrame = { line, bytes, written: false, failed: false };
+				stdinQueue.push(frame);
+				stdinQueuedBytes += bytes;
+				flushStdinQueue();
+				return frame;
 			}
 
 			/**
 			 * Write one protocol frame. This is the only channel into the child's stdin, so the frame is
 			 * validated here: text containing a NUL or a line break would be delivered as several frames, and
 			 * an oversized frame is rejected rather than truncated into a half frame.
+			 *
+			 * Returns `undefined` when the frame was handed to stdin synchronously; returns a promise when it is
+			 * still queued behind backpressure. A synchronous writer that keeps writing past the byte budget
+			 * gets SSH_LAUNCHER_STDIN_BACKLOG instead of silently growing the heap.
 			 */
-			function writeStdinLine(line: string): void {
+			function writeStdinLine(line: string): void | Promise<void> {
 				const stdin = writableStdin();
-				if (typeof line !== "string" || line.includes("\0") || line.includes("\n") || line.includes("\r")) throw new Error(SSH_LAUNCHER_STDIN_LINE_INVALID);
-				// An empty frame would put a bare newline on the wire; the inbound path treats blank lines as
-				// noise, so the outbound path must not manufacture them.
-				if (line.trim().length === 0) throw new Error(SSH_LAUNCHER_STDIN_LINE_INVALID);
-				if (Buffer.byteLength(line, "utf8") > maxLineBytes) throw new Error(SSH_LAUNCHER_STDIN_LINE_TOO_LARGE);
-				try {
-					stdin.write(`${line}\n`);
-				} catch {
-					// EPIPE / ERR_STREAM_DESTROYED messages quote the failed payload and the original error may
-					// carry path and write fields, so neither is attached: only the stable code travels.
-					throw new Error(SSH_LAUNCHER_STDIN_WRITE_FAILED);
+				const bytes = assertOutboundLine(line);
+				if (stdinBacklog(stdin) + bytes > SSH_LAUNCHER_MAX_PENDING_STDIN_BYTES) throw new Error(SSH_LAUNCHER_STDIN_BACKLOG);
+				const frame = enqueueStdinFrame(line, bytes);
+				if (frame.written) return;
+				if (frame.failed) throw new Error(SSH_LAUNCHER_STDIN_WRITE_FAILED);
+				// A synchronous writer is not required to await this: attach a no-op handler so a later teardown
+				// rejection cannot surface as an unhandled rejection, while an awaiting caller still sees it.
+				const pending = new Promise<void>((resolve, reject) => {
+					frame.resolve = resolve;
+					frame.reject = reject;
+				});
+				void pending.catch(() => undefined);
+				return pending;
+			}
+
+			/**
+			 * Awaitable write: stops at the byte budget until the peer drains instead of refusing the frame.
+			 * Meant for callers that write many large frames (project upload) and must keep whole-frame order.
+			 */
+			async function writeStdinLineAwait(line: string): Promise<void> {
+				const bytes = assertOutboundLine(line);
+				for (;;) {
+					const stdin = writableStdin();
+					if (stdinBacklog(stdin) + bytes <= SSH_LAUNCHER_MAX_PENDING_STDIN_BYTES) break;
+					await waitForStdinCapacity();
+					if (stdinClosed || settled !== null) throw new Error(SSH_LAUNCHER_STDIN_WRITE_FAILED);
 				}
+				const frame = enqueueStdinFrame(line, bytes);
+				if (frame.written) return;
+				if (frame.failed) throw new Error(SSH_LAUNCHER_STDIN_WRITE_FAILED);
+				await new Promise<void>((resolve, reject) => {
+					frame.resolve = resolve;
+					frame.reject = reject;
+				});
 			}
 
 			/**
 			 * An asynchronous pipe error (the far side closed stdin) cannot be reported through the synchronous
 			 * write() contract, and an unhandled 'error' event would take the whole main process down instead.
+			 * `drain` is the only signal that may resume a flush stopped by backpressure.
 			 */
 			function watchStdinErrors(): void {
 				const stream = wantsStdin ? child.stdin : null;
@@ -412,9 +559,17 @@ export function createSshProcessLauncher(options?: { spawn?: typeof import("node
 					// Intentionally swallowed: write() has already returned, and the exit report stays the single
 					// terminal signal for this process.
 				};
+				const onDrain = (): void => {
+					if (stdinClosed || settled !== null) return;
+					stdinAwaitingDrain = false;
+					flushStdinQueue();
+				};
 				stream.on("error", onError);
+				stream.on("drain", onDrain);
 				outputDetachers.push(() => {
-					if (typeof stream.off === "function") stream.off("error", onError);
+					if (typeof stream.off !== "function") return;
+					stream.off("error", onError);
+					stream.off("drain", onDrain);
 				});
 			}
 
@@ -458,8 +613,11 @@ export function createSshProcessLauncher(options?: { spawn?: typeof import("node
 				onStderrLine(listener: (line: string) => void): () => void {
 					return output.subscribe("stderr", listener);
 				},
-				write(line: string): void {
-					writeStdinLine(line);
+				write(line: string): void | Promise<void> {
+					return writeStdinLine(line);
+				},
+				writeAwait(line: string): Promise<void> {
+					return writeStdinLineAwait(line);
 				},
 				stop(reason: "abort" | "shutdown"): Promise<void> {
 					// Both reasons tear the process down identically; callers keep the distinction for their own

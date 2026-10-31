@@ -1,4 +1,5 @@
 import { useAtom, useSetAtom } from "jotai";
+import { useState } from "react";
 import type { TranslationKey } from "../../i18n/rendererCopy.zh-CN";
 import { openSettingsAtom } from "../../atoms";
 import { remoteEnrollDialogOpenAtom } from "../../atoms/remote-project-atoms";
@@ -9,6 +10,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "../ui-shadcn/input";
 import { Label } from "../ui-shadcn/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui-shadcn/select";
+import { RemoteDirectoryPicker } from "./RemoteDirectoryPicker";
+import { isValidNewLeaf, joinRemotePath } from "./remoteDirectoryPath";
 
 /** 新建空目录模式下需要专门解释的稳定码（其余沿用登记域的通用错误文案）。 */
 const CREATE_ERROR_KEYS: Partial<Record<string, TranslationKey>> = {
@@ -62,6 +65,24 @@ export function RemoteProjectEnrollDialog(props: { onEnrolled: (projectId: strin
 		onEnrolled: props.onEnrolled,
 	});
 	const { state } = enroll;
+	// 新建空目录模式：浏览器只选父目录，叶名单独输入；两者合成后才交给登记流程。
+	const [createParent, setCreateParent] = useState("");
+	const [leaf, setLeaf] = useState("");
+	const createPathReady = createParent !== "" && isValidNewLeaf(leaf);
+	const syncCreatePath = (parent: string, nextLeaf: string) => {
+		// 叶名还没填好时不能提交一个半成品路径（join(parent, "") 会带尾斜杠）。
+		enroll.setPath(parent !== "" && isValidNewLeaf(nextLeaf) ? joinRemotePath(parent, nextLeaf) : "");
+	};
+	const chooseMode = (mode: "existing" | "create") => {
+		if (mode === "create") {
+			setCreateParent("");
+			setLeaf("");
+			enroll.setPath("");
+		} else {
+			setLeaf("");
+		}
+		enroll.selectMode(mode);
+	};
 	if (!open) return null;
 	const error = errorText(state);
 	const formLocked = state.busy || state.stage === "awaiting-confirm";
@@ -110,11 +131,11 @@ export function RemoteProjectEnrollDialog(props: { onEnrolled: (projectId: strin
 							<legend className="text-label text-muted-foreground">{t("sidebar.remoteEnroll.modeLabel")}</legend>
 							<div className="flex flex-wrap gap-4 text-body">
 								<label htmlFor="remote-enroll-mode-existing" className="flex items-center gap-1.5">
-									<input id="remote-enroll-mode-existing" data-testid="remote-enroll-mode-existing" type="radio" name="remote-enroll-mode" checked={state.mode === "existing"} disabled={formLocked} onChange={() => enroll.selectMode("existing")} />
+									<input id="remote-enroll-mode-existing" data-testid="remote-enroll-mode-existing" type="radio" name="remote-enroll-mode" checked={state.mode === "existing"} disabled={formLocked} onChange={() => chooseMode("existing")} />
 									{t("sidebar.remoteEnroll.modeExisting")}
 								</label>
 								<label htmlFor="remote-enroll-mode-create" className="flex items-center gap-1.5">
-									<input id="remote-enroll-mode-create" data-testid="remote-enroll-mode-create" type="radio" name="remote-enroll-mode" checked={state.mode === "create"} disabled={formLocked} onChange={() => enroll.selectMode("create")} />
+									<input id="remote-enroll-mode-create" data-testid="remote-enroll-mode-create" type="radio" name="remote-enroll-mode" checked={state.mode === "create"} disabled={formLocked} onChange={() => chooseMode("create")} />
 									{t("sidebar.remoteEnroll.modeCreate")}
 								</label>
 							</div>
@@ -134,18 +155,51 @@ export function RemoteProjectEnrollDialog(props: { onEnrolled: (projectId: strin
 								</SelectContent>
 							</Select>
 						</div>
-						<div className="grid gap-1.5">
-							<Label htmlFor="remote-enroll-path">{t("sidebar.remoteEnroll.path")}</Label>
-							<Input id="remote-enroll-path" placeholder={t("sidebar.remoteEnroll.pathPlaceholder")} value={state.path} disabled={formLocked} onChange={(event) => enroll.setPath(event.target.value)} />
-						</div>
-						{state.mode === "create" ? <p className="text-label text-muted-foreground">{t("sidebar.remoteEnroll.createHint")}</p> : null}
+						{state.hostId === undefined ? null : state.mode === "create" ? (
+							<>
+								<div className="grid gap-1.5">
+									<Label>{t("sidebar.remoteEnroll.createParent")}</Label>
+									<RemoteDirectoryPicker
+										key={`create-${state.hostId}`}
+										hostId={state.hostId}
+										value={createParent}
+										disabled={formLocked}
+										onChange={(parent) => {
+											setCreateParent(parent);
+											syncCreatePath(parent, leaf);
+										}}
+									/>
+								</div>
+								<div className="grid gap-1.5">
+									<Label htmlFor="remote-enroll-leaf">{t("sidebar.remoteEnroll.leaf")}</Label>
+									<Input
+										id="remote-enroll-leaf"
+										placeholder={t("sidebar.remoteEnroll.leafPlaceholder")}
+										value={leaf}
+										disabled={formLocked}
+										onChange={(event) => {
+											const nextLeaf = event.target.value;
+											setLeaf(nextLeaf);
+											syncCreatePath(createParent, nextLeaf);
+										}}
+									/>
+									{leaf.length > 0 && !isValidNewLeaf(leaf) ? <p className="text-label text-destructive">{t("sidebar.remoteEnroll.badLeaf")}</p> : null}
+								</div>
+								<p className="text-label text-muted-foreground">{t("sidebar.remoteEnroll.createHint")}</p>
+							</>
+						) : (
+							<div className="grid gap-1.5">
+								<Label>{t("sidebar.remoteEnroll.path")}</Label>
+								<RemoteDirectoryPicker key={`existing-${state.hostId}`} hostId={state.hostId} value={state.path} disabled={formLocked} onChange={enroll.setPath} />
+							</div>
+						)}
 						{state.stage === "awaiting-confirm" ? <p className="text-label text-muted-foreground">{t("sidebar.remoteEnroll.awaitingConfirm")}</p> : null}
 						{error !== null ? <p className="text-label text-muted-foreground">{error}</p> : null}
 						<DialogFooter>
 							<Button variant="ghost" onClick={enroll.close}>
 								{t("common.cancel")}
 							</Button>
-							<Button disabled={formLocked || state.hostId === undefined || state.path.trim() === ""} onClick={() => void enroll.submit()}>
+							<Button disabled={formLocked || state.hostId === undefined || (state.mode === "create" ? !createPathReady : state.path.trim() === "")} onClick={() => void enroll.submit()}>
 								{t("sidebar.remoteEnroll.resolve")}
 							</Button>
 						</DialogFooter>

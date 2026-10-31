@@ -4,6 +4,7 @@ import type { AgentBackend, ChatMessage, ComposerAgentMode, FileTreeNode, ImageC
 import { DEFAULT_IMAGE_GEN_OUTPUT_FORMAT, DEFAULT_IMAGE_GEN_SIZE, DEFAULT_IMAGE_GEN_WATERMARK, parseImageGenOutputFormat, parseImageGenSize, parseImageGenWatermark } from "../../../shared/imageGenParams";
 import { resolveBusySendDelivery } from "../../../shared/busySendDelivery";
 import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../../shared/fileTree";
+import { isRemoteProject } from "../../../shared/projectLocation";
 import { classifyCompactError, compactOwnerReason, compactRoutedCommand, type CompactNoticeKind } from "../../../shared/compactFeedback";
 import { findImageGenProvider } from "../../../shared/imageGenConfig";
 import { findVideoGenProvider } from "../../../shared/videoGenConfig";
@@ -311,6 +312,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	// 统一经 projectId 反查项目清单，拿到已登记的项目根路径，避免把有项目会话
 	// 误当成匿名会话（用户反馈：粘贴大文本发送后消息里被展开成普通文本）。
 	const composerProject = useAtomValue(projectByIdAtomFamily(effectiveProjectId ?? ""));
+	// 远端项目只跑主机上的 pi：底栏不提供后端切换，引导页也不能把 dsh/acp 偏好带进来。
+	// （dsh/acp 是本地 runtime，绑到远端项目上必然起不来；创建侧在 App.ensureSessionForSend 同源钳制。）
+	const isRemoteProjectSession = composerProject !== undefined && isRemoteProject(composerProject);
 	const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(sessionId));
 	const runtimeUi = useAtomValue(sessionRuntimeUiBySessionIdAtomFamily(sessionId));
 	const projectSessions = useAtomValue(sessionSummariesByProjectIdAtomFamily(effectiveProjectId ?? ""));
@@ -436,7 +440,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	// 「切到 dsh 后底栏显示 pi 模型」）。按 dsh 解析时该 IPC 不返回模型（模型归属
 	// host settings），底栏自然回落到 dshDefaultModel。
 	// 仍然经 effectiveAgentBackendAtom 取默认值（DSH runtime 安装态钳制）。
-	const guidePageBackend: AgentBackend = isGuideBootstrapSession ? resolveGuidePageBackend({ override: guideBackendOverride, effectiveDefault: defaultAgentBackend }) : defaultAgentBackend;
+	const guidePageBackend: AgentBackend = isRemoteProjectSession ? "pi" : isGuideBootstrapSession ? resolveGuidePageBackend({ override: guideBackendOverride, effectiveDefault: defaultAgentBackend }) : defaultAgentBackend;
 	const [bootstrapDefaults, setBootstrapDefaults] = useState<ResolvedLaunchDefaults | undefined>(undefined);
 	useEffect(() => {
 		if (record) return;
@@ -1109,6 +1113,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	const sessionTurnRunning = isSessionTurnRunning(runtime?.state, runtime?.status);
 	const isBusy = isSessionRuntimeBusy(runtime?.status, runtime?.state, isAcpBackend ? "acp" : undefined);
 	// 预热只创建进程，不能把编辑器 setEditable(false)：contenteditable 关掉会失焦，输入一半就断。
+	// 「启动中」只认 activating（用户按下发送后的会话创建期）：预热（prewarm）不算——
+	// 预热进程不阻塞输入，用户此时编辑草稿/选模型都是合法的（有意设计，非漏判；
+	// 若把预热也当启动，输入框会在后台预热时被无理由锁住）。
 	const isStarting = isUserFacingSessionStart(sendState.status);
 	// ACP 预热（握手 + 枚举 configOptions）可能持续数秒：编辑器照常可输入，
 	// 输入框底栏同时显示初始化指示。**发送不被它拦住**：主进程的激活闸门（ensureRuntime 复用同一条
@@ -2213,6 +2220,8 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	const backendLocked = record?.status === "active" || hasUserMessage;
 	const changeBackend = useCallback(
 		async (next: AgentBackend, explicitAcpToolId?: string) => {
+			// 远端项目固定 pi；选择器已经隐藏，这里再挡一次键盘/程序化切换。
+			if (isRemoteProjectSession) return;
 			if (backendLocked) return;
 			// 引导页虚拟会话（无 catalog record）：与 pickModel/pickThinking 的引导页
 			// 分支同构——显式选择写 localStorage 偏好并本地即时回显，不走 IPC。
@@ -2293,7 +2302,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 				showNotice(error instanceof Error ? error.message : String(error), 4000);
 			}
 		},
-		[backendLocked, isGuideBootstrapSession, record, runtime?.agentId, sessionId, store, upsertSession],
+		[backendLocked, isGuideBootstrapSession, isRemoteProjectSession, record, runtime?.agentId, sessionId, store, upsertSession],
 	);
 
 	/**
@@ -2410,9 +2419,11 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		runtime,
 		// 引导页优先回显本页手动切换，否则就是设置默认后端（不沿用上次选择）；
 		// 真实会话以 record 为准。
-		backend: record?.backend ?? (isGuideBootstrapSession ? guideBackend : undefined) ?? "pi",
-		/** 草稿期可切换后端；激活后锁定（undefined → UI 隐藏切换器）。 */
-		changeBackend: backendLocked ? undefined : changeBackend,
+		backend: isRemoteProjectSession ? "pi" : (record?.backend ?? (isGuideBootstrapSession ? guideBackend : undefined) ?? "pi"),
+		/** 草稿期可切换后端；激活后锁定、远端项目固定 pi（undefined → UI 隐藏切换器）。 */
+		changeBackend: backendLocked || isRemoteProjectSession ? undefined : changeBackend,
+		/** 远端项目固定 pi：底栏据此显示准确的锁定原因（不是「已发送消息后不可切换」）。 */
+		backendFixedToPi: isRemoteProjectSession,
 		// ACP 工具二级选择（草稿期；激活后 UI 不再渲染选择器）
 		acpTool:
 			record?.backend === "acp"
@@ -2543,14 +2554,17 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			/**
 			 * 快捷消息直发可用性：与 canSend 同源，但去掉「草稿非空」这一项——
 			 * 快捷消息的正文来自清单，发它的时候输入框通常是空的。
+			 * submittingVideo 与 canSend 一致纳入（Wave 4 状态统一）：视频提交中任何发送入口都应锁。
 			 */
-			canSendQuickMessage: !isStarting && !generatingImage && (!isDshBackend || runtime?.state?.modelRoutable !== false),
+			canSendQuickMessage: !isStarting && !generatingImage && !submittingVideo && (!isDshBackend || runtime?.state?.modelRoutable !== false),
 			// 并行发送（拆分菜单）：当前草稿文本进独立 Ask 会话后台处理，成功后清空草稿。
 			// 上下文由 useAskPanel 按 originSessionId 自动生成（与队列面板共用同一口径），
 			// 这里只负责把来源会话传下去；不要在本入口另建一份 context，否则会再次分叉。
 			// 仅投递纯文本：并行问询不支持图片附件（与队列面板 onSendAsk 的 canAsk 判据一致），
 			// 带图时 ComposerSendControls 端按 canSendParallel=false 置灰。
-			canSendParallel: Boolean(draft.trim()) && attachments.length === 0 && !isStarting && !generatingImage && Boolean(effectiveProjectId),
+			// 不查 modelRoutable（并行走 Ask 会话独立后端，不吃当前 DSH 绑定）；
+			// submittingVideo 纳入（Wave 4 状态统一）：视频提交中任何发送入口都应锁。
+			canSendParallel: Boolean(draft.trim()) && attachments.length === 0 && !isStarting && !generatingImage && !submittingVideo && Boolean(effectiveProjectId),
 			sendParallel: () => {
 				const text = draft.trim();
 				if (!text || !effectiveProjectId) return;

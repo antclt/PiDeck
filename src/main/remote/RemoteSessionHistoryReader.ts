@@ -199,6 +199,8 @@ export type RemoteSessionHistoryWindow = {
 	droppedLeadingPartial: boolean;
 	/** 终点被窗口截断：当页丢掉了半截尾行。 */
 	droppedTrailingPartial: boolean;
+	/** 这一页对应的文件字节数（形状一取 wc -c，形状二取游标前的长度）：只用于代际比较。 */
+	size?: number;
 };
 
 /**
@@ -271,6 +273,8 @@ export function parseRemoteSessionWindow(stdout: string, input: { marker: string
 		windowStart,
 		lines,
 		nextBefore: cursor !== undefined && cursor > 1 ? cursor : undefined,
+		// 文件字节数（形状一由 wc -c 取到；形状二等于游标前的长度），作为这一页的尺寸段。
+		size,
 		droppedLeadingPartial,
 		droppedTrailingPartial,
 	};
@@ -392,6 +396,11 @@ function createReader(ports: RemoteSessionHistoryReaderPorts): RemoteSessionHist
 				// 「还有更早历史」只由 nextBefore 决定（渲染层同样只看它）。
 				total: messages.length,
 				nextBefore: window.nextBefore ?? null,
+				// 没有它，渲染层的 disk → runtime 交接会因「无法证明同代」把整页历史丢掉：
+				// 会话被运行时接管后只剩窗口段（用户实拍：重开远端会话只看得到最后一条）。
+				// 版本串只比较体积（`isSameSessionFileGeneration` 取最后一段数字），追加不算异代。
+				// 空页不带版本：没有消息可当前缀，带上反而会让「空页」与「有历史的页」形状不一致。
+				...(messages.length === 0 ? {} : { indexVersion: `remote:${window.size ?? (before !== undefined ? before - 1 : 0)}` }),
 			};
 		},
 	};

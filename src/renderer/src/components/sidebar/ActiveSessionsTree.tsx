@@ -20,15 +20,15 @@ import { useSessionActivityAt } from "../../hooks/sidebar/useSessionActivityCloc
 import { RECENT_SESSIONS_INITIAL_VISIBLE, collectActiveSessionRows, collectRecentActivityRows, growRecentVisible } from "./activitySessionsModel";
 import { RecentSessionsSection } from "./RecentSessionsSection";
 import { SidebarStatusDot } from "./SidebarStatusDot";
+import { SESSION_ROW_CLASS, ROW_MORE_ACTIONS_CLASS } from "./sidebarRowStyles";
 import { RemovalList, RemovalRow } from "../removal/RemovalList";
 
 /** 活动页行样式：与 SessionTree 会话行同尺寸同圆角，但选中底不需要（活动页行不持久）。 */
-const activeRowClass =
-	"group/resource conversation agent-row relative flex min-h-8 w-full items-center gap-1.5 rounded-lg border border-transparent px-2 py-0 text-left text-body text-foreground shadow-none transition-[background-color,border-color,box-shadow] duration-base hover:border-border-subtle hover:bg-bg-hover hover:text-foreground focus-visible:bg-bg-hover focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset";
+const activeRowClass = SESSION_ROW_CLASS;
 
 /** 右侧「更多操作」按钮：与 SessionTree 同一套 absolute 浮层虚化模式，
  *  行 hover 出现，菜单打开期间保持点亮。 */
-const rowMoreActionsClass = "row-more-actions pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100";
+const rowMoreActionsClass = ROW_MORE_ACTIONS_CLASS;
 
 /**
  * 活动 Agent 会话页：跨项目收集所有已绑定 runtime 的 Agent（live + 终态），按会话更新时间排序。

@@ -39,8 +39,8 @@ test("editor IPC validates renderer input before touching remote service and ret
 	assert.equal((await f.invoke("remote:project-text-save", "project", "code.ts", "x".repeat(262145), "a".repeat(32))).code, "REMOTE_FILE_TOO_LARGE");
 	assert.equal(f.calls.length, 0);
 	const opened = await f.invoke("remote:project-text-open", "project", "code.ts");
-	assert.deepEqual(opened, { ok: true, document: { content: "remote text", version: "a".repeat(32) } });
-	assert.deepEqual(await f.invoke("remote:project-text-save", "project", "code.ts", "next", opened.document.version), { ok: true, version: "b".repeat(32) });
+	assert.deepEqual(opened, { ok: true, value: { document: { content: "remote text", version: "a".repeat(32) } } });
+	assert.deepEqual(await f.invoke("remote:project-text-save", "project", "code.ts", "next", opened.value.document.version), { ok: true, value: { version: "b".repeat(32) } });
 	assert.deepEqual(f.calls, [
 		[1, "project", "code.ts"],
 		[1, "project", "code.ts", "next", "a".repeat(32)],
@@ -51,8 +51,8 @@ test("editor IPC validates renderer input before touching remote service and ret
 
 test("disabled feature cannot read/write or register sender resources", async () => {
 	const f = setup(false);
-	assert.deepEqual(await f.invoke("remote:project-text-open", "project", "code.ts"), { ok: false, code: "REMOTE_FEATURE_DISABLED" });
-	assert.deepEqual(await f.invoke("remote:project-text-save", "project", "code.ts", "next", "a".repeat(32)), { ok: false, code: "REMOTE_FEATURE_DISABLED" });
+	assert.deepEqual(await f.invoke("remote:project-text-open", "project", "code.ts"), { ok: false, code: "REMOTE_FEATURE_DISABLED", outcome: "rejected" });
+	assert.deepEqual(await f.invoke("remote:project-text-save", "project", "code.ts", "next", "a".repeat(32)), { ok: false, code: "REMOTE_FEATURE_DISABLED", outcome: "rejected" });
 	assert.equal(f.calls.length, 0);
 	assert.equal(f.sender.listenerCount("destroyed"), 0);
 });

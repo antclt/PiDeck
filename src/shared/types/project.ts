@@ -1,8 +1,8 @@
 import type { SessionEnvironment } from "./session";
 
-export type ProjectLocation = { kind: "local"; environment: SessionEnvironment; wslDistro?: string } | { kind: "ssh"; hostId: string };
+export type ProjectLocation = { kind: "local"; environment: SessionEnvironment; wslDistro?: string; wslUser?: string; wslHostId?: string } | { kind: "ssh"; hostId: string };
 
-export type ProjectLocator = { kind: "local"; environment: SessionEnvironment; localPath: string; wslDistro?: string } | { kind: "ssh"; hostId: string; remotePath: string };
+export type ProjectLocator = { kind: "local"; environment: SessionEnvironment; localPath: string; wslDistro?: string; wslUser?: string; wslHostId?: string } | { kind: "ssh"; hostId: string; remotePath: string };
 
 export type ProjectFileTarget = {
 	projectId: string;
@@ -32,6 +32,9 @@ export type LocalProject = ProjectMetadata & {
 	worktreeEnabled?: boolean;
 	worktreeParentId?: string;
 	wslDistro?: string;
+	/** 第 11 步：项目引用的 WSL 连接档案；缺省表示旧数据（运行时回退 distro/user）。 */
+	wslUser?: string;
+	wslHostId?: string;
 	environment?: "windows" | "wsl";
 };
 
@@ -42,6 +45,8 @@ export type RemoteProject = ProjectMetadata & {
 	path?: never;
 	environment?: never;
 	wslDistro?: never;
+	wslUser?: never;
+	wslHostId?: never;
 	worktreeEnabled?: never;
 	worktreeParentId?: never;
 };

@@ -15,6 +15,7 @@ const activeSessionsTree = readFileSync("src/renderer/src/components/sidebar/Act
 const recentSessionSection = readFileSync("src/renderer/src/components/sidebar/RecentSessionsSection.tsx", "utf8");
 const dshSearchResults = readFileSync("src/renderer/src/components/sidebar/DshSearchResults.tsx", "utf8");
 const projectTree = readFileSync("src/renderer/src/components/sidebar/ProjectTree.tsx", "utf8");
+const rowStyles = readFileSync("src/renderer/src/components/sidebar/sidebarRowStyles.ts", "utf8");
 const agentListDisplay = readFileSync("src/renderer/src/agentListDisplay.ts", "utf8");
 const tabBar = readFileSync("src/renderer/src/components/session/SessionTabsBar.tsx", "utf8");
 const sessionView = readFileSync("src/renderer/src/components/session/SessionView.tsx", "utf8");
@@ -22,15 +23,15 @@ const sourceBadge = readFileSync("src/renderer/src/components/session/SessionSou
 
 test("sidebar child rows use shared official hover/active classes", () => {
 	// 62b741a1e：浅色下 muted/60 反向变亮不可见，hover 底改用 --color-bg-hover。
-	assert.match(sessionTree, /hover:border-border-subtle hover:bg-bg-hover hover:text-foreground/);
+	assert.match(rowStyles, /hover:border-border-subtle hover:bg-bg-hover hover:text-foreground/);
 	// 选中态对标 dsh-web：只有叶子会话灰底，无 accent / 描边 / 阴影。
-	assert.match(sessionTree, /selectedRowClass = "active bg-bg-active text-foreground"/);
+	assert.match(rowStyles, /SESSION_ROW_SELECTED_CLASS = "active bg-bg-active text-foreground"/);
 	assert.doesNotMatch(sessionTree, /bg-accent\/20/);
 	assert.match(sessionTree, /sessionRowClass/);
 	assert.match(projectTree, /treeRowClass/);
 	assert.match(projectTree, /flex min-h-8 w-full/);
 	assert.match(projectTree, /project-fold grid size-6/);
-	assert.match(projectTree, /hover:border-border-subtle hover:bg-bg-hover hover:text-foreground/);
+	assert.match(rowStyles, /hover:border-border-subtle hover:bg-bg-hover hover:text-foreground/);
 	// 父项目行永不挂选中底，避免和当前会话双高亮。
 	assert.doesNotMatch(projectTree, /isCurrent && "active/);
 	assert.doesNotMatch(projectTree, /bg-accent\/20/);
@@ -124,7 +125,7 @@ test("sidebar omits the redundant projects heading and tabs shrink to their titl
 	assert.match(tabBar, /session-tabs-scroll (?:relative )?flex (?:h-full )?min-w-0 flex-1/);
 	assert.match(tabBar, /session-tabs-actions flex shrink-0/);
 	assert.match(sidebarContent, /sidebar-body flex min-h-0 flex-1 flex-col gap-2 px-2 pt-2 pb-1/);
-	assert.match(sessionTree, /min-h-8 w-full/);
+	assert.match(rowStyles, /min-h-8 w-full/);
 	assert.match(sessionTree, /history-session-row mx-0 min-h-8 pl-2 pr-2 py-0/);
 	assert.match(sessionTree, /历史会话不是运行中的 Agent/);
 	assert.match(sessionTree, /flex flex-col gap-0/);

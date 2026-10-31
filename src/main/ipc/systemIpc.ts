@@ -37,7 +37,11 @@ import { sanitizePiCustomPaths } from "../pi/piCustomPaths";
 import type { SettingsStore } from "../settings/SettingsStore";
 import type { ConfigManager } from "../config/ConfigManager";
 import type { RemotePiConfigBackend } from "../config/RemotePiConfigBackend";
-import { createPiConfigRouter, rejectRemotePiConfigTarget } from "../config/PiConfigRouter";
+import { createPiConfigRouter, rejectRemotePiConfigTarget, type PiConfigReadRoute, type PiConfigWriteRoute } from "../config/PiConfigRouter";
+import type { PiResourceManagerPool } from "../config/PiResourceManagerPool";
+import { readPiResourceOptions } from "../config/piResourceTarget";
+import { resolvePiResourceWriteManager } from "../config/piResourceWriteRouting";
+import { createWslPiConfigStoreFor } from "../config/WslPiConfigStore";
 import type { AgentManager } from "../pi/AgentManager";
 import type { AppLogger } from "../logging/AppLogger";
 import type { RpcLogger } from "../logging/RpcLogger";
@@ -64,7 +68,7 @@ import type { WatchaEntitlementStore } from "../config/watchaEntitlement";
 import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
 
 import { probePiModel } from "../pi/PiModelProber";
-import { PROBE_AGENT_DIR_ENV, buildProbeDraftFiles, toWslAccessiblePath } from "../pi/probeDraftConfig";
+import { PROBE_AGENT_DIR_ENV, buildProbeDraftFiles } from "../pi/probeDraftConfig";
 import type { PiModelCapabilityCache } from "../pi/PiModelCapabilityCache";
 import { getPiAiCatalogIndex, readBuiltinPiAiCatalogVersion } from "../pi/piAiBuiltinCatalog";
 import { resolveModelSpecFromCatalogs } from "../pi/modelCapabilityResolver";
@@ -175,6 +179,11 @@ export type SystemIpcDeps = {
 	projectResourceManager: ProjectResourceManager;
 	agentManager: AgentManager;
 	skillManager: SkillManager;
+	/**
+	 * 资源作用域池（W1）：技能/提示词/扩展的 list 按 PiResourceTarget 路由。缺省 = 只用本机单例，
+	 * 让既有装配与定向 IPC 单测保持不变；装配层注入后 WSL 目标不再读写 Windows HOME。
+	 */
+	piResourcePool?: PiResourceManagerPool;
 	appLogger: AppLogger;
 	rpcLogger: RpcLogger;
 	sessionRuntimeCoordinator: SessionRuntimeCoordinator;
@@ -240,18 +249,10 @@ export type SystemIpcDeps = {
 	installAppUpdate: () => void;
 	/** Open external URL */
 	openExternalUrl: (url: string, forceSystem?: boolean) => Promise<void>;
-	/**
-	 * Resolve WSL environment (lazy import in index.ts).
-	 * 返回值直接喂给各 manager.configureWsl，形状必须是 WslEnvironment。
-	 */
-	resolveWslEnvironment?: (distro: string, user: string, logger: { warn: (msg: string, detail: unknown) => void }) => Promise<import("../wsl/WslPaths").WslEnvironment>;
 	/** React to settings changes for pet system */
 	reactToPetSettings?: (prev: AppSettings, next: AppSettings) => Promise<void>;
 	/** React to CUA enable/disable changes (start/stop the in-process MCP host). */
 	reactToCuaSettings?: (prev: AppSettings, next: AppSettings) => Promise<void>;
-	/** Session scanner WSL config */
-	configureSessionScannerWsl?: (env: import("../wsl/WslPaths").WslEnvironment) => Promise<void>;
-	clearSessionScannerWsl?: () => void;
 	/** Set feishu locale */
 	setFeishuLocale?: (locale: unknown) => void;
 	/** Set default bot name */
@@ -270,25 +271,10 @@ export type SystemIpcDeps = {
 	applyWebServiceSettings?: (settings: AppSettings) => Promise<void>;
 	/** Restart the running Web service without changing persisted settings. */
 	restartWebService?: (settings: AppSettings) => Promise<void>;
-	/** Session catalog set identity context */
-	setSessionCatalogIdentityContext?: (ctx: { wslDistro?: string; wslUser?: string }) => void;
 	/** DSH host 重启（改 runner node 路径后写入 fork env）。 */
 	restartDshHost?: () => Promise<boolean>;
 	/** host 是否已 fork；未启动时改路径不必立刻重启。 */
 	dshHostIsStarted?: () => boolean;
-	/** Configure WSL for various services — null 表示切回本机路径 */
-	configureSkillManagerWsl?: (env: import("../wsl/WslPaths").WslEnvironment | null) => void;
-	configurePromptManagerWsl?: (env: import("../wsl/WslPaths").WslEnvironment | null) => void;
-	configureExtensionManagerWsl?: (env: import("../wsl/WslPaths").WslEnvironment | null) => void;
-	configureConfigManagerWsl?: (env: import("../wsl/WslPaths").WslEnvironment | null) => void;
-	configureXuePromptManagerWsl?: (env: import("../wsl/WslPaths").WslEnvironment | null) => void;
-	configureAgentManagerWsl?: (env: import("../wsl/WslPaths").WslEnvironment | null) => void;
-	/**
-	 * DSH host 的 WSL 环境：DSH host 是 Windows 原生进程，workspace 解析与会话目录
-	 * 编码都必须是 Windows 主机路径。WSL 模式下项目记录是 /mnt/... 形式，缺了这层转换
-	 * 会让 workspace.resolve 直接失败（会话建不出来）。
-	 */
-	configureDshHostWsl?: (env: import("../wsl/WslPaths").WslEnvironment | null) => void;
 	/** Session command IPC error converter */
 	sessionCommandIpcError?: (error: import("../../shared/types").SessionCommandError) => Error;
 	/** 读取技能 SKILL.md 正文（装配层注入：路径白名单校验由 readSkillContent 完成）。 */
@@ -402,6 +388,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		projectResourceManager,
 		agentManager,
 		skillManager,
+		piResourcePool,
 		appLogger,
 		rpcLogger,
 		sessionRuntimeCoordinator,
@@ -419,11 +406,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		downloadAppUpdate,
 		installAppUpdate,
 		openExternalUrl: doOpenExternalUrl,
-		resolveWslEnvironment,
 		reactToPetSettings,
 		reactToCuaSettings,
-		configureSessionScannerWsl,
-		clearSessionScannerWsl,
 		setFeishuLocale,
 		setFeishuConfigDefaultBotName,
 		refreshTrayContextMenu,
@@ -434,16 +418,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		testPiProxy,
 		applyWebServiceSettings,
 		restartWebService,
-		setSessionCatalogIdentityContext,
 		restartDshHost,
 		dshHostIsStarted,
-		configureSkillManagerWsl,
-		configurePromptManagerWsl,
-		configureExtensionManagerWsl,
-		configureConfigManagerWsl,
-		configureXuePromptManagerWsl,
-		configureAgentManagerWsl,
-		configureDshHostWsl,
 		sessionCommandIpcError,
 		readSkillContent,
 		extensionManager,
@@ -482,9 +458,10 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	};
 
 	/**
-	 * Phase 5 remote config routing (Batch A): the local target keeps ConfigManager exactly as before; an ssh target
-	 * goes only to the injected RemotePiConfigBackend. Provider test/fetch/usage are local-only and refuse an ssh
-	 * target with REMOTE_CONFIG_PROVIDER_OPERATION_UNSUPPORTED before any network or helper request.
+	 * Phase 5 remote config routing (Batch A) + WS2 wsl target: local keeps ConfigManager; ssh goes only to the
+	 * injected RemotePiConfigBackend; wsl goes only to WslPiConfigStore, which re-resolves the profile's
+	 * distribution HOME on every call (never configureWsl, so two targets cannot pollute each other's configDir).
+	 * Provider test/fetch/usage stay local-only and refuse any non-local target before any request.
 	 */
 	const piConfigRouter = createPiConfigRouter({
 		local: {
@@ -494,7 +471,20 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			saveSettingsConfig: (settings) => configManager.saveSettingsConfig(settings),
 		},
 		remote: remotePiConfig,
+		wsl: createWslPiConfigStoreFor(app.getPath("userData"), { warn: (message, details) => void appLogger.warn("wsl", message, details) }),
 	});
+	// 非本机目标的回程 DTO：local 原样返回；wsl 带来源（档案/发行版/用户），ssh 带脱敏快照（不含明文密钥）。
+	const configReadDto = (routed: PiConfigReadRoute<unknown>) => (routed.kind === "local" ? routed.value : routed.kind === "wsl" ? { raw: JSON.stringify(routed.data, null, 2), parsed: routed.data, wsl: routed } : { raw: JSON.stringify(routed.data, null, 2), parsed: routed.data, remote: routed });
+	/** 非本机写回执：ssh 只带 version，wsl 只带档案 id；都只回「写成功」，本机缓存由调用方决定是否失效。 */
+	const configWriteDto = (routed: PiConfigWriteRoute, file: string) => {
+		if (routed.kind === "local") return routed.value;
+		if (routed.kind === "remote") {
+			void appLogger.info("config", "Remote config patched", { file, hostId: routed.hostId, version: routed.version });
+			return { valid: true, remote: routed };
+		}
+		void appLogger.info("config", "WSL config written", { file, hostId: routed.value.valid ? routed.value.receipt.hostId : undefined });
+		return routed.value.valid ? { valid: true, wsl: routed.value.receipt } : routed.value;
+	};
 
 	/**
 	 * Models/auth 的任何写入都必须同时失效 CLI fallback 与 Pi-authoritative
@@ -565,7 +555,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		const settings = settingsStore.get();
 		// 渲染层输入不可信：只认布尔 true，其他一律当非强制重检
 		const forceWslProbe = force === true;
-		const status = await piLocator.check(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser, { forceWslProbe });
+		const status = await piLocator.check(settings.customPiPath, false, undefined, undefined, { forceWslProbe });
 		void appLogger.info("pi", "Pi check completed", {
 			installed: status.installed,
 			version: status.version,
@@ -594,7 +584,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.piInstallations, async (_event, force?: unknown) => {
 		const settings = settingsStore.get();
 		const forceShellProbe = force === true;
-		const installations = await piLocator.listInstallations(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser, { forceShellProbe, customPaths: settings.piCustomPaths });
+		const installations = await piLocator.listInstallations(settings.customPiPath, false, undefined, undefined, { forceShellProbe, customPaths: settings.piCustomPaths });
 		void appLogger.info("pi", "Pi installations listed", {
 			count: installations.length,
 			forceShellProbe,
@@ -651,7 +641,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.piCheckCustom, async (_event, customPath: string, activate?: unknown) => {
 		const shouldActivate = activate !== false;
 		const settings = settingsStore.get();
-		const status = await piLocator.validateCustomPath(customPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
+		const status = await piLocator.validateCustomPath(customPath, false, undefined, undefined);
 		if (status.installed && status.command && shouldActivate) {
 			await settingsStore.update({ customPiPath: status.command });
 			// 自定义路径变了，当前使用项/排序跟着变；不清缓存会让设置页在 TTL 内显示旧列表。
@@ -663,11 +653,6 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			version: status.version,
 			command: status.command,
 			error: status.error,
-			// 校验实际使用的 WSL 上下文：用户报告「校验失败」时先看这三个字段与
-			// 设置页展示是否一致（设置弹窗草稿未提交时主进程读到的仍是旧值）。
-			wslEnabled: settings.wslEnabled,
-			wslDistro: settings.wslDistro,
-			wslUser: settings.wslUser,
 		});
 		return status;
 	});
@@ -1126,7 +1111,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			// 只在 UI 层不展示引导不够——检测总有覆盖不到的地方（自定义目录、别名、只在 GUI 看不见的 shell 里配的 PATH），
 			// 一旦漏判，用户点一下就会真的多出一份，之后终端与 PiDeck 各用各的、更新走两条路。
 			const settings = settingsStore.get();
-			const existing = await piLocator.listInstallations(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
+			const existing = await piLocator.listInstallations(settings.customPiPath);
 			const guard = resolvePiInstallGuard(existing);
 			if (guard.skip) {
 				void appLogger.info("pi", "Runtime pi install skipped because pi already exists", {
@@ -1273,7 +1258,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			try {
 				// 与设置页/反馈环境一致：用当前设置的 WSL 路径探测 pi CLI 版本
 				const settings = settingsStore.get();
-				const status = await piLocator.check(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
+				const status = await piLocator.check(settings.customPiPath);
 				piVersion = status.version;
 			} catch (error) {
 				appLogger.warn("appInfo", "pi version probe failed", { error });
@@ -1564,7 +1549,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 
 	ipcMain.handle(ipcChannels.appFeedbackEnvironment, async () => {
 		const settings = settingsStore.get();
-		const pi = await piLocator.check(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser);
+		const pi = await piLocator.check(settings.customPiPath);
 		return {
 			appVersion: app.getVersion(),
 			platform: process.platform,
@@ -1887,36 +1872,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 				throw new Error(mainCopy(debugDetails === "WEB_SERVICE_INVALID_PORT" ? "webService.invalidPort" : "webService.startFailed"));
 			}
 		}
-		// WSL 设置变更时同步更新会话扫描器和配置管理器
-		if ("wslEnabled" in patch || "wslDistro" in patch || "wslUser" in patch) {
-			if (setSessionCatalogIdentityContext) {
-				setSessionCatalogIdentityContext(settings.wslEnabled ? { wslDistro: settings.wslDistro, wslUser: settings.wslUser } : {});
-			}
-			if (settings.wslEnabled && settings.wslDistro && settings.wslUser && resolveWslEnvironment) {
-				const environment = await resolveWslEnvironment(settings.wslDistro, settings.wslUser, {
-					warn: (msg: string, detail: unknown) => console.warn("[PiDeck] " + String(msg), detail),
-				});
-				if (configureSessionScannerWsl) await configureSessionScannerWsl(environment);
-				if (configureSkillManagerWsl) configureSkillManagerWsl(environment);
-				if (configurePromptManagerWsl) configurePromptManagerWsl(environment);
-				if (configureExtensionManagerWsl) configureExtensionManagerWsl(environment);
-				if (configureConfigManagerWsl) configureConfigManagerWsl(environment);
-				if (configureXuePromptManagerWsl) configureXuePromptManagerWsl(environment);
-				if (configureAgentManagerWsl) configureAgentManagerWsl(environment);
-				if (configureDshHostWsl) configureDshHostWsl(environment);
-			} else {
-				if (clearSessionScannerWsl) clearSessionScannerWsl();
-				if (configureSkillManagerWsl) configureSkillManagerWsl(null);
-				if (configurePromptManagerWsl) configurePromptManagerWsl(null);
-				if (configureExtensionManagerWsl) configureExtensionManagerWsl(null);
-				if (configureConfigManagerWsl) configureConfigManagerWsl(null);
-				if (configureXuePromptManagerWsl) configureXuePromptManagerWsl(null);
-				if (configureAgentManagerWsl) configureAgentManagerWsl(null);
-				if (configureDshHostWsl) configureDshHostWsl(null);
-			}
-		}
-		if ("customPiPath" in patch || "wslEnabled" in patch || "wslDistro" in patch || "wslUser" in patch) {
-			// WSL 切换会改变 ConfigManager 的目录；先重新挂 watcher，再启动新 generation。
+		if ("customPiPath" in patch) {
+			// 当前使用的 pi 路径变化后重新挂 watcher，再启动新 generation。
 			modelCapabilityCache.watchConfigDirectory();
 			// 当前使用项与候选列表都随这些字段变化：不清缓存会让 UI 在 TTL 内显示旧安装列表。
 			invalidatePiInstallationCache();
@@ -1987,28 +1944,39 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 
 	// ── Skills CRUD ──────────────────────────────────────────────────
 
-	ipcMain.handle(ipcChannels.skillsList, () => skillManager.list());
+	// 资源目标（W1）：options 在第一行校验（形状/hostId/拒绝 ssh），再由池按目标取管理器；
+	// 未装配池时保持旧行为（本机单例），不让资源页因为装配顺序变成不可用。
+	ipcMain.handle(ipcChannels.skillsList, async (_event, options?: unknown) => {
+		const parsed = readPiResourceOptions(options);
+		return (piResourcePool ? await piResourcePool.skills(parsed) : skillManager).list();
+	});
 	ipcMain.handle(ipcChannels.skillsReadContent, async (_event, skillPath: string) => {
 		if (!readSkillContent) throw new Error("readSkillContent not available");
 		// 渲染层传入的路径不可信：白名单校验（全局/项目技能位置）在 readSkillContent 内完成。
 		return readSkillContent(skillPath);
 	});
-	ipcMain.handle(ipcChannels.skillsCreate, async (_event, input: CreatePiSkillInput) => {
-		const result = await skillManager.create(input);
+	// 资源写通道（task-16）：local/缺省 → 原单例；wsl → 池中该档案管理器（写入其发行版 HOME）；池缺失 fail closed。
+	ipcMain.handle(ipcChannels.skillsCreate, async (_event, input: CreatePiSkillInput, options?: unknown) => {
+		const manager = await resolvePiResourceWriteManager({ options, pool: piResourcePool, local: () => skillManager, pick: async (pool, parsed) => await pool.skills(parsed) });
+		const result = await manager.create(input);
 		void appLogger.info("skill", "Skill created", { name: input.name, locationId: input.locationId });
 		return result;
 	});
-	ipcMain.handle(ipcChannels.skillsToggle, async (_event, path: string, enabled: boolean) => {
-		const result = await skillManager.toggle(path, enabled);
+	ipcMain.handle(ipcChannels.skillsToggle, async (_event, path: string, enabled: boolean, options?: unknown) => {
+		const manager = await resolvePiResourceWriteManager({ options, pool: piResourcePool, local: () => skillManager, pick: async (pool, parsed) => await pool.skills(parsed) });
+		const result = await manager.toggle(path, enabled);
 		void appLogger.info("skill", "Skill toggled", { path, enabled });
 		return result;
 	});
-	ipcMain.handle(ipcChannels.skillsDelete, async (_event, path: string) => {
-		const result = await skillManager.delete(path);
+	ipcMain.handle(ipcChannels.skillsDelete, async (_event, path: string, options?: unknown) => {
+		const manager = await resolvePiResourceWriteManager({ options, pool: piResourcePool, local: () => skillManager, pick: async (pool, parsed) => await pool.skills(parsed) });
+		// WSL 目标：shell.trashItem 对 UNC 路径可能不支持 → 报错而不是硬删（风险已登记）。
+		const result = await manager.delete(path);
 		void appLogger.info("skill", "Skill deleted", { path });
 		return result;
 	});
-	ipcMain.handle(ipcChannels.skillsRename, async (_event, skillPath: unknown, newName: unknown) => {
+	ipcMain.handle(ipcChannels.skillsRename, async (_event, skillPath: unknown, newName: unknown, options?: unknown) => {
+		const manager = await resolvePiResourceWriteManager({ options, pool: piResourcePool, local: () => skillManager, pick: async (pool, parsed) => await pool.skills(parsed) });
 		// 渲染层入参不可信：先校验再进 SkillManager（与 projectResourceIpc 的边界校验同一纪律）。
 		if (typeof skillPath !== "string" || skillPath.trim().length === 0 || skillPath.length > 4096) {
 			throw new Error("Invalid skill path for rename.");
@@ -2016,20 +1984,19 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		if (typeof newName !== "string" || newName.trim().length === 0 || newName.length > 256) {
 			throw new Error("Invalid skill name for rename.");
 		}
-		const result = await skillManager.rename(skillPath, newName);
+		const result = await manager.rename(skillPath, newName);
 		void appLogger.info("skill", "Skill renamed", { skillPath, newName });
 		return result;
 	});
-	ipcMain.handle(ipcChannels.skillsOpenFolder, (_event, path?: string) => skillManager.openFolder(path));
+	ipcMain.handle(ipcChannels.skillsOpenFolder, async (_event, path?: string, options?: unknown) => {
+		const manager = await resolvePiResourceWriteManager({ options, pool: piResourcePool, local: () => skillManager, pick: async (pool, parsed) => await pool.skills(parsed) });
+		// WSL 目标：openSystemPath 对 UNC 路径若不被支持会抛错（不静默），错误经 IPC 上抛。
+		return await manager.openFolder(path);
+	});
 
 	// ── 配置管理 ─────────────────────────────────────────────────────
 
-	ipcMain.handle(ipcChannels.configGetModels, async (_event, options?: unknown) => {
-		const routed = await piConfigRouter.readModels(options);
-		if (routed.kind === "local") return routed.value;
-		// Batch B renderer DTO: local-compatible fields plus the sanitized remote snapshot (no secret plaintext).
-		return { raw: JSON.stringify(routed.data, null, 2), parsed: routed.data, remote: routed };
-	});
+	ipcMain.handle(ipcChannels.configGetModels, async (_event, options?: unknown) => configReadDto(await piConfigRouter.readModels(options)));
 	// 预览/执行单供应商互迁：方向必须是枚举，供应商名在服务层再校验。
 	ipcMain.handle(ipcChannels.configPreviewProviderMigration, async (_event, direction: unknown) => {
 		if (direction !== "pi-to-dsh" && direction !== "dsh-to-pi") {
@@ -2061,11 +2028,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 		return result;
 	});
 	ipcMain.handle(ipcChannels.configGetAuth, () => configManager.getAuthConfig());
-	ipcMain.handle(ipcChannels.configGetSettings, async (_event, options?: unknown) => {
-		const routed = await piConfigRouter.readSettings(options);
-		if (routed.kind === "local") return routed.value;
-		return { raw: JSON.stringify(routed.data, null, 2), parsed: routed.data, remote: routed };
-	});
+	ipcMain.handle(ipcChannels.configGetSettings, async (_event, options?: unknown) => configReadDto(await piConfigRouter.readSettings(options)));
 	ipcMain.handle(ipcChannels.configGetTrust, () => configManager.getTrustConfig());
 	// MCP project layers are selected by a stable registered project id; renderer paths are never trusted.
 	// MCP 作用域：projectId 省略 = 全局页；项目页固定写项目 .pi/mcp.json（读也要过信任门禁）。
@@ -2196,13 +2159,10 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	ipcMain.handle(ipcChannels.projectsTrustResponse, (_event, requestId: string, choice: "trust-remember" | "trust-session" | "deny") => agentManager.respondTrustRequest(requestId, choice));
 	ipcMain.handle(ipcChannels.configSaveModels, async (_event, data, options?: unknown) => {
 		const routed = await piConfigRouter.saveModels(data, options);
-		if (routed.kind === "remote") {
-			// 远端 patch 成功：不触碰本机模型缓存/后台 fork（本机 models.json 没变），只回传供下一次 patch 的 version。
-			// 但必须让**那台主机**的目录缓存失效：否则刚加完 provider/模型，选择器还要等 TTL 过期才看得到
-			// （本机侧当年就踩过同一坑，「新模型添加后下拉列表有时候没有」）。
-			remoteModelCatalog?.invalidate(routed.hostId);
-			void appLogger.info("config", "Remote models config patched", { hostId: routed.hostId, version: routed.version });
-			return { valid: true, remote: routed };
+		if (routed.kind !== "local") {
+			// ssh 写回执必须让那台主机的目录缓存失效（否则新加的 provider/模型要等 TTL 才可见）；wsl 只改发行版配置。
+			if (routed.kind === "remote") remoteModelCatalog?.invalidate(routed.hostId);
+			return configWriteDto(routed, "models.json");
 		}
 		const result = routed.value;
 		if (!result.valid) return result;
@@ -2234,10 +2194,7 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 	});
 	ipcMain.handle(ipcChannels.configSaveSettings, async (_event, settings, options?: unknown) => {
 		const routed = await piConfigRouter.saveSettings(settings, options);
-		if (routed.kind === "remote") {
-			void appLogger.info("config", "Remote settings config patched", { hostId: routed.hostId, version: routed.version });
-			return { valid: true, remote: routed };
-		}
+		if (routed.kind !== "local") return configWriteDto(routed, "settings.json");
 		const result = routed.value;
 		void appLogger.info("config", "Pi settings config saved", { keys: Object.keys(settings ?? {}) });
 		return result;
@@ -2501,9 +2458,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			await writeFile(join(tempDir, "auth.json"), authJson, "utf8");
 			// 正式 settings.json 副本：扩展注册的 api 协议靠它加载；空配置不写。
 			if (settingsJson) await writeFile(join(tempDir, "settings.json"), settingsJson, "utf8");
-			// WSL：pi 在 Linux 里读不到 Windows 路径，转 /mnt/<drive>；非 WSL 用原路径。
-			const settings = settingsStore.get();
-			const agentDirEnv = settings.wslEnabled && process.platform === "win32" ? toWslAccessiblePath(tempDir) : tempDir;
+			// 模型探针只跑本机 pi；WSL 内的自定义配置由该发行版的 pi 自己处理。
+			const agentDirEnv = tempDir;
 			// 3) 用真实 pi 做一次最小调用（走 pi 的 provider 解析 + SDK，与真实会话同路径）。
 			//    测试连接显式选了代理时，把它覆盖到探针进程的代理环境（pi 侧只认 piProxy* 配置）。
 			const result = await probePiModel(piLocator, settingsStore, providerName, modelId, resolveConfigProxyTarget(settingsStore.get(), asConfigProxyMode(raw.proxyMode)), { [PROBE_AGENT_DIR_ENV]: agentDirEnv });

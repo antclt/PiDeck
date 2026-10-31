@@ -146,7 +146,7 @@ function requireClient(options: { client: SshClientRuntime }): SshClientRuntime 
 export type PreverifiedSshHostKey = { knownHostsBytes: Buffer; fingerprint: string };
 
 /** Return an in-memory candidate after SSH authentication; profile activation needs separate user confirmation. */
-export async function verifyDraftSshHost(route: SshDraftRoute, pinAlias: string, options: { client: SshClientRuntime; preverifiedHostKey?: PreverifiedSshHostKey }): Promise<SshDraftHostCandidate> {
+export async function verifyDraftSshHost(route: SshDraftRoute, pinAlias: string, options: { client: SshClientRuntime; preverifiedHostKey?: PreverifiedSshHostKey; allowUnauthenticatedHostKey?: boolean }): Promise<SshDraftHostCandidate> {
 	const preverified = options?.preverifiedHostKey;
 	const trustedBytes = preverified === undefined ? undefined : Buffer.isBuffer(preverified.knownHostsBytes) ? Buffer.from(preverified.knownHostsBytes) : undefined;
 	if (preverified !== undefined && (trustedBytes === undefined || fingerprintSshHostKey(trustedBytes, pinAlias) !== preverified.fingerprint)) throw new Error("SSH_HOST_KEY_MISMATCH");
@@ -160,7 +160,11 @@ export async function verifyDraftSshHost(route: SshDraftRoute, pinAlias: string,
 		const knownHostsFile = join(directory, "known_hosts");
 		if (trustedBytes !== undefined) await writeFile(knownHostsFile, trustedBytes, { flag: "wx", mode: 0o600 });
 		const auth = await client.run(client.sshPath, draftProbeArgs(routeArgs, pinAlias, knownHostsFile, trustedBytes !== undefined));
-		if (auth.exitCode !== 0 || auth.stdout !== "") throw new Error("SSH_HOST_AUTHENTICATION_FAILED");
+		// A password host cannot authenticate before its key is pinned, and OpenSSH writes the host key during
+		// key exchange - before authentication starts. So a failed auth still leaves the exact bytes to pin;
+		// anything on stdout is still refused (it means the probe was not a quiet handshake).
+		if (auth.stdout !== "") throw new Error("SSH_HOST_AUTHENTICATION_FAILED");
+		if (auth.exitCode !== 0 && options.allowUnauthenticatedHostKey !== true) throw new Error("SSH_HOST_AUTHENTICATION_FAILED");
 		const knownHostsBytes = await readBoundedHostKey(knownHostsFile);
 		if (trustedBytes !== undefined && !knownHostsBytes.equals(trustedBytes)) throw new Error("SSH_HOST_KEY_MISMATCH");
 		const fingerprint = fingerprintSshHostKey(knownHostsBytes, pinAlias);

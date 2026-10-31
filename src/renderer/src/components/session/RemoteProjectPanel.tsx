@@ -1,32 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, FilePlus2, FileText, Folder, FolderPlus, Link2, Loader2, Search, TerminalSquare, Trash2, Upload, X } from "lucide-react";
-import type { RemoteWorkspaceEntry } from "../../../../shared/types/remoteHost";
+import { AlertTriangle, ArrowLeft, FilePlus2, FileText, Folder, FolderPlus, Link2, Loader2, Plus, RefreshCw, Search, TerminalSquare, Trash2, Upload } from "lucide-react";
+import type { FileTreeNode } from "../../../../shared/types";
 import type { RemoteEntryKind } from "../../../../shared/types/remoteFiles";
 import { desktopApi } from "../../desktopApi";
 import { useRemoteProjectEntries } from "../../hooks/useRemoteProjectEntries";
 import { useRemoteProjectSearch, REMOTE_SEARCH_UNWIRED_CODE } from "../../hooks/useRemoteProjectSearch";
+import { useRemoteContentSearch, useRemoteProjectContentSearchCapability } from "../../hooks/useRemoteContentSearch";
+import { RemoteContentSearchSection } from "./RemoteContentSearchSection";
+import { RemoteProjectRowMenu } from "./RemoteProjectRowMenu";
+import { RemoteDirWatchDegradedHint } from "../workspace/RemoteDirWatchDegradedHint";
 import { useRemoteProjectTransfer } from "../../hooks/useRemoteProjectTransfer";
 import { moveDestination, remoteDropOnBlankArea, remoteDropRoute, REMOTE_ENTRY_DRAG_TYPE } from "../../utils/remoteEntryDrag";
 import { t } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
-import { Input } from "../ui-shadcn/input";
-import { sortRemoteEntries } from "./remoteProjectEntries";
+import { isRemoteHostNotConnectedCode as isNotConnectedCode } from "./remoteProjectEntries";
 import { createRequestGate } from "./remoteRequestGate";
 import { RemoteFileEditor } from "../workspace/RemoteFileEditor";
-import { RemoteFileRow } from "./RemoteFileRow";
 import { RemoteProjectEntryDialogs, type RemoteEntryDialog } from "./RemoteProjectEntryDialogs";
 import { RemoteTrashPanel } from "./RemoteTrashPanel";
 import { remoteFileEntryKeepsInput } from "./remoteFileManagementState";
+import { FileTreeNodeRow } from "./FileTreeRows";
+import { useRemoteFileTree } from "../../hooks/useRemoteFileTree";
+import { fileTreeNodeKey, projectFileKey } from "../../utils/fileTreeLazy";
 import type { RemoteSearchEntryView } from "./remoteProjectSearchState";
-
-/** 主机未连接是最常见的失败，且与「路径有问题」完全不同：直接说怎么办，而不是只扔稳定码。 */
-function isNotConnectedCode(code: string): boolean {
-	return code === "SSH_HOST_NOT_READY" || code === "SSH_CONNECTION_FAILED";
-}
-
-const relativePath = (segments: string[], name: string): string => [...segments, name].join("/");
-const parentPath = (segments: string[]): string => segments.join("/");
+import { RemoteProjectSearchBar } from "./RemoteProjectSearchBar";
+import { RemoteUploadLimitsHint } from "./RemoteUploadLimitsHint";
 
 /**
  * 远端项目目录浏览 + 文件名搜索 + 文本编辑 + 文件管理（Phase 5 文件面）。
@@ -38,29 +36,28 @@ const parentPath = (segments: string[]): string => segments.join("/");
  * useRemoteProjectEntries，弹框、行菜单、回收站与 testid 在 §10.2 冻结。失败与空目录分开呈现，
  * 未知结果消息保留到用户显式刷新；本机 FileTree/右键菜单不受影响。
  */
-export function RemoteProjectPanel(props: { projectId: string; projectName: string; onOpenTerminal?: () => void }) {
-	const [entries, setEntries] = useState<RemoteWorkspaceEntry[]>([]);
-	const [relative, setRelative] = useState<string[]>([]);
+export function RemoteProjectPanel(props: { projectId: string; projectName: string; onOpenTerminal?: () => void; onCreateSession?: () => void; onBack?: () => void }) {
+	const tree = useRemoteFileTree(props.projectId);
 	const [file, setFile] = useState<{ projectId: string; path: string } | null>(null);
-	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const [listed, setListed] = useState(false);
 	const [query, setQuery] = useState("");
+	const [searchOpen, setSearchOpen] = useState(false);
 	const [entryDialog, setEntryDialog] = useState<RemoteEntryDialog | null>(null);
 	const [trashOpen, setTrashOpen] = useState(false);
-	/**
-	 * 内部拖放移动：被拖的条目 + 当前悬停的目录。
-	 *
-	 * 与「从资源管理器拖文件进来上传」是两件事：前者没有 `dataTransfer.files`（只有我们自己放的
-	 * 一个标记），所以面板根节点的 drop 处理必须能区分两者，否则内部拖动会被当成上传。
-	 */
-	const [dragEntry, setDragEntry] = useState<{ path: string; kind: RemoteEntryKind } | null>(null);
-	const [dropTarget, setDropTarget] = useState<string | null>(null);
+	/** 行右键菜单：与本地文件树同一种交互（不再给每一行常驻一个「…」按钮）。 */
+	const [rowMenu, setRowMenu] = useState<{ node: FileTreeNode; x: number; y: number } | null>(null);
+	/** 内部拖动悬停的目录（只做视觉反馈；落点判定仍由行组件读 dataTransfer）。 */
+	const [dragOverDir, setDragOverDir] = useState<string | null>(null);
 	const [trashReloadToken, setTrashReloadToken] = useState(0);
+	const scrollRef = useRef<HTMLDivElement | null>(null);
 	/** 请求代次闸门；组件卸载时作废所有在途结果。 */
 	const gateRef = useRef(createRequestGate());
 	/** 搜索状态机（自带代次闸门）；切项目由 hook 负责作废旧结果。 */
 	const { state: search, run: runSearch, reset: resetSearch } = useRemoteProjectSearch(desktopApi, props.projectId);
+	// 能力只来自连接 hello（rootStatus.helperCapabilities）；树根读完=session 已建立，此刻问才不会凭空建连。
+	// 旧 helper 的清单里没有 fs.searchContent ⇒ contentSupported=false ⇒ 继续只做文件名搜索并显示能力提示。
+	const contentSupported = useRemoteProjectContentSearchCapability(props.projectId, tree.listed);
+	const contentSearch = useRemoteContentSearch({ projectId: props.projectId, supported: contentSupported });
 
 	useEffect(
 		() => () => {
@@ -70,72 +67,22 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 	);
 
 	const searching = search.phase !== "idle";
+	const busy = tree.loadingDirs.size > 0;
 
 	// 传输关注点（上传 / 拖放 / 下载）整块在 hook 里，面板只保留接线：这个文件已经同时管导航、
 	// 搜索、写操作弹框与回收站，再塞传输就越过「单文件 ≤400 行」的目标。
-	const transfer = useRemoteProjectTransfer({ projectId: props.projectId, directory: relative.join("/"), reload: () => loadDirectory(relative), setError, searching });
+	const transfer = useRemoteProjectTransfer({ projectId: props.projectId, directory: tree.currentDir, reload: () => tree.refresh(), setError, searching });
 
-	const loadDirectory = useCallback(
-		async (segments: string[]) => {
-			const gate = gateRef.current;
-			const generation = gate.begin();
-			setBusy(true);
-			setError(null);
-			let result: Awaited<ReturnType<typeof desktopApi.remoteHosts.listProject>>;
-			try {
-				result = await desktopApi.remoteHosts.listProject(props.projectId, segments.join("/"));
-			} catch {
-				// IPC reject：不是「目录不存在」，只能说请求失败并让用户重试/查连接。
-				if (!gate.isCurrent(generation)) return;
-				setListed(false);
-				setEntries([]);
-				setError(t("project.remote.requestFailed"));
-				return;
-			} finally {
-				if (gate.isCurrent(generation)) setBusy(false);
-			}
-			if (!gate.isCurrent(generation)) return;
-			if (!result.ok) {
-				// 列出失败不能再声称「已列出」：否则空目录提示会和错误同时出现，互相矛盾。
-				setListed(false);
-				setEntries([]);
-				setError(isNotConnectedCode(result.code) ? t("project.remote.notConnectedHint") : t("project.remote.listFailed", { code: result.code }));
-				return;
-			}
-			setError(null);
-			setListed(true);
-			setRelative(segments);
-			setFile(null);
-			// 列表内容变了，拖动状态不能跨过去：源行可能已经被卸载，dragend 不会再来。
-			setDragEntry(null);
-			setDropTarget(null);
-			setEntries(sortRemoteEntries(result.entries));
-		},
-		[props.projectId],
-	);
+	const files = useRemoteProjectEntries({ projectId: props.projectId, reload: () => tree.refresh() });
 
-	const openFile = useCallback(
-		(segments: string[]) => {
-			gateRef.current.invalidate();
-			setBusy(false);
-			setError(null);
-			setFile({ projectId: props.projectId, path: segments.join("/") });
-		},
-		[props.projectId],
-	);
-
-	const files = useRemoteProjectEntries({ projectId: props.projectId, reload: () => loadDirectory(relative) });
-
-	// 切换项目时必须重读，且不能沿用上一个项目的目录状态。
+	// 切换项目：树由 hook 自行重置，这里只清掉面板自己的临时状态。
 	useEffect(() => {
-		setRelative([]);
 		setFile(null);
-		setListed(false);
 		setError(null);
 		setEntryDialog(null);
 		setTrashOpen(false);
-		void loadDirectory([]);
-	}, [loadDirectory]);
+		setRowMenu(null);
+	}, [props.projectId]);
 
 	/** 搜索失败文案：未接线 / 主机未连接 / 稳定码三种，分别给出用户能行动的说法。 */
 	const searchFailedText = (code: string | null): string => {
@@ -147,12 +94,18 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 	/** 点开一条搜索结果：远端 path 本来就是相对项目根的，直接拆段导航；搜索态随之清空。 */
 	const openResult = useCallback(
 		(entry: RemoteSearchEntryView) => {
-			const segments = entry.path.split("/");
 			resetSearch();
 			setQuery("");
-			void (entry.kind === "directory" ? loadDirectory(segments) : openFile(segments));
+			if (entry.kind === "directory") {
+				// 目录结果：在树里展开到它（含全部祖先），而不是切到一个只显示这一层的列表。
+				void tree.reveal(entry.path);
+				return;
+			}
+			gateRef.current.invalidate();
+			setError(null);
+			setFile({ projectId: props.projectId, path: entry.path });
 		},
-		[loadDirectory, openFile, resetSearch],
+		[props.projectId, resetSearch, tree],
 	);
 
 	const bumpTrash = useCallback(() => setTrashReloadToken((value) => value + 1), []);
@@ -205,20 +158,19 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 	 * 拖到自己身上/自己的子目录由服务端 `assertRemoteProjectEntryMove` 拒绝，这里只拦「拖到同一目录」。
 	 */
 	const moveInto = useCallback(
-		(dragged: { path: string; kind: RemoteEntryKind }, targetDirectory: string) => {
-			const destination = moveDestination(dragged.path, targetDirectory);
+		(sourcePath: string, targetDirectory: string) => {
+			const destination = moveDestination(sourcePath, targetDirectory);
 			if (destination === null) return;
-			void files.renameEntry(dragged.path, destination).then((result) => {
-				if (result.ok) void loadDirectory(relative);
+			void files.renameEntry(sourcePath, destination).then((result) => {
+				if (result.ok) void tree.refresh();
 			});
 		},
-		[files, loadDirectory, relative],
+		[files, tree],
 	);
 
-	const openRowDialog = (entry: RemoteWorkspaceEntry, kind: "rename" | "delete"): void => {
-		if (entry.kind !== "file" && entry.kind !== "directory") return;
-		const path = relativePath(relative, entry.name);
-		setEntryDialog(kind === "rename" ? { kind: "rename", source: path } : { kind: "delete", path, entryKind: entry.kind });
+	const openRowDialog = (node: FileTreeNode, kind: "rename" | "delete"): void => {
+		const path = node.relativePath;
+		setEntryDialog(kind === "rename" ? { kind: "rename", source: path } : { kind: "delete", path, entryKind: node.type });
 	};
 
 	const dialogErrorText = files.outcome?.kind === "failed" && remoteFileEntryKeepsInput(files.outcome.code) ? files.outcome.text : null;
@@ -227,7 +179,8 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 
 	return (
 		<div
-			className={`flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 py-3 ${transfer.dragActive ? "outline outline-2 -outline-offset-2 outline-primary/60" : ""}`}
+			ref={scrollRef}
+			className={`files-panel flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 py-3 ${transfer.dragActive ? "outline outline-2 -outline-offset-2 outline-primary/60" : ""}`}
 			data-testid="remote-project-drop"
 			onDragOver={(event) => {
 				// 内部拖动也接受 drop（不 preventDefault 就不会派发 drop）：落在空白处 = 当前目录，
@@ -252,104 +205,90 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 				transfer.onDrop(event);
 			}}
 		>
-			<div className="flex flex-wrap items-center gap-2 text-label">
-				<span className="rounded bg-muted px-1.5 py-0.5 font-medium text-muted-foreground">{t("project.remote.badge")}</span>
-				<strong className="text-body font-semibold text-foreground">{props.projectName}</strong>
-				<span className="text-muted-foreground">{t("project.remote.title")}</span>
-				{props.onOpenTerminal && (
-					<Button variant="ghost" size="sm" onClick={props.onOpenTerminal}>
-						<TerminalSquare className="size-4" aria-hidden="true" />
-						{t("app.terminal")}
-					</Button>
-				)}
-			</div>
-			{/* 工具栏只在目录浏览态出现（搜索态由搜索自身的结果/错误呈现）；空目录仍可见，可在空目录新建。 */}
-			{!searching ? (
-				<div data-testid="remote-file-toolbar" className="flex flex-wrap items-center gap-1">
-					<Button type="button" size="sm" variant="secondary" data-testid="remote-file-create" disabled={files.busy || busy} onClick={() => setEntryDialog({ kind: "new", entryKind: "file", parent: parentPath(relative) })}>
-						<FilePlus2 className="size-3.5" />
-						{t("remoteFileEntry.newFile")}
-					</Button>
-					<Button type="button" size="sm" variant="secondary" data-testid="remote-file-mkdir" disabled={files.busy || busy} onClick={() => setEntryDialog({ kind: "new", entryKind: "directory", parent: parentPath(relative) })}>
-						<FolderPlus className="size-3.5" />
-						{t("remoteFileEntry.newFolder")}
-					</Button>
-					<Button type="button" size="sm" variant="secondary" data-testid="remote-file-upload" disabled={files.busy || busy} onClick={transfer.uploadFiles}>
-						<Upload className="size-3.5" />
-						{t("remoteFileEntry.uploadAction")}
-					</Button>
-					<Button type="button" size="sm" variant="ghost" data-testid="remote-trash-toggle" aria-expanded={trashOpen} disabled={files.busy} onClick={() => setTrashOpen((open) => !open)}>
-						<Trash2 className="size-3.5" />
-						{t("remoteTrash.title")}
-					</Button>
-				</div>
-			) : null}
-			<nav className="flex flex-wrap items-center gap-1 text-label">
-				<button
-					type="button"
-					className={`underline ${dropTarget === "" ? "rounded px-1 outline outline-1 -outline-offset-1 outline-primary/60" : ""}`}
-					disabled={busy}
-					onClick={() => void loadDirectory([])}
-					onDragOver={(event) => {
-						if (dragEntry === null) return;
-						event.preventDefault();
-						event.stopPropagation();
-						// 不给 dropEffect 时 Chromium 对自定义类型显示「禁止」光标，看着像放不了。
-						event.dataTransfer.dropEffect = "move";
-						setDropTarget("");
-					}}
-					onDragLeave={(event) => {
-						// 只在真正离开这个可放置区域时清高亮：从其内部子节点移出也会触发 dragleave。
-						if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-						if (dropTarget === "") setDropTarget(null);
-					}}
-					onDrop={(event) => {
-						if (dragEntry === null) return;
-						event.preventDefault();
-						event.stopPropagation();
-						setDropTarget(null);
-						moveInto(dragEntry, "");
-					}}
-				>
-					/
-				</button>
-				{relative.map((crumb, index) => (
-					<span key={relative.slice(0, index + 1).join("/")} className="flex items-center gap-1">
-						<button type="button" className="underline" disabled={busy} onClick={() => void loadDirectory(relative.slice(0, index + 1))}>
-							{crumb}
-						</button>
-						{index < relative.length - 1 ? <span className="text-muted-foreground">/</span> : null}
-					</span>
-				))}
-			</nav>
-			<form
-				className="flex items-center gap-1"
-				onSubmit={(event) => {
-					event.preventDefault();
-					if (query.length > 0 && !busy) void runSearch(query);
-				}}
-			>
-				<Input value={query} onChange={(event) => setQuery(event.target.value)} maxLength={128} disabled={busy} placeholder={t("project.remote.searchPlaceholder")} aria-label={t("project.remote.searchPlaceholder")} className="h-8 min-w-0 flex-1 text-label" />
-				<Button type="submit" variant="secondary" size="sm" disabled={busy || query.length === 0}>
-					<Search className="size-3.5" />
-					{t("project.remote.searchAction")}
-				</Button>
-				{searching ? (
-					<Button
-						type="button"
-						variant="ghost"
-						size="sm"
-						title={t("project.remote.searchClear")}
-						aria-label={t("project.remote.searchClear")}
-						onClick={() => {
-							resetSearch();
-							setQuery("");
-						}}
-					>
-						<X className="size-3.5" />
+			{/* 工具行与本地文件面板同密度：图标按钮贴右，返回/新建会话/终端保留为图标动作，不额外做一条「远端项目」标题栏。 */}
+			<div data-testid="remote-file-toolbar" className="flex h-8 shrink-0 items-center gap-1 border-b border-border/40 px-2">
+				{props.onBack ? (
+					<Button variant="ghost" size="icon-sm" data-testid="remote-project-back" aria-label={t("project.remote.back")} title={t("project.remote.back")} onClick={props.onBack}>
+						<ArrowLeft className="size-4" aria-hidden="true" />
 					</Button>
 				) : null}
-			</form>
+				{props.onCreateSession ? (
+					<Button variant="ghost" size="icon-sm" data-testid="remote-project-new-session" aria-label={t("project.remote.newSession")} title={t("project.remote.newSession")} onClick={props.onCreateSession}>
+						<Plus className="size-4" aria-hidden="true" />
+					</Button>
+				) : null}
+				{props.onOpenTerminal ? (
+					<Button variant="ghost" size="icon-sm" aria-label={t("app.terminal")} title={t("app.terminal")} onClick={props.onOpenTerminal}>
+						<TerminalSquare className="size-4" aria-hidden="true" />
+					</Button>
+				) : null}
+				<Button variant="ghost" size="icon-sm" data-testid="remote-file-root" aria-label="/" title={t("remoteFileEntry.root")} onClick={() => tree.setCurrentDir("")}>
+					<span className="font-mono text-xs" aria-hidden="true">
+						/
+					</span>
+				</Button>
+				<span className="min-w-0 flex-1 truncate px-1 text-label text-muted-foreground">{props.projectName}</span>
+				{!searching && !searchOpen ? (
+					<>
+						<Button type="button" size="icon-sm" variant="ghost" data-testid="remote-file-create" aria-label={t("remoteFileEntry.newFile")} title={t("remoteFileEntry.newFile")} disabled={files.busy || busy} onClick={() => setEntryDialog({ kind: "new", entryKind: "file", parent: tree.currentDir })}>
+							<FilePlus2 className="size-4" />
+						</Button>
+						<Button type="button" size="icon-sm" variant="ghost" data-testid="remote-file-mkdir" aria-label={t("remoteFileEntry.newFolder")} title={t("remoteFileEntry.newFolder")} disabled={files.busy || busy} onClick={() => setEntryDialog({ kind: "new", entryKind: "directory", parent: tree.currentDir })}>
+							<FolderPlus className="size-4" />
+						</Button>
+						<Button type="button" size="icon-sm" variant="ghost" data-testid="remote-file-upload" aria-label={t("remoteFileEntry.uploadAction")} title={t("remoteFileEntry.uploadAction")} disabled={files.busy || busy} onClick={transfer.uploadFiles}>
+							<Upload className="size-4" />
+						</Button>
+						<Button
+							type="button"
+							size="icon-sm"
+							variant="ghost"
+							aria-label={t("project.remote.searchPlaceholder")}
+							title={t("project.remote.searchPlaceholder")}
+							aria-pressed={searchOpen}
+							disabled={busy}
+							onClick={() => {
+								setSearchOpen((open) => {
+									if (open) {
+										resetSearch();
+										contentSearch.reset();
+										setQuery("");
+									}
+									return !open;
+								});
+							}}
+						>
+							<Search className="size-4" />
+						</Button>
+						<Button type="button" size="icon-sm" variant="ghost" data-testid="remote-trash-toggle" aria-label={t("remoteTrash.title")} title={t("remoteTrash.title")} aria-expanded={trashOpen} disabled={files.busy} onClick={() => setTrashOpen((open) => !open)}>
+							<Trash2 className="size-4" />
+						</Button>
+						<Button type="button" size="icon-sm" variant="ghost" aria-label={t("common.refresh")} title={t("common.refresh")} disabled={busy} onClick={() => void tree.refresh()}>
+							<RefreshCw className="size-4" />
+						</Button>
+					</>
+				) : null}
+			</div>
+			{searchOpen ? (
+				<RemoteProjectSearchBar
+					query={query}
+					busy={busy}
+					onQueryChange={setQuery}
+					onSubmit={() => {
+						void runSearch(query);
+						// 名字搜索与内容搜索同一次提交、同一查询：先到的名字结果照常先渲染，内容命中稍后补上。
+						void contentSearch.run(query);
+					}}
+					onClose={() => {
+						resetSearch();
+						contentSearch.reset();
+						setQuery("");
+						setSearchOpen(false);
+					}}
+				/>
+			) : null}
+			{/* 能力边界前置说明：单文件 16 MiB、文件夹不支持（强制在主进程，这里只提前告知）。 */}
+			{!searching && !searchOpen ? <RemoteUploadLimitsHint /> : null}
 			{/* 写操作结果/未知提示：固定单行高度，避免布局抖动；读失败只影响目录列表，不覆盖这条回执。 */}
 			<p data-testid="remote-file-outcome" aria-live="polite" className="h-5 truncate text-label text-muted-foreground">
 				{fileOutcomeText}
@@ -357,35 +296,46 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 			{/* 失败提示独立于空目录提示：列出失败时绝不显示「这个目录是空的」；搜索态下由搜索自己报告错误。 */}
 			{error !== null && !searching ? <p className="text-label text-muted-foreground">{error}</p> : null}
 			{!searching ? (
-				<ul className="flex flex-col gap-0.5">
-					{listed && error === null && entries.length === 0 ? <li className="text-label text-muted-foreground">{t("project.remote.empty")}</li> : null}
-					{entries.map((entry) => {
-						const path = relativePath(relative, entry.name);
-						return (
-							<RemoteFileRow
-								key={entry.name}
-								entry={entry}
-								path={path}
-								busy={busy}
-								filesBusy={files.busy}
-								dropTarget={dropTarget}
-								onOpen={() => void (entry.kind === "directory" ? loadDirectory([...relative, entry.name]) : openFile([...relative, entry.name]))}
-								onDragStartEntry={setDragEntry}
-								onDragEndEntry={() => {
-									setDragEntry(null);
-									setDropTarget(null);
-								}}
-								onDropTargetChange={setDropTarget}
-								onDropInto={(targetDirectory) => {
-									if (dragEntry !== null) moveInto(dragEntry, targetDirectory);
-								}}
-								onDownload={() => transfer.downloadFile(path)}
-								onRename={() => openRowDialog(entry, "rename")}
-								onDelete={() => openRowDialog(entry, "delete")}
-							/>
-						);
-					})}
-				</ul>
+				<div className="flex flex-col">
+					{/* 根层读失败：远端错误只报稳定码对应的人话，不伪造空目录。 */}
+					{tree.error !== null ? <p className="px-2 py-1 text-label text-muted-foreground">{isNotConnectedCode(tree.error) ? t("project.remote.notConnectedHint") : t("project.remote.listFailed", { code: tree.error })}</p> : null}
+					{tree.listed && tree.error === null && tree.nodes.length === 0 ? <p className="px-2 py-1 text-label text-muted-foreground">{t("project.remote.empty")}</p> : null}
+					{tree.truncatedDirs.size > 0 ? (
+						<p data-testid="remote-file-tree-truncated" className="px-2 py-1 text-label text-muted-foreground">
+							{t("project.remote.directoryTruncated")}
+						</p>
+					) : null}
+					{/* W3 深层 watch 降级提示：预算不够时目录仍可读但不会实时刷新，必须显式说明覆盖缺口。 */}
+					<RemoteDirWatchDegradedHint dirWatch={tree.dirWatch} />
+					{tree.nodes.map((node) => (
+						<FileTreeNodeRow
+							key={fileTreeNodeKey(node)}
+							node={node}
+							depth={0}
+							expandedDirs={tree.expanded}
+							// 活跃文件用项目作用域键比：远端没有本机绝对路径，之前传裸相对路径会让两边各用一套词。
+							activeEditorFile={file === null ? null : projectFileKey({ projectId: file.projectId, relativePath: file.path })}
+							onToggleDirectory={(key) => tree.toggle(key)}
+							onFileContextMenu={(target, x, y) => setRowMenu({ node: target, x, y })}
+							onViewFile={(target) => {
+								// 远端节点的打开凭据是 target（项目作用域相对路径），不是本机 path。
+								const relativePath = typeof target === "string" ? target : target.relativePath;
+								if (relativePath.length === 0) return;
+								gateRef.current.invalidate();
+								setError(null);
+								setFile({ projectId: props.projectId, path: relativePath });
+							}}
+							onMoveFiles={(sourcePaths, targetDirectory) => {
+								const source = sourcePaths[0];
+								if (source !== undefined) moveInto(source, targetDirectory);
+							}}
+							dragOverDir={dragOverDir}
+							onDragOverDirChange={setDragOverDir}
+							scrollRef={scrollRef}
+							remoteDragType={REMOTE_ENTRY_DRAG_TYPE}
+						/>
+					))}
+				</div>
 			) : (
 				<div className="flex flex-col gap-1">
 					{search.phase === "searching" ? (
@@ -421,13 +371,45 @@ export function RemoteProjectPanel(props: { projectId: string; projectName: stri
 							</ul>
 						</>
 					) : null}
+					<RemoteContentSearchSection
+						supported={contentSupported}
+						query={query}
+						results={contentSearch.results}
+						isSearching={contentSearch.isSearching}
+						onOpenHit={(path) => {
+							// 远端正文命中的 path 是项目相对路径：与名字搜索结果走同一个编辑器入口。
+							resetSearch();
+							contentSearch.reset();
+							setQuery("");
+							gateRef.current.invalidate();
+							setError(null);
+							setFile({ projectId: props.projectId, path });
+						}}
+						onHitContextMenu={(node, x, y) => setRowMenu({ node: { name: node.name, path: node.path, relativePath: node.relativePath, type: "file" }, x, y })}
+					/>
 				</div>
 			)}
+			{rowMenu !== null ? (
+				<RemoteProjectRowMenu
+					menu={rowMenu}
+					busy={files.busy || busy}
+					onClose={() => setRowMenu(null)}
+					onDownload={() => {
+						transfer.downloadFile(rowMenu.node.relativePath);
+						setRowMenu(null);
+					}}
+					onRename={() => {
+						openRowDialog(rowMenu.node, "rename");
+						setRowMenu(null);
+					}}
+					onDelete={() => {
+						openRowDialog(rowMenu.node, "delete");
+						setRowMenu(null);
+					}}
+				/>
+			) : null}
 			{!searching ? <RemoteTrashPanel projectId={props.projectId} open={trashOpen} reloadToken={trashReloadToken} busy={files.busy} outcome={trashOutcomeText} onRestore={restoreTrash} onRequestPrune={(ids, count) => setEntryDialog({ kind: "prune", ids, count })} /> : null}
 			{file !== null && file.projectId === props.projectId ? <RemoteFileEditor key={JSON.stringify([file.projectId, file.path])} projectId={file.projectId} path={file.path} /> : null}
-			<Button variant="ghost" size="sm" className="self-start" disabled={busy} onClick={() => void loadDirectory(relative)}>
-				{t("common.refresh")}
-			</Button>
 			<RemoteProjectEntryDialogs dialog={entryDialog} busy={files.busy} errorText={dialogErrorText} onClose={() => setEntryDialog(null)} onCreate={submitNew} onRename={submitRename} onDelete={submitDelete} onPrune={submitPrune} />
 		</div>
 	);

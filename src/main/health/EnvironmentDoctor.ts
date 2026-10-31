@@ -64,7 +64,7 @@ export class EnvironmentDoctor {
 		const maskPath = createPathMasker(home);
 		const userDataDir = app.getPath("userData");
 		const memory = process.memoryUsage();
-		const pi = await piLocator.check(settings.customPiPath, settings.wslEnabled, settings.wslDistro, settings.wslUser).catch(() => null);
+		const pi = await piLocator.check(settings.customPiPath).catch(() => null);
 		return {
 			appVersion: app.getVersion(),
 			platform: process.platform,

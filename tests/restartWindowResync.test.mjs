@@ -40,9 +40,23 @@ test("重发/编辑/删除确认文案按 busy 状态区分，zh/en 都提供 id
 		assert.match(zh, new RegExp(`"message\\.${key}"`), `zh-CN 缺少 ${key}`);
 		assert.match(en, new RegExp(`"message\\.${key}"`), `en-US 缺少 ${key}`);
 	}
-	// hook 必须按 isAgentCurrentlyBusy（≈running）切文案：idle（含刚重启完）不再谎报「会话正在运行」
+	// hook 必须按 isAgentCurrentlyBusy（≈running）切文案：idle（含刚重启完）不再谎报「会话正在运行」。
+	// 编辑/重发的 fork 路径不再弹窗，这三条文案只剩 DSH/远端 catalog 文件改写路径在用。
 	assert.match(hook, /t\("message\.historyStopToEditBodyIdle"\)/);
 	assert.match(hook, /t\("message\.historyStopToDeleteBodyIdle"\)/);
 	assert.match(hook, /t\("message\.historyStopToResendBodyIdle"\)/);
 	assert.match(hook, /isAgentCurrentlyBusy\(\)\s*\n?\s*\? t\("message\.historyStopToEditBody"\)/);
+});
+
+test("编辑/重发走 fork 时不得再包「停止后编辑」确认弹窗", () => {
+	// pi 的 fork 在同一进程内完成（teardownCurrent 先 abort 当前 turn 再 createBranchedSession
+	// 换会话文件），与 CLI 双击 Esc 选树同路径；弹窗只会多一次点击并谎报「停止并重启」。
+	// 只有 legacy 文件改写路径（DSH / 远端 catalog）仍需要先停 Agent，保留确认。
+	const forkBlocks = hook.split('path.path === "fork-mutation"').slice(1);
+	assert.equal(forkBlocks.length, 2, "编辑与重发各有一个 fork-mutation 分支");
+	for (const block of forkBlocks) {
+		const legacyIndex = block.indexOf("// legacy");
+		assert.ok(legacyIndex > 0, "fork-mutation 分支后应紧跟 legacy 文件路径分支");
+		assert.doesNotMatch(block.slice(0, legacyIndex), /confirmStopIfRunning/, "fork-mutation 分支不得再包确认弹窗");
+	}
 });

@@ -1295,9 +1295,9 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		if (positionedSendMessageRef.current === sendMessageId) return;
 		const pending = pendingSendScrollRef.current;
 		const pendingMatches = Boolean(pending && pending.ownerKey === ownerKey && pending.messageId === sendMessageId);
-		// 面板挂载时乐观气泡已在缓存（引导页首发 / 切页回来）：此前的 id 变化没人观察到，
+		// 无历史锚点的面板挂载时乐观气泡已在缓存（如引导页首发）：此前的 id 变化没人观察到，
 		// 但发送态仍 in-flight 且 requestId 就是这条 user 消息，恢复完成后补一次定位。
-		const submissionMatches = sendingRequestId === sendMessageId && !changed;
+		const submissionMatches = !restoreAnchor && sendingRequestId === sendMessageId && !changed;
 		if (!changed && !pendingMatches && !submissionMatches) {
 			if (pending?.ownerKey === ownerKey) pendingSendScrollRef.current = undefined;
 			return;
@@ -1334,7 +1334,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		// 短会话 / 行未挂载 / 距离为 0 时 pin 可能一次都不动画就返回（不触发 onStart）：
 		// 同步结算标记，避免残留 true。
 		if (!sendScrollRef.current.isAnimating) setSendPinAnimating(false);
-	}, [clearProgrammaticTimelineScroll, invalidateHistoryBrowsing, markProgrammaticScroll, options.sessionId, ownerKey, restorePhase, sendMessageId, store, setSendPinAnimating]);
+	}, [clearProgrammaticTimelineScroll, invalidateHistoryBrowsing, markProgrammaticScroll, options.sessionId, ownerKey, restoreAnchor, restorePhase, sendMessageId, store, setSendPinAnimating]);
 	useEffect(
 		() => () => {
 			pendingSendScrollRef.current = undefined;

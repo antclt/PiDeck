@@ -9,33 +9,34 @@
  *
  * 两个域刻意互不 import：`HOST_ID`、`senderIdOf`、`codeOf` 在本文件按 hosts 域的同一判据重新声明
  * （仓库里 `HOST_ID` 本来就是每个远端模块各自持有的闭集判据）；若让项目域 import hosts 域，拆分
- * 只是把耦合换了个文件名。
+ * 只是把耦合换了个文件名。稳定码判据本身走 `shared/op`（全仓唯一一份实现）。
+ *
+ * 信封形状是 `Op<T>`（v5 §2「单信封」）：成功 `{ok:true, value}`，失败 `{ok:false, code, outcome}`。
  */
 
 import { createHash } from "node:crypto";
 import { createRemoteProjectTargetResolver } from "./remoteProjectTarget";
 import { ipcMain, type WebContents } from "electron";
 import { ipcChannels } from "../../shared/ipc";
-import type {
-	RemoteProjectDownloadResult,
-	RemoteProjectUploadResult,
-	RemoteProjectEnrollAnswerResult,
-	RemoteProjectEnrollMode,
-	RemoteProjectEnrollRequest,
-	RemoteProjectEnrollResult,
-	RemoteProjectListResult,
-	RemoteProjectReadResult,
-	RemoteProjectRootStatusResult,
-	RemoteProjectSearchResult,
-} from "../../shared/types/remoteHost";
+import { codeOf, opFailFromCode, opOk, type Op } from "../../shared/op";
+import type { FileContentSearchResult } from "../../shared/types";
+import type { ProjectDirectoryPageResult, ProjectPathsExistResult } from "../../shared/types/projectFiles";
+import type { RemoteProjectDownloadResult, RemoteProjectUploadResult, RemoteProjectEnrollAnswerResult, RemoteProjectEnrollMode, RemoteProjectEnrollRequest, RemoteProjectEnrollResult, RemoteWorkspaceEntry } from "../../shared/types/remoteHost";
+import { readRelativePath, readerPath, registerRemoteProjectReadIpc, sessionPort, type RemoteProjectDirSnapshot } from "./remoteProjectReadIpc";
+import { projectDirectoryPage, projectDirectoryWatchDegradation, projectPathsExist } from "./remoteProjectDirectoryReads";
 import { registerRemoteProjectCreateFlow } from "./remoteProjectCreateIpc";
 import type { RemoteHostConnectionService, RemoteProjectSession } from "../remote/RemoteHostConnectionService";
-import { REMOTE_HELPER_MAX_SEARCH_QUERY_LENGTH } from "../remote/RemoteHelperContract";
 import { REMOTE_PROJECT_TRASH_DIR } from "../remote/RemoteProjectEntryCommands";
+import { isUserVisibleRemoteEntry } from "../remote/RemoteProjectNameRules";
 import { REMOTE_UPLOAD_TEMP_NAME } from "../remote/RemoteProjectFileUpload";
 import { resolveRemoteBrowseRoot } from "../remote/RemoteBrowseRoot";
-import { createRemoteSearchReader, REMOTE_SEARCH_READER_CODES } from "../remote/RemoteSearchReader";
-import { createRemoteWorkspaceReader, type RemoteWorkspacePort } from "../remote/RemoteWorkspaceReader";
+import { createRemoteWorkspaceReader } from "../remote/RemoteWorkspaceReader";
+import { createRemoteSearchReader } from "../remote/RemoteSearchReader";
+import { REMOTE_HELPER_METHOD_FS_SEARCH_CONTENT } from "../remote/RemoteHelperContract";
+import { createFactCache, type FactCache } from "../remote/RemoteFactCache";
+import { createDirWatchRegistry, dirKeysAfterWrite, dirPathsAfterWrite } from "../remote/RemoteDirWatchRegistry";
+import { createDeepDirWatch, type DeepDirWatchStatus } from "../remote/RemoteDeepDirWatch";
+import { createRemoteFactsHub, type RemoteFactsHub } from "../remote/RemoteFactsNotifications";
 import { PendingConfirmationBroker } from "../security/PendingConfirmationBroker";
 
 /** host id 的闭集判据，与 hosts 域逐字相同；两个域各自持有，避免项目域 import hosts 域。 */
@@ -48,25 +49,58 @@ function senderIdOf(sender: WebContents): number | undefined {
 }
 
 /**
- * Map a thrown store/pin error to a stable code. Only messages that are already a bare code survive;
- * anything else collapses to the fallback so no path or command line can reach the renderer.
- */
-function codeOf(error: unknown, fallback: string): string {
-	const message = typeof error === "object" && error !== null && "message" in error ? (error as { message?: unknown }).message : undefined;
-	return typeof message === "string" && /^[A-Z][A-Z0-9_]{2,63}$/.test(message) ? message : fallback;
-}
-
-/**
  * 远端项目 IPC：登记、确认回答、按 projectId 的列表/读取/搜索。
  *
  * `enabled` 关掉时每个通道都返回稳定码（渲染层连「有这条路」都不该知道）；`service` 可选，因此
  * 只读目录在没有任何连接服务时也返回稳定码而不是崩溃；`projects` 是装配层注入的持久化端口
  * （enroll / locator），未提供时项目相关通道返回稳定码。
  */
+/** 事实层句柄：写面完成后按“我改了哪些路径”标脏，下一次读取自然重新装载。 */
+export type RemoteProjectIpcHandle = {
+	/** 失效矩阵：写到的路径 ⇒ 所在目录 + 其父目录（目录自身的元数据也变了）。 */
+	afterWrite(projectId: string, paths: readonly string[]): void;
+	/**
+	 * 整树失效（远端 Git 写成功/结果未知）：子树条目可能整块变化，但这不是「根目录事件」——
+	 * 只标脏、不装载；重读范围由活跃的文件树决定（收到 tree scope 后重读根与全部已加载目录）。
+	 */
+	invalidateTree(projectId: string): void;
+	/**
+	 * helper 变更事件（helper 1.24.0）的入口：把 watchId 换回「哪个项目的哪些目录」。
+	 *
+	 * 只做**失效**，不装载：事件是「你可能要重读」的提示，重读仍由读的人决定。
+	 * 未注册的 watchId（旧会话、别的项目、已撤销）直接忽略——绝不猜。
+	 */
+	onHelperEvent(entry: { hostId: string; watchId: string; paths: readonly string[] }): void;
+	/** 断连：helper 的 watcher 已随会话一起死，登记直接丢弃（不再发退订）。 */
+	onHostDisconnected(hostId: string): void;
+	/** 项目关闭：退订它在各 host 上的目录订阅，不影响别的项目。 */
+	closeProject(projectId: string): Promise<void>;
+	/** 立即冲刷深层订阅的合并窗口（测试/诊断；正常路径由 150–250ms 窗口自行冲刷）。 */
+	flushDirWatch(): Promise<void>;
+	/** 深层订阅的可断言状态：期望路径、已覆盖路径与降级原因（超预算时不假装覆盖）。 */
+	dirWatchStatus(projectId: string): DeepDirWatchStatus;
+	/** 公共目录页（T6）：与远端 list 共用同一份事实缓存，带 truncated/revision/generation。 */
+	directoryPage(projectId: string, path: string, force?: boolean): Promise<ProjectDirectoryPageResult>;
+	/**
+	 * 远端内容搜索（helper 1.25.0）：按**连接握手声明的能力**路由，旧 helper 返回 `ok:true, value:null`
+	 * （"这个位置不支持"），渲染层据此回退到仅文件名提示，而不是发一次注定失败的请求。
+	 * 匹配里的 path 是项目相对路径（与文件名搜索同一身份）；文件正文永不回传，只有有界预览。
+	 */
+	searchContent(projectId: string, query: string): Promise<Op<FileContentSearchResult | null>>;
+	/** 批量存在性/类型（只读 fs 面；64 路径/帧，全有或全无时按需逐项核对）。 */
+	pathsExist(projectId: string, paths: readonly string[]): Promise<ProjectPathsExistResult>;
+	/** 进程退出：成对退订后丢弃全部订阅登记。 */
+	dispose(): Promise<void>;
+	/** 只读诊断：一次会话内真实发生的目录装载次数。 */
+	dirLoads(): number;
+};
+
 export function registerRemoteProjectIpc(input: {
 	enabled: boolean;
 	userDataDir: string;
 	service?: () => RemoteHostConnectionService | undefined | Promise<RemoteHostConnectionService | undefined>;
+	/** 事实变化通知出口；装配层提供时由目录与 Git 共用同一个 hub。 */
+	factsEvents?: RemoteFactsHub;
 	/**
 	 * 远端项目登记端口（Phase 3 第二段）。
 	 *
@@ -78,7 +112,7 @@ export function registerRemoteProjectIpc(input: {
 		enroll: (input: { hostId: string; canonicalRemotePath: string }) => Promise<{ projectId: string }>;
 		locator: (projectId: string) => { kind: "ssh"; hostId: string; remotePath: string } | undefined;
 	};
-}): void {
+}): RemoteProjectIpcHandle {
 	/**
 	 * Resolve the connection service, turning a discovery failure into a stable code.
 	 *
@@ -95,36 +129,6 @@ export function registerRemoteProjectIpc(input: {
 			return { code: codeOf(error, "REMOTE_CONNECTION_SERVICE_UNAVAILABLE") };
 		}
 	};
-
-	/**
-	 * 设置页那套临时「浏览已确认 root」的入口曾在这里：五条 `remote:workspace-*` 通道只凭内存里的
-	 * confirmed root 就放行读取，从不重新对齐 live helper 会话。删除它是必要的，但从来不是充分的——
-	 * 项目之间的并发串根修在 `RemoteHostConnectionService.withProjectSession`，边界现在在那里。
-	 * 它用到的只读构件（RemoteWorkspaceReader、canonical root resolver、helper）全部保留，
-	 * 各自的测试也照旧运行。
-	 */
-
-	/**
-	 * Validate a path the renderer named. Relative to the confirmed root by construction: an absolute path,
-	 * a traversal segment, a control byte or a backslash is refused here, so the helper only ever sees a
-	 * value that stays inside the boundary regardless of what the UI sent.
-	 *
-	 * The empty string is this layer's spelling of "the root". The reader spells it `"."` instead (it
-	 * refuses an empty path outright), so the two are translated by `readerPath` — the UI should not have to
-	 * know which convention the transport chose.
-	 */
-	const readRelativePath = (value: unknown): string | undefined => {
-		if (typeof value !== "string" || value.length > 4096) return undefined;
-		if (/[\u0000-\u001f\u007f\\]/.test(value)) return undefined;
-		if (value.startsWith("/")) return undefined;
-		if (value === "") return "";
-		const segments = value.split("/");
-		if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) return undefined;
-		return value;
-	};
-
-	/** This layer's empty string means the root; the reader's own spelling of that is `"."`. */
-	const readerPath = (relative: string): string => (relative === "" ? "." : relative);
 
 	/**
 	 * Remote project enrollment (Phase 3 第二段).
@@ -160,22 +164,22 @@ export function registerRemoteProjectIpc(input: {
 			.digest("hex");
 
 	ipcMain.handle(ipcChannels.remoteProjectEnroll, async (event, hostIdValue: unknown, pathValue: unknown, modeValue: unknown): Promise<RemoteProjectEnrollResult> => {
-		if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
-		if (input.projects === undefined) return { ok: false, code: "REMOTE_PROJECT_ENROLL_UNAVAILABLE" };
-		if (typeof hostIdValue !== "string" || !HOST_ID.test(hostIdValue)) return { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID" };
+		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
+		if (input.projects === undefined) return opFailFromCode("REMOTE_PROJECT_ENROLL_UNAVAILABLE");
+		if (typeof hostIdValue !== "string" || !HOST_ID.test(hostIdValue)) return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
 		const senderId = senderIdOf(event.sender);
-		if (senderId === undefined) return { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID" };
-		if (typeof pathValue !== "string") return { ok: false, code: "REMOTE_BROWSE_ROOT_INVALID" };
-		if (modeValue !== undefined && modeValue !== "existing" && modeValue !== "create") return { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID" };
+		if (senderId === undefined) return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
+		if (typeof pathValue !== "string") return opFailFromCode("REMOTE_BROWSE_ROOT_INVALID");
+		if (modeValue !== undefined && modeValue !== "existing" && modeValue !== "create") return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
 		const mode: RemoteProjectEnrollMode = modeValue === "create" ? "create" : "existing";
 		// 「新建空目录」不是登记：它会在项目根之外执行一次写命令，因此必须先探针、再走独立确认 broker。
 		if (mode === "create") {
 			const createService = await resolveService();
-			if ("code" in createService) return { ok: false, code: createService.code };
+			if ("code" in createService) return opFailFromCode(createService.code);
 			return createProjectFlow.begin(event.sender, createService.service, hostIdValue, pathValue);
 		}
 		const resolvedService = await resolveService();
-		if ("code" in resolvedService) return { ok: false, code: resolvedService.code };
+		if ("code" in resolvedService) return opFailFromCode(resolvedService.code);
 		try {
 			// Same pinned probe the workspace panel uses: the canonical value shown here is the one that will be
 			// confined to, and a symlink that the handshake would reject can never be confirmed in the first place.
@@ -184,24 +188,24 @@ export function registerRemoteProjectIpc(input: {
 			const { requestId, expiresAt } = enrollBroker.begin({ senderId, action: enrollAction, subjectId: hostIdValue, stateDigest: digest, payload: { hostId: hostIdValue, canonicalPath: resolved.canonicalPath } });
 			enrollOffers.set(requestId, { subjectId: hostIdValue, digest });
 			if (!event.sender.isDestroyed()) event.sender.send(ipcChannels.remoteProjectEnrollConfirm, { requestId, expiresAt, hostId: hostIdValue, label: pathValue, requestedPath: pathValue, canonicalPath: resolved.canonicalPath } satisfies RemoteProjectEnrollRequest);
-			return { ok: true, status: "pending", hostId: hostIdValue, canonicalPath: resolved.canonicalPath };
+			return opOk({ status: "pending" as const, hostId: hostIdValue, canonicalPath: resolved.canonicalPath });
 		} catch (error) {
-			return { ok: false, code: codeOf(error, "REMOTE_PROJECT_TARGET_INVALID") };
+			return opFailFromCode(codeOf(error, "REMOTE_PROJECT_TARGET_INVALID"));
 		}
 	});
 
 	ipcMain.handle(ipcChannels.remoteProjectAnswer, async (event, requestId: unknown, choice: unknown): Promise<RemoteProjectEnrollAnswerResult> => {
-		if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
-		if (input.projects === undefined) return { ok: false, code: "REMOTE_PROJECT_ENROLL_UNAVAILABLE" };
-		if (typeof requestId !== "string" || requestId.length === 0 || requestId.length > 128) return { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID" };
-		if (choice !== "approve" && choice !== "deny") return { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID" };
+		if (!input.enabled) return opFailFromCode("REMOTE_FEATURE_DISABLED");
+		if (input.projects === undefined) return opFailFromCode("REMOTE_PROJECT_ENROLL_UNAVAILABLE");
+		if (typeof requestId !== "string" || requestId.length === 0 || requestId.length > 128) return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
+		if (choice !== "approve" && choice !== "deny") return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
 		const senderId = senderIdOf(event.sender);
-		if (senderId === undefined) return { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID" };
+		if (senderId === undefined) return opFailFromCode("REMOTE_PROJECT_TARGET_INVALID");
 		const offered = enrollOffers.get(requestId);
-		if (offered === undefined) return { ok: false, code: "REMOTE_PROJECT_ENROLL_CONFIRMATION_REQUIRED" };
+		if (offered === undefined) return opFailFromCode("REMOTE_PROJECT_ENROLL_CONFIRMATION_REQUIRED");
 		try {
 			const payload = enrollBroker.answer({ requestId, senderId, action: enrollAction, subjectId: offered.subjectId, stateDigest: offered.digest, choice });
-			if (payload === null) return { ok: true, enrolled: false };
+			if (payload === null) return opOk({ enrolled: false });
 			// The confirmation window is real time, and the world moves inside it: the directory can be deleted,
 			// or a symlink along it can be re-pointed at something else. Writing the value the user was *shown*
 			// is therefore not enough on its own — that value has to still resolve to itself right now, or the
@@ -212,137 +216,176 @@ export function registerRemoteProjectIpc(input: {
 			// and the broker already consumed the request, so the user re-enrolls rather than getting a
 			// half-written record.
 			const resolvedService = await resolveService();
-			if ("code" in resolvedService) return { ok: false, code: resolvedService.code };
+			if ("code" in resolvedService) return opFailFromCode(resolvedService.code);
 			try {
 				const rechecked = await resolveRemoteBrowseRoot({ userDataDir: input.userDataDir, hostId: payload.hostId, client: resolvedService.service.client, userPath: payload.canonicalPath });
-				if (rechecked.canonicalPath !== payload.canonicalPath) return { ok: false, code: "REMOTE_PROJECT_ROOT_CHANGED" };
+				if (rechecked.canonicalPath !== payload.canonicalPath) return opFailFromCode("REMOTE_PROJECT_ROOT_CHANGED");
 			} catch (error) {
-				return { ok: false, code: codeOf(error, "REMOTE_PROJECT_ROOT_UNRESOLVED") };
+				return opFailFromCode(codeOf(error, "REMOTE_PROJECT_ROOT_UNRESOLVED"));
 			}
 			// Write the durable record only now, with the main-held canonical value. The renderer cannot supply
 			// the path, the id or an "already confirmed" flag.
 			const { projectId } = await input.projects.enroll({ hostId: payload.hostId, canonicalRemotePath: payload.canonicalPath });
-			return { ok: true, enrolled: true, projectId };
+			return opOk({ enrolled: true, projectId });
 		} catch (error) {
-			return { ok: false, code: codeOf(error, "REMOTE_PROJECT_TARGET_INVALID") };
+			return opFailFromCode(codeOf(error, "REMOTE_PROJECT_TARGET_INVALID"));
 		}
 	});
 
 	const projectReadTarget = createRemoteProjectTargetResolver({ service: input.service, locator: input.projects?.locator });
 
 	/**
-	 * Bind the reader's transport to one already-pinned session.
+	 * 目录事实（W3 接线）：**一次内容变化只装载一次**。
 	 *
-	 * The host id is re-checked rather than ignored: the reader names a host in its diagnostics, and a port
-	 * that silently served another host would make those diagnostics lie.
+	 * 树、搜索建议、Git 面板的“这个目录里有什么”过去各自问一遍远端；现在同一个 (projectId, 相对路径)
+	 * 在同一个装载里合并，并带一个 revision——两个读者据此知道“我看到的是同一份事实”。
+	 * 失效只在写面发生时标脏（`afterWrite`），装载成本由读的人决定，一次写不产生任何往返。
 	 */
-	const sessionPort = (session: RemoteProjectSession, hostId: string): RemoteWorkspacePort => ({
-		request: (requestHostId, method, params, options) => (requestHostId === hostId ? session.request(method, params, options) : Promise.reject(new Error("SSH_HOST_NOT_READY"))),
-		cancel: (requestHostId, requestId, options) => (requestHostId === hostId ? session.cancel(requestId, options) : Promise.reject(new Error("SSH_HOST_NOT_READY"))),
-	});
+	const watchRegistry = createDirWatchRegistry();
 
-	ipcMain.handle(ipcChannels.remoteProjectList, async (_event, projectIdValue: unknown, pathValue: unknown): Promise<RemoteProjectListResult> => {
-		if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
-		const relative = readRelativePath(pathValue);
-		if (relative === undefined) return { ok: false, code: "REMOTE_PROJECT_PATH_INVALID" };
-		const target = await projectReadTarget(projectIdValue);
-		if ("code" in target) return { ok: false, code: target.code };
-		try {
-			// The whole listing runs inside the host's operation boundary: a switch for another project queues
-			// behind it instead of re-pointing the session halfway through.
-			const outcome = await target.service.withProjectSession(target.hostId, target.remotePath, async (session) => {
-				const reader = createRemoteWorkspaceReader({ port: sessionPort(session, target.hostId) });
-				return reader.list(target.hostId, readerPath(relative));
-			});
-			if (!outcome.ok) return { ok: false, code: outcome.code };
-			// 回收站是项目根的保留命名空间（读通道也拒绝它）；只隐藏根目录下这一项，子目录里同名条目属于用户数据。
-			return {
-				ok: true,
-				// 两类条目不属于用户数据：回收站命名空间（只在根目录隐藏）与本通道自己的上传临时文件
-				// （强杀后可能残留）。后者按形状隐藏，用户自己造的同后缀文件照常显示。
-				entries: outcome.value.entries.filter((entry) => (relative !== "" || entry.name !== REMOTE_PROJECT_TRASH_DIR) && !REMOTE_UPLOAD_TEMP_NAME.test(entry.name)).map((entry) => ({ name: entry.name, kind: entry.kind, ...(entry.bytes === undefined ? {} : { bytes: entry.bytes }) })),
-			};
-		} catch (error) {
-			return { ok: false, code: codeOf(error, "REMOTE_PROJECT_READ_FAILED") };
-		}
-	});
+	/**
+	 * 事实变化通知的出口（v5 T4）：事实层只标脏，通知由这里发。
+	 * 订阅按 (sender, project) 绑定；退订/窗口销毁都清登记（见 `RemoteFactsNotifications`）。
+	 */
+	const factsEvents: RemoteFactsHub = input.factsEvents ?? createRemoteFactsHub(ipcChannels.remoteProjectFactsChanged);
+	/** projectId → 最近一次装载所用的连接代（通知里带出去，渲染层跨代丢弃缓存）。 */
+	const projectGenerations = new Map<string, string>();
+	/** projectId → hostId（断连时把这一代标成已断开）。 */
+	const projectHosts = new Map<string, string>();
+	let disconnectedGeneration = 0;
+	const generationOf = (projectId: string): string => projectGenerations.get(projectId) ?? "";
 
-	ipcMain.handle(ipcChannels.remoteProjectRead, async (_event, projectIdValue: unknown, pathValue: unknown): Promise<RemoteProjectReadResult> => {
-		if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
-		// The read of the root itself is not a file; an empty path is a valid listing target but never a read.
-		const relative = readRelativePath(pathValue);
-		if (relative === undefined || relative === "") return { ok: false, code: "REMOTE_PROJECT_PATH_INVALID" };
-		// 回收站不是用户可读的项目文件：读通道在这里拒绝（只读列表隐藏、回收站三通道单独授权）。
-		if (relative === REMOTE_PROJECT_TRASH_DIR || relative.startsWith(REMOTE_PROJECT_TRASH_DIR + "/")) return { ok: false, code: "REMOTE_FILE_PROTECTED_PATH" };
-		const target = await projectReadTarget(projectIdValue);
-		if ("code" in target) return { ok: false, code: target.code };
+	/**
+	 * 深层目录订阅（P0-4）：期望路径集 + 合并窗口 + 一次性 ensure/rewatch 在 RemoteDeepDirWatch。
+	 *
+	 * 这里只负责登记：目录读成功后把**项目相对路径**交给它；订阅失败/超预算是降级，不是读失败。
+	 */
+	const dirWatch = createDeepDirWatch({ registry: watchRegistry });
+
+	const dirs: FactCache<RemoteWorkspaceEntry[]> = createFactCache<RemoteWorkspaceEntry[]>(async (key) => {
+		const separator = key.indexOf("\u0000");
+		const projectId = key.slice(0, separator);
+		const relative = key.slice(separator + 1);
+		const target = await projectReadTarget(projectId);
+		if ("code" in target) return opFailFromCode(target.code);
 		try {
-			// The sizing stat, every chunk and the closing stat all happen under one host operation, so no
-			// other project can switch the root between two chunks of this file.
 			const outcome = await target.service.withProjectSession(target.hostId, target.remotePath, async (session) => {
+				// 连接代与 host 归属记在这里：事件/写面通知带去给渲染层，断连时据此换代。
+				projectGenerations.set(projectId, session.connectionId);
+				projectHosts.set(projectId, target.hostId);
 				const reader = createRemoteWorkspaceReader({ port: sessionPort(session, target.hostId) });
-				return reader.readFile(target.hostId, relative);
+				const listed = await reader.list(target.hostId, readerPath(relative));
+				// 读成功后登记订阅：根目录立即 ensure，深层目录进合并窗口；之后 helper 的变更事件才能把
+				// 这个项目的事实标脏。订阅不是读的前置条件（失败只降级到只读刷新）。
+				await dirWatch.record(projectId, target.hostId, relative, session);
+				return listed;
 			});
-			if (!outcome.ok) return { ok: false, code: outcome.code };
-			const file = outcome.value;
-			return { ok: true, contentBase64: Buffer.from(file.content).toString("base64"), bytes: file.bytes, mtimeMs: file.mtimeMs };
+			if (!outcome.ok) return opFailFromCode(outcome.code);
+			// 两类条目不属于用户数据：回收站命名空间（只在根目录隐藏）与本通道自己的上传临时文件。
+			return opOk(outcome.value.entries.filter((entry) => (relative !== "" || entry.name !== REMOTE_PROJECT_TRASH_DIR) && !REMOTE_UPLOAD_TEMP_NAME.test(entry.name)).map((entry) => ({ name: entry.name, kind: entry.kind, ...(entry.bytes === undefined ? {} : { bytes: entry.bytes }) })));
 		} catch (error) {
-			return { ok: false, code: codeOf(error, "REMOTE_PROJECT_READ_FAILED") };
+			return opFailFromCode(codeOf(error, "REMOTE_PROJECT_READ_FAILED"));
 		}
 	});
 
 	/**
-	 * 项目内**文件名**搜索（不含内容搜索）。
+	 * 目录事实读（list 与公共目录页共用）：暖缓存命中也要逐次重解析当前项目/连接。
 	 *
-	 * 与 listProject/readProjectFile 同构：解析 locator → host/root，整次搜索都在 withProjectSession 的受控
-	 * 边界内完成，因此一次搜索不会横跨两个 root。query 来自渲染层，在这里（IPC 边界）先按契约校验一次，
-	 * reader 内部还会再校验一次；非法 query 一个帧都不发出去。
-	 *
-	 * `truncated` 必须如实透传：它表示遍历在某一项上限处收束，界面据此显示「结果已截断」，而不是把一屏
-	 * 结果伪装成完整答案。
+	 * `force` 只给显式刷新用：越过已完成缓存；在途同代装载仍可合并。
 	 */
-	ipcMain.handle(ipcChannels.remoteProjectSearch, async (_event, projectIdValue: unknown, pathValue: unknown, queryValue: unknown): Promise<RemoteProjectSearchResult> => {
-		if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
-		const relative = readRelativePath(pathValue);
-		if (relative === undefined) return { ok: false, code: "REMOTE_PROJECT_PATH_INVALID" };
-		// 渲染层来的值一律不可信：长度与控制字节在这里就拒，绝不把非法 query 发到远端。
-		if (typeof queryValue !== "string" || queryValue.length === 0 || queryValue.length > REMOTE_HELPER_MAX_SEARCH_QUERY_LENGTH || /[\u0000-\u001f\u007f]/.test(queryValue)) return { ok: false, code: REMOTE_SEARCH_READER_CODES.queryInvalid };
-		const target = await projectReadTarget(projectIdValue);
+	async function readDirSnapshot(projectId: string, relative: string, force: boolean): Promise<RemoteProjectDirSnapshot> {
+		const target = await projectReadTarget(projectId);
 		if ("code" in target) return { ok: false, code: target.code };
-		try {
-			const outcome = await target.service.withProjectSession(target.hostId, target.remotePath, async (session) => {
-				const reader = createRemoteSearchReader({ port: sessionPort(session, target.hostId) });
-				return reader.search(target.hostId, readerPath(relative), queryValue);
-			});
-			if (!outcome.ok) return { ok: false, code: outcome.code };
-			const result = outcome.value;
-			// 只把界面要用的字段接过去；远端多余字段在 reader 里已被拒，这里再显式重建一次。
-			// 递归搜索会命中回收站里的归档条目，但它们不是用户可搜索的文件：按首段过滤整棵 .pideck-trash。
-			return {
-				ok: true,
-				entries: result.entries.filter((entry) => entry.path.split("/")[0] !== REMOTE_PROJECT_TRASH_DIR && !REMOTE_UPLOAD_TEMP_NAME.test(entry.path.split("/").at(-1) ?? "")).map((entry) => ({ path: entry.path, name: entry.name, kind: entry.kind, ...(entry.bytes === undefined ? {} : { bytes: entry.bytes }) })),
-				scanned: result.scanned,
-				truncated: result.truncated,
-			};
-		} catch (error) {
-			return { ok: false, code: codeOf(error, "REMOTE_PROJECT_READ_FAILED") };
-		}
+		const key = projectId + "\u0000" + relative;
+		// 只有暖事实才要求活的同代会话；首次打开目录必须允许正常建立会话。
+		const existing = dirs.peek(key);
+		const connection = target.service.connectionFacts?.(target.hostId);
+		if (typeof target.service.connectionFacts === "function" && existing !== undefined && (connection === undefined || connection.state !== "ready")) return { ok: false, code: "SSH_HOST_NOT_READY" };
+		const snapshot = await dirs.read(key, { ...(connection === undefined ? {} : { generation: connection.connectionId }), force });
+		return snapshot.ok ? { ok: true, snapshot } : { ok: false, code: snapshot.code };
+	}
+
+	registerRemoteProjectReadIpc({
+		enabled: input.enabled,
+		projectReadTarget,
+		factsEvents,
+		readDirSnapshot,
 	});
 
-	/**
-	 * 项目级 root 复核状态（第四批设计 (i)）。
-	 *
-	 * 只读既往复核结果：不连主机、不发任何 helper 请求、不建立会话，也不在这里重新复核（复核只在建立/恢复
-	 * 会话时发生）。projectId → (hostId, remotePath) 由 main 从项目库解析，渲染层不传路径，因此同一个 host 上
-	 * 某个项目漂移不会污染另一个健康项目的答案——这正是 (i) 相对「接到主机级 needs-attention」的价值。
-	 * projectReadTarget 已经做完全部入参/归属校验（非法 id、未知项目、非 ssh 项目各自的稳定码），这里复用它，
-	 * 但只取 locator 与 service，不碰会话。
-	 */
-	ipcMain.handle(ipcChannels.remoteProjectRootStatus, async (_event, projectIdValue: unknown): Promise<RemoteProjectRootStatusResult> => {
-		if (!input.enabled) return { ok: false, code: "REMOTE_FEATURE_DISABLED" };
-		const target = await projectReadTarget(projectIdValue);
-		if ("code" in target) return { ok: false, code: target.code };
-		const status = target.service.projectRootStatus(target.hostId, target.remotePath);
-		return status.status === "ok" ? { ok: true, status: "ok" } : { ok: true, status: "needs-attention", code: status.code };
-	});
+	return {
+		afterWrite(projectId: string, paths: readonly string[]): void {
+			const touched = dirPathsAfterWrite(paths);
+			for (const key of dirKeysAfterWrite(projectId, paths)) dirs.invalidate(key);
+			// 只标脏 + 通知：读仍由活跃的消费者决定（一次写不产生远端往返）。
+			factsEvents.publish({ projectId, generation: generationOf(projectId), scopes: touched.map((path) => ({ kind: "dir" as const, path })) });
+		},
+		invalidateTree(projectId: string): void {
+			// 前缀匹配 = 本项目全部目录键（项目 id 后紧跟真实的 NUL 分隔符，不会误命中同前缀的其它项目）。
+			dirs.invalidateWhere((key) => key.startsWith(projectId + "\u0000"));
+		},
+		directoryPage: (projectId, path, force = false) =>
+			projectDirectoryPage({
+				projectId,
+				path,
+				force,
+				readDirSnapshot,
+				generationOf,
+				// 监听降级是项目级事实：每个目录页都顺手带出去，渲染层不必再开一条诊断通道。
+				dirWatch: (id) => projectDirectoryWatchDegradation(dirWatch.status(id)),
+			}),
+		pathsExist: (projectId, paths) => projectPathsExist({ projectId, paths, projectReadTarget }),
+		async searchContent(projectId, query) {
+			const target = await projectReadTarget(projectId);
+			if ("code" in target) return opFailFromCode(target.code);
+			try {
+				// The capability is read after the session exists: a first read of a cold host establishes the
+				// session inside withProjectSession, so the hello answer is already stored when this runs.
+				const outcome = await target.service.withProjectSession(target.hostId, target.remotePath, async (session) => {
+					const capabilities = target.service.helperCapabilities(target.hostId);
+					if (capabilities === undefined || capabilities.includes(REMOTE_HELPER_METHOD_FS_SEARCH_CONTENT) === false) return null;
+					const reader = createRemoteSearchReader({ port: sessionPort(session, target.hostId) });
+					const result = await reader.searchContent(target.hostId, ".", query);
+					// Same identity rules as the filename search: the trash and upload temps are not user files.
+					const hits = result.matches.filter((match) => isUserVisibleRemoteEntry(match.path)).map((match) => ({ name: match.name, path: match.path, relativePath: match.path, line: match.line, column: match.column, snippet: match.snippet }));
+					return { hits, matchedFiles: result.matchedFiles, scannedFiles: result.scannedFiles, scannedBytes: result.scannedBytes, truncated: result.truncated };
+				});
+				if (!outcome.ok) return opFailFromCode(outcome.code);
+				return opOk(outcome.value);
+			} catch (error) {
+				return opFailFromCode(codeOf(error, "REMOTE_PROJECT_READ_FAILED"));
+			}
+		},
+		onHelperEvent(entry): void {
+			const changed = watchRegistry.scopesForEvent(entry.hostId, entry.watchId) ?? [];
+			// 先发通知再标脏：两者都是同步的，读仍由活跃的消费者决定（事件不装载）。
+			for (const scope of changed) factsEvents.publish({ projectId: scope.projectId, generation: generationOf(scope.projectId), scopes: scope.paths.map((path) => ({ kind: "dir" as const, path })) });
+			for (const scope of changed) {
+				for (const path of scope.paths) dirs.invalidate(scope.projectId + " " + path);
+			}
+		},
+		dirLoads(): number {
+			return dirs.stats().loads;
+		},
+		onHostDisconnected(hostId: string): void {
+			// helper 已死：旧的 watchId 不可能再回来，登记直接丢弃，不发退订。
+			dirWatch.forgetHost(hostId);
+			watchRegistry.clearHost(hostId);
+			// 断连换代：旧代缓存与渲染层持有的快照都不能再被当作“现在”。
+			disconnectedGeneration += 1;
+			for (const [projectId, projectHost] of projectHosts) if (projectHost === hostId) projectGenerations.set(projectId, `${hostId}#disconnected#${disconnectedGeneration}`);
+		},
+		closeProject(projectId: string): Promise<void> {
+			// 期望集合先丢（迟到的冲刷不得把它订回来），再成对退订该项目的 watcher。
+			dirWatch.forgetProject(projectId);
+			return watchRegistry.closeProject(projectId);
+		},
+		flushDirWatch(): Promise<void> {
+			return dirWatch.flush();
+		},
+		dirWatchStatus: (projectId) => dirWatch.status(projectId),
+		dispose(): Promise<void> {
+			dirWatch.dispose();
+			return watchRegistry.releaseAll();
+		},
+	};
 }

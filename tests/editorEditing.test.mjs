@@ -76,7 +76,8 @@ test("FileDiffViewer: auto-save reads the latest edit and never reapplies a stal
 	assert.match(viewer, /const getLatestContent = useCallback\(\(\) => contentRef\.current, \[\]\)/);
 	assert.match(viewer, /contentRef\.current = value;\n\s*setContent\(value\)/);
 	// 保存完成后若用户已继续输入，不得用保存开始时的快照覆盖当前编辑内容。
-	assert.match(viewer, /if \(contentRef\.current === latest\) \{\n\s*setDirty\(false\);\n\s*\}/);
+	// 合并 origin/dev 后同一分支多了 reportDirty(false) 的脏态上报（语义不变：仍在「内容未被用户改写」时才清脏）。
+	assert.match(viewer, /if \(contentRef\.current === latest\) \{\n\s*setDirty\(false\);\n(?:\s*reportDirty\(false\);\n)?\s*\}/);
 	assert.doesNotMatch(viewer, /lastSavedRef\.current = latest;\n\s*setContent\(latest\)/);
 });
 

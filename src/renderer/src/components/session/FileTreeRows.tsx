@@ -5,7 +5,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui-shadc
 import { FileTreeIndentGuides } from "./FileTreeIndentGuides";
 import { getFileIconSeti, getFileIconColor, getFileTypeLabel } from "../../fileIcons";
 import { writeFileNodeDragPayload } from "../app/AppUtils";
-import { fileTreeNodeKey } from "../../utils/fileTreeLazy";
+import { fileTreeNodeKey, isActiveFileTreeRow } from "../../utils/fileTreeLazy";
 import { t } from "../../i18n";
 import type { FileTreeNode, ProjectFileTarget } from "../../../../shared/types";
 import { useLazyListWindow } from "../../hooks/useLazyListWindow";
@@ -17,7 +17,7 @@ import { fileTreeGitStatusClass, fileTreeGitStatusLabelKey, type FileTreeGitStat
 // 迁出的原因只有一个：WorkspaceSurface 超过 600 行红线；面板外壳与文件面板本体仍在 WorkspaceSurface，
 // 行组件经 props 拿查表函数与回调（不逐行订阅 atom），memo 边界与 200 行分批窗口全部保持原样。
 
-function fileIconElement(name: string, isDirectory: boolean, isExpanded: boolean) {
+export function fileIconElement(name: string, isDirectory: boolean, isExpanded: boolean) {
 	if (isDirectory) {
 		return isExpanded ? <FolderOpen size={18} aria-hidden="true" /> : <Folder size={18} aria-hidden="true" />;
 	}
@@ -44,7 +44,7 @@ const EMPTY_FILE_TREE_CHILDREN: readonly FileTreeNode[] = [];
 type FileTreeRowProps = {
 	node: FileTreeNode;
 	depth: number;
-	expandedDirs: Set<string>;
+	expandedDirs: ReadonlySet<string>;
 	/** 当前编辑器活跃文件：面板统一订阅后下发，行组件不再各自订阅 atom（否则点一次文件全树重渲）。 */
 	activeEditorFile: string | null;
 	onToggleDirectory: (path: string) => void;
@@ -61,6 +61,13 @@ type FileTreeRowProps = {
 	onDragOverDirChange: (path: string | null) => void;
 	/** 文件树滚动容器：目录子项增量窗口的 IntersectionObserver root。 */
 	scrollRef: RefObject<HTMLDivElement | null>;
+	/**
+	 * 远端树的自定义拖拽类型（缺省走本机 `text/pi-file-path`）。
+	 *
+	 * 远端条目没有本机路径，源数据必须是相对项目根的路径；用独立类型还能让面板的
+	 * drop 处理区分「内部移动」与「从系统拖文件上传」。
+	 */
+	remoteDragType?: string;
 	/** Git 状态查表（IDEA 风格行名着色）：命中带档位（祖先目录可能洗淡）；缺省（非 git 项目/未加载）不上色 */
 	gitStatusOf?: (path: string) => FileTreeGitStatusHit | undefined;
 	/** 目录 listing 失败后的重试：重新触发该目录拉取；缺省时错误行只提示不重试 */
@@ -81,7 +88,7 @@ function fileRowStyle(depth: number): CSSProperties {
    border-color,box-shadow] duration-base），移入文件列表时背景平滑渐变而非瞬切。
    hover 用 bg-muted（白面板上 Δ11 轻档）：抽屉底是白面板，更深的 hover 档
    （#eaeaea/#e4e4e4）偏重，用户裁决工具面灰底一律取轻（2026-10）。 */
-const FILE_ROW_BUTTON_CLASS =
+export const FILE_ROW_BUTTON_CLASS =
 	"file-node-row flex h-[28px] min-h-0 w-full items-center justify-start gap-1.5 rounded-sm border-0 bg-transparent py-0 text-left text-body font-normal text-foreground transition-[background-color,border-color,box-shadow] duration-base hover:bg-muted active:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset relative";
 
 /**
@@ -99,7 +106,7 @@ const FileRow = memo(function FileRow(props: FileTreeRowProps) {
 	// 远端节点的 path 可能缺失：活跃文件按相对路径比较（tab.filePath 对远端就是 relativePath），
 	// 点击目标回落到 node.target（远端 FileTreeNode 的打开凭据）。
 	const fileActionTarget = node.target ?? node.path;
-	const isActiveFile = props.activeEditorFile === (node.path ?? node.relativePath);
+	const isActiveFile = isActiveFileTreeRow(props.activeEditorFile, node);
 	const typeLabel = getFileTypeLabel(node.name);
 	const rowStyle = fileRowStyle(depth);
 	// Git 着色查表：文件行取自身状态；直接父目录实色、更远祖先由档位决定洗淡。
@@ -121,9 +128,10 @@ const FileRow = memo(function FileRow(props: FileTreeRowProps) {
 	const handleDragStart = useCallback(
 		(event: React.DragEvent) => {
 			event.dataTransfer.effectAllowed = "copyMove";
-			writeFileNodeDragPayload(event.dataTransfer, node);
+			if (props.remoteDragType) event.dataTransfer.setData(props.remoteDragType, node.relativePath);
+			else writeFileNodeDragPayload(event.dataTransfer, node);
 		},
-		[node],
+		[node, props.remoteDragType],
 	);
 	return (
 		<div className="file-node">
@@ -169,9 +177,10 @@ const DirectoryRow = memo(function DirectoryRow(props: FileTreeRowProps) {
 	const handleDragStart = useCallback(
 		(event: React.DragEvent) => {
 			event.dataTransfer.effectAllowed = "copyMove";
-			writeFileNodeDragPayload(event.dataTransfer, node);
+			if (props.remoteDragType) event.dataTransfer.setData(props.remoteDragType, node.relativePath);
+			else writeFileNodeDragPayload(event.dataTransfer, node);
 		},
-		[node],
+		[node, props.remoteDragType],
 	);
 	const handleDragOver = useCallback(
 		(event: React.DragEvent) => {
@@ -190,8 +199,8 @@ const DirectoryRow = memo(function DirectoryRow(props: FileTreeRowProps) {
 			event.preventDefault();
 			event.stopPropagation();
 			props.onDragOverDirChange(null);
-			// 内部拖拽移动：优先检查 pi-file-path
-			const sourcePath = event.dataTransfer.getData("text/pi-file-path");
+			// 内部拖拽移动：远端树用自己的类型，本机树走 pi-file-path。
+			const sourcePath = props.remoteDragType ? event.dataTransfer.getData(props.remoteDragType) : event.dataTransfer.getData("text/pi-file-path");
 			if (sourcePath) {
 				if (sourcePath !== nodeKey && props.onMoveFiles) {
 					props.onMoveFiles([sourcePath], nodeKey);
@@ -203,7 +212,7 @@ const DirectoryRow = memo(function DirectoryRow(props: FileTreeRowProps) {
 				props.onDropFiles(nodeKey, event.dataTransfer.files);
 			}
 		},
-		[nodeKey, props.onDropFiles, props.onMoveFiles, props.onDragOverDirChange],
+		[nodeKey, props.onDropFiles, props.onMoveFiles, props.onDragOverDirChange, props.remoteDragType],
 	);
 	const isDragOver = props.dragOverDir === nodeKey;
 	// Git 着色查表：目录行取子树聚合状态（直接父目录实色、更远祖先洗淡）。
@@ -303,6 +312,7 @@ const DirectoryRow = memo(function DirectoryRow(props: FileTreeRowProps) {
 									scrollRef={props.scrollRef}
 									gitStatusOf={props.gitStatusOf}
 									onRetryDirectory={props.onRetryDirectory}
+									remoteDragType={props.remoteDragType}
 								/>
 							))}
 							{childWindow.hasMore && <div ref={childWindow.sentinelRef} aria-hidden="true" className="h-px" />}

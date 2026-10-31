@@ -270,7 +270,7 @@ describe("Git panel VS Code Source Control contract", () => {
 		assert.doesNotMatch(graph, /onFocus=\{\(event\) => scheduleHover/);
 		assert.match(graph, /void loadCommitDetail\(commit\.hash\)/);
 		assert.match(graph, /detailRequests\.current\.get\(hash\)/);
-		assert.match(graph, /pointer-events-auto absolute z-\[1800\]/);
+		assert.match(graph, /pointer-events-auto absolute z-\[var\(--z-popover\)\]/);
 		assert.doesNotMatch(graph, /pointer-events-none absolute z-\[1800\]/);
 		assert.match(graph, /role="dialog"/);
 		assert.match(graph, /onMouseEnter=\{handleCardMouseEnter\}/);

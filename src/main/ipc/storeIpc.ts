@@ -16,6 +16,9 @@ import type { ExtensionManager } from "../extensions/ExtensionManager";
 import type { ProjectResourceManager } from "../projects/ProjectResourceManager";
 import type { ConfigManager } from "../config/ConfigManager";
 import { getPiPackageCatalog } from "../extensions/piPackageCatalog";
+import type { PiResourceManagerPool } from "../config/PiResourceManagerPool";
+import { readPiResourceOptions, requireLocalPiResourceTarget } from "../config/piResourceTarget";
+import { resolvePiResourceWriteManager } from "../config/piResourceWriteRouting";
 
 export type StoreIpcDeps = {
 	promptManager: PromptManager;
@@ -25,6 +28,11 @@ export type StoreIpcDeps = {
 	xuePromptDbStore?: () => XuePromptDbStore | null;
 	extensionManager: ExtensionManager;
 	projectResourceManager: ProjectResourceManager;
+	/**
+	 * 资源作用域池（W1）：prompts.list/edit 与 extensions.list 按 PiResourceTarget 路由。
+	 * 缺省 = 本机单例（既有装配与 IPC 单测不变）；注入后 WSL 目标不再命中 Windows HOME。
+	 */
+	piResourcePool?: PiResourceManagerPool;
 	/** Project trust is checked before any store write; optional keeps isolated IPC tests lightweight. */
 	configManager?: ConfigManager;
 	projectTrustPath?: (projectRoot: string, projectId: string) => string;
@@ -42,7 +50,7 @@ export type StoreIpcDeps = {
 	mainCopy: (key: string, params?: Record<string, string | number>) => string;
 };
 
-export function registerStoreIpc({ promptManager, skillManager, xuePromptManager, xuePromptDbStore, extensionManager, projectResourceManager, configManager, projectTrustPath, netFetch, resolveInstallProxyEnv, sendSkillHubInstallProgress, appLogger, mainCopy }: StoreIpcDeps): void {
+export function registerStoreIpc({ promptManager, skillManager, xuePromptManager, xuePromptDbStore, extensionManager, projectResourceManager, piResourcePool, configManager, projectTrustPath, netFetch, resolveInstallProxyEnv, sendSkillHubInstallProgress, appLogger, mainCopy }: StoreIpcDeps): void {
 	// 商店网络请求统一走注入实现（Electron net.fetch，遵循桌面/系统代理规则）。
 	// 惰性取全局 fetch：测试沙箱没有 fetch 全局，注册阶段直接引用会 ReferenceError。
 	const fetchImpl = netFetch ?? ((url: string, init?: RequestInit) => globalThis.fetch(url, init));
@@ -98,28 +106,43 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 	};
 
 	// ── Prompt Templates ──
-	ipcMain.handle(ipcChannels.promptsList, () => promptManager.list());
+	// 资源目标（W1）：本机缺省走原单例；wsl 目标由池按档案解析发行版 HOME（ssh 在 options 校验里被拒）。
+	ipcMain.handle(ipcChannels.promptsList, async (_event, options?: unknown) => {
+		const parsed = readPiResourceOptions(options);
+		return (piResourcePool ? await piResourcePool.prompts(parsed) : promptManager).list();
+	});
 	// 编辑内置模板时先创建用户副本（fork）再写入内容，渲染层编辑流程依赖此通道。
-	ipcMain.handle(ipcChannels.promptsCreate, async (_event, input: unknown) => {
+	// 资源写通道（task-16）：local/缺省 → 原单例；wsl → 池中该档案管理器（写入其发行版 HOME）。
+	ipcMain.handle(ipcChannels.promptsCreate, async (_event, input: unknown, options?: unknown) => {
+		const manager = await resolvePiResourceWriteManager({ options, pool: piResourcePool, local: () => promptManager, pick: async (pool, parsed) => await pool.prompts(parsed) });
 		const validInput = promptInput(input);
-		const result = await promptManager.create(validInput);
+		const result = await manager.create(validInput);
 		void appLogger.info("prompt", "Prompt template created", { name: validInput.name });
 		return result;
 	});
-	ipcMain.handle(ipcChannels.promptsDelete, async (_event, filePath: unknown) => {
+	ipcMain.handle(ipcChannels.promptsDelete, async (_event, filePath: unknown, options?: unknown) => {
+		const manager = await resolvePiResourceWriteManager({ options, pool: piResourcePool, local: () => promptManager, pick: async (pool, parsed) => await pool.prompts(parsed) });
 		const validPath = requireText(filePath, "prompt path", 32_768);
-		await promptManager.delete(validPath);
+		// WSL 目标：回收站对 UNC 路径可能不支持 → 报错而不是硬删（风险已登记）。
+		await manager.delete(validPath);
 		void appLogger.info("prompt", "Prompt template deleted", { filePath: validPath });
 	});
-	ipcMain.handle(ipcChannels.promptsOpenFolder, () => promptManager.openFolder());
-	ipcMain.handle(ipcChannels.promptsEdit, async (_event, filePath: unknown, content?: unknown) => {
+	ipcMain.handle(ipcChannels.promptsOpenFolder, async (_event, options?: unknown) => {
+		const manager = await resolvePiResourceWriteManager({ options, pool: piResourcePool, local: () => promptManager, pick: async (pool, parsed) => await pool.prompts(parsed) });
+		// WSL 目标：openSystemPath 对 UNC 路径若不被支持会抛错（不静默）。
+		return await manager.openFolder();
+	});
+	ipcMain.handle(ipcChannels.promptsEdit, async (_event, filePath: unknown, content?: unknown, options?: unknown) => {
+		// options 第一行校验：非法/ssh 目标在触碰任何文件前失败（稳定码）。
+		const parsed = readPiResourceOptions(options);
 		const validPath = requireText(filePath, "prompt path", 32_768);
+		const manager = piResourcePool ? await piResourcePool.prompts(parsed) : promptManager;
 		if (content !== undefined) {
 			const validContent = requireString(content, "prompt content", 4 * 1024 * 1024);
-			await promptManager.writeContent(validPath, validContent);
+			await manager.writeContent(validPath, validContent);
 			return;
 		}
-		return promptManager.readContent(validPath);
+		return manager.readContent(validPath);
 	});
 	ipcMain.handle(ipcChannels.promptsListByProject, async (_event, projectId: unknown) => {
 		const root = projectRoot(projectId);
@@ -141,10 +164,11 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 		await promptManager.deleteFromProject(root, validName);
 		void appLogger.info("prompt", "Project prompt template deleted", { projectId, name: validName });
 	});
-	ipcMain.handle(ipcChannels.promptsRename, async (_event, oldName: unknown, newName: unknown) => {
+	ipcMain.handle(ipcChannels.promptsRename, async (_event, oldName: unknown, newName: unknown, options?: unknown) => {
+		const manager = await resolvePiResourceWriteManager({ options, pool: piResourcePool, local: () => promptManager, pick: async (pool, parsed) => await pool.prompts(parsed) });
 		const validOldName = requireText(oldName, "old prompt name", 256);
 		const validNewName = requireText(newName, "new prompt name", 256);
-		const result = await promptManager.rename(validOldName, validNewName);
+		const result = await manager.rename(validOldName, validNewName);
 		void appLogger.info("prompt", "Prompt template renamed", {
 			oldName: validOldName,
 			newName: validNewName,
@@ -162,10 +186,11 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 		});
 		return result;
 	});
-	ipcMain.handle(ipcChannels.promptsToggle, async (_event, filePath: unknown, enabled: unknown) => {
+	ipcMain.handle(ipcChannels.promptsToggle, async (_event, filePath: unknown, enabled: unknown, options?: unknown) => {
+		const manager = await resolvePiResourceWriteManager({ options, pool: piResourcePool, local: () => promptManager, pick: async (pool, parsed) => await pool.prompts(parsed) });
 		const validPath = requireText(filePath, "prompt path", 32_768);
 		if (typeof enabled !== "boolean") throw new Error("Invalid prompt toggle input.");
-		const result = await promptManager.toggle(validPath, enabled);
+		const result = await manager.toggle(validPath, enabled);
 		void appLogger.info("prompt", "Prompt template toggled", { filePath: validPath, enabled });
 		return result;
 	});
@@ -312,7 +337,10 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 				content: string;
 				projectId?: unknown;
 			},
+			options?: unknown,
 		) => {
+			// 未路由的资源写通道：非本机 target 先拒绝（store 导入最终写入全局 prompts 目录）。
+			requireLocalPiResourceTarget(options);
 			// 渲染层不可信：先校验载荷再解析安装目标，null/超大 content 在此拦截。
 			const { title, description, content } = requireStoreItem(payload);
 			const target = await projectInstallTarget(payload.projectId);
@@ -383,7 +411,9 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 		}
 	});
 
-	ipcMain.handle(ipcChannels.skillStoreImport, async (_event, item: PromptStoreItem, locationId: "pi-global" | "agents-global" = "pi-global", projectId?: unknown) => {
+	ipcMain.handle(ipcChannels.skillStoreImport, async (_event, item: PromptStoreItem, locationId: "pi-global" | "agents-global" = "pi-global", projectId?: unknown, options?: unknown) => {
+		// 未路由的资源写通道：非本机 target 先拒绝（store 导入最终写入全局技能目录）。
+		requireLocalPiResourceTarget(options);
 		// 渲染层不可信：先校验载荷再解析安装目标，null/超大 content 在此拦截。
 		const { title, description, content } = requireStoreItem(item);
 		const target = await projectInstallTarget(projectId);
@@ -464,7 +494,9 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 
 	ipcMain.handle(ipcChannels.skillHubDetail, async () => null);
 
-	ipcMain.handle(ipcChannels.skillHubInstall, async (_event, slug: unknown, projectId?: unknown) => {
+	ipcMain.handle(ipcChannels.skillHubInstall, async (_event, slug: unknown, projectId?: unknown, options?: unknown) => {
+		// 未路由的资源写通道：非本机 target 先拒绝（安装最终写入全局技能目录）。
+		requireLocalPiResourceTarget(options);
 		const validSlug = typeof slug === "string" ? slug.trim() : "";
 		const lastSlash = validSlug.lastIndexOf("/");
 		const pkg = lastSlash > 0 ? validSlug.slice(0, lastSlash) : validSlug;
@@ -568,7 +600,9 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 		}
 	});
 
-	ipcMain.handle(ipcChannels.yaoPromptsImport, async (_event, slug: string, category: string, projectId?: unknown) => {
+	ipcMain.handle(ipcChannels.yaoPromptsImport, async (_event, slug: string, category: string, projectId?: unknown, options?: unknown) => {
+		// 未路由的资源写通道：非本机 target 先拒绝（导入最终写入全局 prompts 目录）。
+		requireLocalPiResourceTarget(options);
 		const target = await projectInstallTarget(projectId);
 		try {
 			const result = await xuePromptManager.importToPi(slug, category, target?.root);
@@ -586,8 +620,12 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 	});
 
 	// ── Extensions ──────────────────────────────
-	ipcMain.handle(ipcChannels.extensionsList, (_event, forceRefresh?: boolean) => extensionManager.list(Boolean(forceRefresh)));
-	ipcMain.handle(ipcChannels.extensionsRemoveBuiltIn, async (_event, source: string) => {
+	ipcMain.handle(ipcChannels.extensionsList, async (_event, forceRefresh?: boolean, options?: unknown) => {
+		const parsed = readPiResourceOptions(options);
+		return (piResourcePool ? await piResourcePool.extensions(parsed) : extensionManager).list(Boolean(forceRefresh));
+	});
+	ipcMain.handle(ipcChannels.extensionsRemoveBuiltIn, async (_event, source: string, options?: unknown) => {
+		requireLocalPiResourceTarget(options);
 		try {
 			await extensionManager.removeBuiltIn(source);
 			void appLogger.info("extension", "Built-in extension removed", { source });
@@ -599,11 +637,13 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 			throw error;
 		}
 	});
-	ipcMain.handle(ipcChannels.extensionsRestoreBuiltIn, async (_event, source: string) => {
+	ipcMain.handle(ipcChannels.extensionsRestoreBuiltIn, async (_event, source: string, options?: unknown) => {
+		requireLocalPiResourceTarget(options);
 		await extensionManager.restoreBuiltIn(source);
 		void appLogger.info("extension", "Built-in extension restored", { source });
 	});
-	ipcMain.handle(ipcChannels.extensionsUninstall, async (_event, source: string, scope?: "user" | "project" | "unknown", projectId?: unknown) => {
+	ipcMain.handle(ipcChannels.extensionsUninstall, async (_event, source: string, scope?: "user" | "project" | "unknown", projectId?: unknown, options?: unknown) => {
+		requireLocalPiResourceTarget(options);
 		try {
 			// 项目层卸载与安装走同一信任门（projectInstallTarget 内含 resolveProjectRoot + trust 校验）：
 			// 否则 pi remove -l 在错误 cwd 下被推入 --no-approve，pi 以 "Project is not trusted" 拒改本地 packages。
@@ -621,7 +661,8 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 			throw error;
 		}
 	});
-	ipcMain.handle(ipcChannels.extensionsInstall, async (_event, source: string, projectId?: unknown) => {
+	ipcMain.handle(ipcChannels.extensionsInstall, async (_event, source: string, projectId?: unknown, options?: unknown) => {
+		requireLocalPiResourceTarget(options);
 		const target = await projectInstallTarget(projectId);
 		const result = await extensionManager.install(source, target ? { projectRoot: target.root } : undefined);
 		void appLogger.info("extension", "Extension installed", {
@@ -631,22 +672,26 @@ export function registerStoreIpc({ promptManager, skillManager, xuePromptManager
 		});
 		return result;
 	});
-	ipcMain.handle(ipcChannels.extensionsToggle, async (_event, source: string, enabled: boolean, scope?: "user" | "project" | "unknown", path?: unknown, projectId?: unknown) => {
+	ipcMain.handle(ipcChannels.extensionsToggle, async (_event, source: string, enabled: boolean, scope?: "user" | "project" | "unknown", path?: unknown, projectId?: unknown, options?: unknown) => {
+		// 资源写通道（task-16）：local/缺省 → 原单例；wsl → 池中该档案管理器（写发行版 settings.json）。
+		const manager = await resolvePiResourceWriteManager({ options, pool: piResourcePool, local: () => extensionManager, pick: async (pool, parsed) => await pool.extensions(parsed) });
 		// 原生过滤规则：本地文件扩展要精确路径，项目作用域要 projectId（来自渲染层，主进程校验）。
 		const extensionPath = typeof path === "string" && path.length <= 32_768 ? path : undefined;
 		const resolvedProjectId = typeof projectId === "string" && projectId.trim() && projectId.length <= 256 ? projectId.trim() : undefined;
 		if (scope === "project" && !resolvedProjectId) throw new Error("Project scope requires a project id.");
 		// 内置扩展与原生过滤规则的分流收口在 ExtensionManager.toggleFromUi：与 Web 工作区路由共用同一入口，
 		// 避免两处各写一套「pi-deck-* 前缀 ≠ 内置身份」的白名单判定（issue #321 教训）。
-		await extensionManager.toggleFromUi(source, enabled, scope, extensionPath, resolvedProjectId);
+		await manager.toggleFromUi(source, enabled, scope, extensionPath, resolvedProjectId);
 		void appLogger.info("extension", "Extension toggled", { source, enabled, scope, projectId });
 	});
-	ipcMain.handle(ipcChannels.extensionsUpdate, async () => {
+	ipcMain.handle(ipcChannels.extensionsUpdate, async (_event, options?: unknown) => {
+		requireLocalPiResourceTarget(options);
 		const result = await extensionManager.updateExtensions();
 		void appLogger.info("extension", "Extensions update command completed", { updated: result.updated, bytes: result.output.length });
 		return result;
 	});
-	ipcMain.handle(ipcChannels.extensionsUpdateOne, async (_event, source: string) => {
+	ipcMain.handle(ipcChannels.extensionsUpdateOne, async (_event, source: string, options?: unknown) => {
+		requireLocalPiResourceTarget(options);
 		const result = await extensionManager.updateExtension(source);
 		void appLogger.info("extension", "Extension update-one command completed", { source, updated: result.updated, bytes: result.output.length });
 		return result;

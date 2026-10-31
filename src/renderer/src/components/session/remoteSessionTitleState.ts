@@ -76,12 +76,14 @@ export function readTitleResponse(raw: unknown): RemoteSessionTitleOutcome {
 	if (!isRecord(raw)) return { kind: "rejected" };
 	if (raw.ok === false) return typeof raw.code === "string" && STABLE_CODE.test(raw.code) ? { kind: "failed", code: raw.code } : { kind: "rejected" };
 	if (raw.ok !== true) return { kind: "rejected" };
-	const title = raw.title;
+	// 迁移期：新 IPC 是 Op（{ok:true,value}），旧 scanner/夹具是扁平形状。有 value 就只读 value。
+	const payload = isRecord(raw.value) ? raw.value : raw;
+	const title = payload.title;
 	if (typeof title !== "string" || title.length === 0 || title.length > MAX_TITLE_LENGTH || CONTROL_CHARS.test(title)) return { kind: "rejected" };
-	const origin = raw.titleOrigin;
+	const origin = payload.titleOrigin;
 	if (origin !== "authoritative" && origin !== "inferred" && origin !== "fallback") return { kind: "rejected" };
 	// tailDegraded 是可选布尔：缺省=false；别的类型属于读不懂（不猜、也不静默降级）。
-	const tailDegraded = raw.tailDegraded;
+	const tailDegraded = payload.tailDegraded;
 	if (tailDegraded !== undefined && typeof tailDegraded !== "boolean") return { kind: "rejected" };
 	return { kind: "ok", title, origin, tailDegraded: tailDegraded === true };
 }

@@ -36,7 +36,7 @@ export function useRemoteProjectTrust(): RemoteProjectTrustHandle {
 		setState((current) => ({ ...current, status: "loading" }));
 		try {
 			const result = await desktopApi.remoteTrust.list();
-			setState(result.ok ? { status: "ready", entries: result.entries } : { status: "error", entries: [], code: result.code });
+			setState(result.ok ? { status: "ready", entries: result.value.entries } : { status: "error", entries: [], code: result.code });
 		} catch {
 			setState({ status: "error", entries: [], code: REMOTE_TRUST_REQUEST_FAILED });
 		}

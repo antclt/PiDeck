@@ -1,8 +1,8 @@
 # DSH 0.2.1 升级对照
 
-状态：代码适配与本机隔离验证完成，发布前跨平台与人工 smoke 待补齐（0.2.0-rc.2 → 0.2.1-rc.1 → 0.2.1-rc.2）。
+状态：代码适配与本机隔离验证完成，发布前跨平台与人工 smoke 待补齐（0.2.0-rc.2 → 0.2.1-rc.1 → 0.2.1-rc.2 → 0.2.1-rc.5）。
 
-升级路径：先落 npm `next` 上当时可用的 `0.2.1-rc.1`（`@deepseek-ai/dsh@0.2.1-rc.2` 当时 404，只有 GitHub tag）；rc.2 上架 npm 后按同一套门禁补升到 `0.2.1-rc.2`，现为声明的配套版本，补丁级差异见下文「rc.2 补丁升级」。
+升级路径：先落 npm `next` 上当时可用的 `0.2.1-rc.1`（`@deepseek-ai/dsh@0.2.1-rc.2` 当时 404，只有 GitHub tag）；rc.2 上架 npm 后按同一套门禁补升到 `0.2.1-rc.2`；rc.5 为 0.2.1 线当前 latest，按同一套门禁补升。补丁级差异见下文「rc.2 补丁升级」与「rc.5 补丁升级」。
 
 ## 边界与验收
 
@@ -31,6 +31,22 @@ rc.2 是 DeepSeek Search/Fetch API provider 的补丁版：86 个直接依赖全
 
 其余 rc.2 差异只有版本号、agent-preset 的技能参考文档与 lock 里的 duplicate 收敛，不动会话格式、wire 描述符、Peer 接口与预设语义，因此回退边界与 rc.1 相同。
 
+## rc.5 补丁升级（0.2.1-rc.2 → 0.2.1-rc.5）
+
+rc.3、rc.4、rc.5 三个补丁都只动 web 客户端与 ACP 附属面，未改 host / session / RPC 契约：
+
+| 版本 | 变化 | PiDeck 适配 |
+| --- | --- | --- |
+| rc.3 | web 客户端左/中/右栏新增「更多」菜单与插件草稿入口；修复切换会话后新会话丢草稿；DeepSeek API Key 适配器的模型列表改为与账号登录同路径 | `dsh-web-app` 的 `cordis.patch.yml` 仅新增 client-ui 行 `entry-customization`；PiDeck 的 agent-plane 禁用表（23 项）不变 |
+| rc.4 | 修复 ACP 模式诊断输出混入 stdout | PiDeck DSH 后端走自有 hostEntry，不经 `dsh-acp-app`；包随闭包升级，无代码适配 |
+| rc.5 | 优化对话中思考内容的展示（供应商思维签名块剥离） | 展示层改动位于 `dsh-client-ui-chat`；PiDeck 已在 `df287bc2f` 移植同一净化逻辑到 `src/shared/reasoningText.ts`，时间线行为一致 |
+
+依赖与 lock：
+
+- 29 个 `@deepseek-ai/dsh*` 直接依赖与根字段 `dshRuntimeVersion` 全部对齐 `0.2.1-rc.5`；lock 内 296 个 dsh 包均为 rc.5，无混版。
+- 按既有做法从 lock 删除 `@deepseek-ai/dsh*` 条目后重新解析（子包 peer 精确 pin 到 rc.2，只改根版本会 ERESOLVE）；同时移除已下线的本地包 `packages/dsh-tool-pwsh-persistent` 残留条目。
+- 重建后 npm 11.6.2 仍会漏掉顶层 `@emnapi/wasi-threads`，已按 `pideck-npm-ci-lockfile-emnapi` 补回 1.2.3，`npm ci` 才能通过。
+
 ## 升级与回退
 
 会话格式（V3/V4）与 0.2.0 一致，由 DSH runtime 负责迁移；回退边界同 [DSH 0.2.0 升级对照](dsh-0.2.0-migration.md)：不能只降 npm 版本，V4 新写入不会回填 V3。
@@ -40,13 +56,34 @@ rc.2 是 DeepSeek Search/Fetch API provider 的补丁版：86 个直接依赖全
 - `npm run typecheck`。
 - `node --test --test-concurrency=4 "tests/dsh*.test.mjs" tests/providerMigration.test.mjs`。
 - `npm run check:dsh-wire`。
-- 只构建 `packages/dsh-tool-pwsh-persistent`，不跑全仓构建。
+- 只构建改动涉及的子包，不跑全仓构建（本地 pwsh 插件已下线，无单包构建项）。
 - `node scripts/pack-dsh-runtime.mjs --out <隔离目录> --lite` 后，用同一 tgz 依次跑 `check-dsh-asar.mjs`、`check-dsh-boot.mjs`、`check-dsh-migration.mjs`。
 - 分平台归档只验证归档完整性；非本机平台真实运行需对应 runner，不把交叉打包称为跨平台运行通过。
 
 ## 交付记录
 
-### rc.2（当前声明版本，0.2.1-rc.2）
+### rc.5（当前声明版本，0.2.1-rc.5）
+
+在隔离 worktree（`../pideck-dsh-rc5`，分支 `chore/dsh-0.2.1-rc.5`，`npm ci --ignore-scripts`）内完成，不干扰主工作区的并行改动与 node_modules。
+
+| 命令 | 结果 |
+| --- | --- |
+| `npm ci --dry-run`（bundled npm 11.6.2） | 补回 `@emnapi/wasi-threads@1.2.3` 后通过 |
+| `npm run typecheck` | 通过 |
+| `node --test --test-concurrency=4 "tests/dsh*.test.mjs" tests/providerMigration.test.mjs` | 906 项通过，0 失败/跳过 |
+| `node --test tests/packageLockIntegrity.test.mjs tests/releaseConsistency.test.mjs` | 10 项通过 |
+| `node --test tests/agentMessageProjector.test.mjs tests/liveStreamThinkingDisplay.test.mjs tests/reasoningText.test.mjs` | 26 项思考净化回归通过 |
+| `npm run check:dsh-wire` | 31 个调用点形状匹配，0 不符 |
+| `node scripts/pack-dsh-runtime.mjs --out "$TEMP/dsh-021-rc5-pack" --lite` | win32-x64 归档成功，639 包 / 38,307 文件 |
+| `node scripts/check-dsh-asar.mjs <tgz>` | 38,308 entries / 513 packages；19 基线 + 8 入口包、639 个包目录入口与关键文件通过 |
+| `node scripts/check-dsh-boot.mjs <tgz>` | 真实 hostEntry、官方/旧预设健康、相对资源、配置保存/重启通过 |
+| `node scripts/check-dsh-migration.mjs <tgz>` | V3 冷读/写租约发布 V4/V3 保留/V4 重启/损坏输入/最高代扫描/follow/control/fork 通过 |
+
+验证产物：`C:/Users/14012/AppData/Local/Temp/dsh-021-rc5-pack/`，`dsh-runtime-win32-x64.tgz` 为 153,325,470 bytes（146.2 MiB），runtime `0.2.1-rc.5`、最低应用版本 `0.9.9`，SHA-256 `30d370e61731e7e552a4875bf6bbb8c365719e12ea9d31d07b5d39d1bc380596`。发布落点（win32-x64）：GitHub `v0.9.8`（当前 latest；未打包 dev 跟随 latest，`v0.9.9` 尚未发版，发版时由 release.yml 按新 lock 自动产出）与 AtomGit `v0.9.8` 的 `dsh-runtime-win32-x64.tgz` + `-releases.json` 已替换为 rc.5。AtomGit 同步踩中「索引文件改版本后大小不变（305 bytes）被按大小去重跳过」，处理方式是先删掉两个 win32-x64 附件再重传；GitHub 侧下载归档超时（`gh ETIMEDOUT`），改用本地归档直传预签名 URL。两条 `releases/download/latest` 链路实测索引 `runtimeVersion` 均为 rc.5、sha256 均为 `30d370e6…c380596`，Range 长度均为 153,325,470。
+
+注意：rc.5 归档的 `minAppVersion=0.9.9`，而 `v0.9.8` 客户端声明 rc.2，因此 0.9.8 的新装用户不会再被提供可下载 runtime（已装 rc.2 的用户不受影响）；需要升级到 0.9.9 或手动导入归档。其他平台归档、安装包内 utilityProcess、真实供应商请求与人工 UI smoke 未在本次验证范围。
+
+### rc.2（历史记录，已被 rc.5 取代）
 
 在隔离 worktree（`../pideck-dsh-rc2`，分支 `chore/dsh-0.2.1-rc.2`，`npm ci --ignore-scripts`）内完成，不干扰主工作区的并行改动与 node_modules。
 

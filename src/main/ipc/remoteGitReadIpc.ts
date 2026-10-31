@@ -1,11 +1,16 @@
 import { ipcMain, type IpcMainInvokeEvent } from "electron";
 import { ipcChannels } from "../../shared/ipc";
 import type {
+	GitRef,
 	GitCommitResult,
+	GitRepoInfo,
 	GitIndexMutationResult,
 	GitReadSnapshotResult,
 	GitResourceGroups,
 	GitWorkspaceFileDiff,
+	GitCompareRefsResult,
+	GitHistoryPageResult,
+	GitRepositoryListResult,
 	RemoteGitBranchMutationResult,
 	RemoteGitCommitDetailResult,
 	RemoteGitCompareResult,
@@ -24,8 +29,12 @@ import type {
 	RemoteGitSyncFactsResult,
 } from "../../shared/types/git";
 import type { ProjectFileTarget } from "../../shared/types/project";
-import { createRemoteGitService, remoteGitFailureCode, validateRemoteGitPath, validateRemoteGitRepoPath, type RemoteGitLocator } from "../git/RemoteGitService";
+import type { RemoteProjectFactsScope } from "../../shared/types/remoteHost";
+import { opFailFromCode, opOk } from "../../shared/op";
+import { createRemoteGitService, remoteGitFailureCode, remoteGitRepoScope, validateRemoteGitPath, validateRemoteGitRepoPath, type RemoteGitLocator, type RemoteGitReadSnapshot } from "../git/RemoteGitService";
 import { createRemoteGitMutationTokens } from "../git/RemoteGitMutationTokens";
+import { createSnapshotFactsCache } from "../git/RemoteGitSnapshotFacts";
+import type { RemoteFactsHub } from "../remote/RemoteFactsNotifications";
 import { REMOTE_GIT_COMMIT_MESSAGE_MAX_BYTES } from "../remote/RemoteHelperContract";
 import type { RemoteHostConnectionService } from "../remote/RemoteHostConnectionService";
 
@@ -39,16 +48,26 @@ function fileTarget(projectId: string, value: unknown): ProjectFileTarget {
 }
 /** Local Git IPC still sends a ProjectFileTarget-shaped repo; the remote channels send the relative POSIX path. */
 function compatRepo(projectId: string, value: unknown): string {
-	if (value === undefined || value === null || value === "") return "";
-	if (record(value)) {
-		if (Object.keys(value).some((key) => key !== "projectId" && key !== "relativePath") || value.projectId !== projectId) throw new Error("GIT_RESULT_INVALID");
-		return validateRemoteGitRepoPath(value.relativePath);
-	}
-	return validateRemoteGitRepoPath(value);
+	// 同一个归一化函数服务两种调用方：字符串（旧远端控制器）与 ProjectFileTarget（共享 Git 通道/文件树）。
+	return remoteGitRepoScope(projectId, value);
 }
 
 /** Owns Git read request lifetimes; existing status/diff IPC can delegate before any local repository lookup. */
-export function registerRemoteGitReadIpc(input: { enabled: boolean; locator(projectId: string): RemoteGitLocator | undefined; trusted(target: RemoteGitLocator): Promise<boolean>; service(): RemoteHostConnectionService | undefined | Promise<RemoteHostConnectionService | undefined> }) {
+export function registerRemoteGitReadIpc(input: {
+	enabled: boolean;
+	locator(projectId: string): RemoteGitLocator | undefined;
+	trusted(target: RemoteGitLocator): Promise<boolean>;
+	service(): RemoteHostConnectionService | undefined | Promise<RemoteHostConnectionService | undefined>;
+	/** 事实变化通知出口（与目录共用同一个 hub）；缺省时不发通知。 */
+	factsEvents?: RemoteFactsHub;
+	/**
+	 * 整树失效的主进程侧入口（装配层注入 remoteProjectIpc.invalidateTree）。
+	 *
+	 * 写成功/结果未知都可能让工作树的条目整块变化（切分支、discard、恢复快照、init），目录事实缓存
+	 * 必须与 Git 事实一起标脏；否则下一次打开抽屉仍会命中旧目录。缺省时不标脏（旧装配/测试端口）。
+	 */
+	onTreeInvalidated?: (projectId: string) => void;
+}) {
 	const reads = new Map<AbortController, { senderId: number; projectId: string }>();
 	const tokens = createRemoteGitMutationTokens();
 	const senders = new Map<number, { sender: IpcMainInvokeEvent["sender"]; destroy: () => void }>();
@@ -73,25 +92,173 @@ export function registerRemoteGitReadIpc(input: { enabled: boolean; locator(proj
 			return result.value;
 		},
 	});
+	/**
+	 * 快照**事实**缓存（W4 前置）：读与签授权拆开之后，同一个仓库状态在一次内容变化里只读一次。
+	 *
+	 * 事实旧了不会让写穿过去：每个写动词都带 `expectedRevision`，revision 不符时远端自己拒绝
+	 * （见 `RemoteGitSnapshotFacts` 的模块头）。令牌仍然每次现签，缓存的只是事实。
+	 */
+	const facts = createSnapshotFactsCache<RemoteGitReadSnapshot>();
+	/** 公共仓库列表的单调版本：一次成功列表就是一份新事实（truncated 也属这份事实）。 */
+	let repositoryListingRevision = 0;
+
+	/** 当前连接代（没有稳定身份时为空串）：只用于随结果/通知一起返给渲染层。 */
+	async function generationFor(projectId: string): Promise<string> {
+		try {
+			const locator = input.locator(projectId);
+			if (locator === undefined) return "";
+			const service = await input.service();
+			return service?.connectionFacts?.(locator.hostId)?.connectionId ?? "";
+		} catch {
+			return "";
+		}
+	}
+
+	/**
+	 * 写面标脏后通知渲染层：只发“哪个仓库的 status 该重读”，不装载、不碰授权。
+	 *
+	 * 通知不是事务的一部分：生成代、取服务失败都不影响已经成功的写。
+	 */
+	function publishFacts(projectId: string, repoPath: string): void {
+		publishScopes(projectId, [{ kind: "status", repoPath }]);
+	}
+
+	/** 一次通知的公共出口：生成代在发布时求值，订阅者只看到 (项目, 代, scopes)。 */
+	function publishScopes(projectId: string, scopes: RemoteProjectFactsScope[]): void {
+		const events = input.factsEvents;
+		if (events === undefined) return;
+		void (async () => {
+			try {
+				const locator = input.locator(projectId);
+				const service = await input.service();
+				const generation = locator === undefined ? "" : (service?.connectionFacts?.(locator.hostId)?.connectionId ?? "");
+				events.publish({ projectId, generation, scopes });
+			} catch {
+				// 观察者不是事务的一部分。
+			}
+		})();
+	}
+
+	/**
+	 * 一次 Git 写造成的跨域失效：主进程目录事实先由装配层注入的入口标脏，再发布 status + tree。
+	 *
+	 * 标脏不是事务的一部分：入口缺失/抛错都不能把一个已经成功的写说成失败。
+	 */
+	function publishTreeInvalidation(projectId: string, repoPath: string): void {
+		try {
+			input.onTreeInvalidated?.(projectId);
+		} catch {
+			// 观察者不是事务的一部分。
+		}
+		// 写会改变工作树条目：status 让 Git 面板重读，tree 让文件树重读根与全部已加载目录
+		// （tree 不是根目录事件：根事件只重读根层，覆盖不了深层目录）。
+		publishScopes(projectId, [{ kind: "status", repoPath }, { kind: "tree" }]);
+	}
+
 	async function read<T>(event: IpcMainInvokeEvent, projectId: unknown, repo: unknown, task: (projectId: string, signal: AbortSignal) => Promise<T>, mutating = false): Promise<T> {
+		const { repoPath, guard } = guardRead(event, projectId, repo);
+		try {
+			const value = await task(guard.projectId, guard.controller.signal);
+			if (guard.controller.signal.aborted || guard.sender.isDestroyed()) throw new Error(mutating ? "GIT_WRITE_RESULT_UNCONFIRMED" : "REQUEST_CANCELLED");
+			// 写成功 ⇒ 这一仓的事实过时了：只标脏，下一次读重新装载（不在这里主动再读一次）。
+			if (mutating) {
+				facts.invalidate(guard.projectId, repoPath);
+				publishTreeInvalidation(guard.projectId, repoPath);
+			}
+			return value;
+		} catch (error) {
+			// 写已发出但结果未知（超时/断连/答复畸形）：事实可能已经变了，标脏但不自动读、不重放。
+			if (mutating && remoteGitFailureCode(error) === "GIT_WRITE_RESULT_UNCONFIRMED") {
+				facts.invalidate(guard.projectId, repoPath);
+				publishTreeInvalidation(guard.projectId, repoPath);
+			}
+			throw error;
+		} finally {
+			guard.finish();
+		}
+	}
+
+	/**
+	 * 读边界（每个调用者自己的存活/取消/压力边界），不含任何事实缓存。
+	 *
+	 * 缓存命中必须重新过这一层：暖缓存不是权限旁路。它也不缓存任何授权快照——令牌仍然每次现签。
+	 */
+	function guardRead(event: IpcMainInvokeEvent, projectId: unknown, repo: unknown): { repoPath: string; guard: { sender: IpcMainInvokeEvent["sender"]; projectId: string; controller: AbortController; finish(): void } } {
 		if (!input.enabled) throw new Error("REMOTE_FEATURE_DISABLED");
 		if (disposed) throw new Error("REQUEST_CANCELLED");
 		const sender = event.sender;
-		if (!Number.isSafeInteger(sender.id) || sender.id < 1 || sender.isDestroyed() || typeof projectId !== "string" || !projectId.trim() || projectId !== projectId.trim() || projectId.length > 256 || /[\x00-\x1f\x7f]/.test(projectId)) throw new Error("GIT_RESULT_INVALID");
+		if (!Number.isSafeInteger(sender.id) || sender.id < 1 || typeof projectId !== "string" || !projectId.trim() || projectId !== projectId.trim() || projectId.length > 256 || /[\x00-\x1f\x7f]/.test(projectId)) throw new Error("GIT_RESULT_INVALID");
+		// 已销毁的窗口是「取消」，不是「输入非法」：先校验身份，再报取消（与读中途销毁的结局一致）。
+		if (sender.isDestroyed()) throw new Error("REQUEST_CANCELLED");
 		// The scope is validated (and refused) before anything is queued for SSH.
-		validateRemoteGitRepoPath(repo);
+		const repoPath = validateRemoteGitRepoPath(repo);
 		if (reads.size >= 32 || [...reads.values()].filter((read) => read.senderId === sender.id).length >= 4) throw new Error("TOO_MANY_REQUESTS");
 		const controller = new AbortController();
 		const cancel = () => controller.abort();
 		reads.set(controller, { senderId: sender.id, projectId });
 		sender.once("destroyed", cancel);
+		return {
+			repoPath,
+			guard: {
+				sender,
+				projectId,
+				controller,
+				finish: () => {
+					sender.removeListener("destroyed", cancel);
+					reads.delete(controller);
+				},
+			},
+		};
+	}
+
+	/**
+	 * 事实读的授权/生命周期边界：每次读都重新确认目标、trust、连接身份与就绪状态。
+	 *
+	 * 缓存只复用事实，绝不能复用授权结论：trust 被撤销、项目被移除、host 离线都必须当场拒绝，
+	 * 而不是把暖缓存当“仍然是那个权限下的同一个事实”。没有稳定 helper 身份时返回空（不猜 identity）。
+	 *
+	 * `hasCachedFacts` 区分两种读：没有暖事实时允许正常读去建立/恢复会话（首次打开项目必须可读）；
+	 * 有暖事实时，没有就绪的同代会话就不许拿旧值冒充成功。
+	 */
+	async function verifyFactsBoundary(projectId: string, hasCachedFacts: boolean): Promise<{ generation?: string }> {
+		const locator = input.locator(projectId);
+		if (locator === undefined) throw new Error("GIT_TARGET_CHANGED");
+		if (!(await input.trusted(locator))) throw new Error("GIT_TRUST_REQUIRED");
+		const service = await input.service();
+		if (service === undefined) throw new Error("SSH_HOST_NOT_READY");
+		if (typeof service.connectionFacts !== "function") return {};
+		const connection = service.connectionFacts(locator.hostId);
+		if (connection === undefined || connection.state !== "ready") {
+			if (hasCachedFacts) throw new Error("SSH_HOST_NOT_READY");
+			// 没有暖事实：让正常读走 withProjectSession，由它决定建立会话还是报告真实状态。
+			return {};
+		}
+		return { generation: connection.connectionId };
+	}
+
+	/**
+	 * 快照/状态的公共事实读：同一次内容变化里，树与面板只读一次；显式 refresh 越过已完成缓存。
+	 *
+	 * 共享装载不继承任何一个调用者的取消信号：一个窗口取消不能撤销另一个窗口对同 scope 的读
+	 * （各自在 await 后检查自己的 controller，取消者拿不到结果，也不会拿到现签的 token）。
+	 */
+	async function readFacts(event: IpcMainInvokeEvent, projectId: unknown, repoPath: string, force: boolean): Promise<{ facts: RemoteGitReadSnapshot; revision: number }> {
+		const { guard } = guardRead(event, projectId, repoPath);
 		try {
-			const value = await task(projectId, controller.signal);
-			if (controller.signal.aborted || sender.isDestroyed()) throw new Error(mutating ? "GIT_WRITE_RESULT_UNCONFIRMED" : "REQUEST_CANCELLED");
-			return value;
+			// 只有暖事实才需要“活的同代会话”；首次读必须允许正常建立会话。
+			const boundary = await verifyFactsBoundary(guard.projectId, facts.peek(guard.projectId, repoPath) !== undefined);
+			if (guard.controller.signal.aborted || guard.sender.isDestroyed()) throw new Error("REQUEST_CANCELLED");
+			const shared = new AbortController();
+			const options = { ...(boundary.generation === undefined ? {} : { generation: boundary.generation }), force };
+			// 有稳定会话身份时，共享装载不继承单个调用者的取消（一个人取消不能撤销另一个窗口的读）；
+			// 没有稳定身份的兼容端口保留旧的逐调用者取消语义。
+			const signal = boundary.generation === undefined ? guard.controller.signal : shared.signal;
+			const load = () => git.status(guard.projectId, repoPath, signal);
+			const result = force ? await facts.refresh(guard.projectId, repoPath, load, options) : await facts.read(guard.projectId, repoPath, load, options);
+			if (guard.controller.signal.aborted || guard.sender.isDestroyed()) throw new Error("REQUEST_CANCELLED");
+			return { facts: result.facts, revision: result.revision };
 		} finally {
-			sender.removeListener("destroyed", cancel);
-			reads.delete(controller);
+			guard.finish();
 		}
 	}
 	// Cancellation authority is scoped to this sender and main-owned project reads, never a helper id.
@@ -100,11 +267,15 @@ export function registerRemoteGitReadIpc(input: { enabled: boolean; locator(proj
 		tokens.revoke(event.sender.id, projectId);
 		for (const [controller, read] of reads) if (read.senderId === event.sender.id && read.projectId === projectId) controller.abort();
 	});
-	ipcMain.handle(ipcChannels.gitRemoteSnapshot, async (event, projectId: unknown, repo: unknown): Promise<GitReadSnapshotResult> => {
+	ipcMain.handle(ipcChannels.gitRemoteSnapshot, async (event, projectId: unknown, repo: unknown, force?: unknown): Promise<GitReadSnapshotResult> => {
 		try {
+			// 显式 refresh 是第十五个参数位置（同一通道的第四个入参）：只接受 boolean/undefined，不猜。
+			if (force !== undefined && typeof force !== "boolean") throw new Error("GIT_RESULT_INVALID");
 			const repoPath = validateRemoteGitRepoPath(repo);
 			tokens.revoke(event.sender.id, typeof projectId === "string" ? projectId : "");
-			const { writeExpectation, commitExpectation, branchExpectation, switchExpectation, discardExpectation, restoreExpectation, dropExpectation, fetchExpectation, pushExpectation, pullExpectation, ...snapshot } = await read(event, projectId, repoPath, (id, signal) => git.status(id, repoPath, signal));
+			// 事实可缓存（同键并发合并成一次往返）；令牌每次现签，绑定的是这份事实的 revision。
+			const readSnapshot = (await readFacts(event, projectId, repoPath, force === true)).facts;
+			const { writeExpectation, commitExpectation, branchExpectation, switchExpectation, discardExpectation, restoreExpectation, dropExpectation, fetchExpectation, pushExpectation, pullExpectation, ...snapshot } = readSnapshot;
 			// Every confirmed scope mints grants bound to itself (G5e): a nested snapshot's tokens carry its repoPath, so
 			// the token layer refuses them against another repository.
 			if (typeof projectId === "string") {
@@ -350,7 +521,9 @@ export function registerRemoteGitReadIpc(input: { enabled: boolean; locator(proj
 	return {
 		async status(event: IpcMainInvokeEvent, projectId: unknown, repo?: unknown): Promise<GitResourceGroups> {
 			const repoPath = compatRepo(typeof projectId === "string" ? projectId : "", repo);
-			return read(event, projectId, repoPath, async (id, signal) => (await git.status(id, repoPath, signal)).groups);
+			// 文件树着色与 Git 面板读的是同一份事实：同一次内容变化里，一个仓库只读一次状态。
+			const cached = await readFacts(event, projectId, repoPath, false);
+			return cached.facts.groups;
 		},
 		async workspaceDiff(event: IpcMainInvokeEvent, projectId: unknown, group: unknown, value: unknown, repo?: unknown): Promise<GitWorkspaceFileDiff> {
 			const repoPath = compatRepo(typeof projectId === "string" ? projectId : "", repo);
@@ -358,6 +531,99 @@ export function registerRemoteGitReadIpc(input: { enabled: boolean; locator(proj
 				if (group !== "merge" && group !== "index" && group !== "workingTree" && group !== "untracked") throw new Error("GIT_RESULT_INVALID");
 				return git.workspaceDiff(id, group, fileTarget(id, value), repoPath, signal);
 			});
+		},
+		/**
+		 * 仓库列表（W4：同一条 `git:listRepos` 通道服务两种位置）。
+		 *
+		 * 过去 ssh 项目在这条通道上直接抛 UNSUPPORTED_PROJECT_LOCATION，于是远端文件树的着色与
+		 * 仓库下拉只能各自再走一条 `git:remote-repos`（不同形状、不同失败词汇）。这里把远端结果
+		 * 映射成与本地同形的 `GitRepoInfo[]`，上层不需要知道自己看的是哪种位置。
+		 */
+		/**
+		 * `git:refs` 的远端实现：**同形**返回本地的 `GitRef[]`。
+		 *
+		 * 远端刻意只报本地分支与 tag（不报 remote-tracking：那是「尚未交付」的暗示），于是 type 只有两档——
+		 * 分支归 `head`（本地 `for-each-ref` 对 refs/heads 的同一档），tag 归 `tag`。OID 字段名不同
+		 * （`oid` ↔ `hash`）也在这里换掉，渲染层不再需要知道自己在看哪一侧。
+		 */
+		async refs(event: IpcMainInvokeEvent, projectId: unknown, repo: unknown): Promise<GitRef[]> {
+			// 旧调用方传字符串，共享通道传 ProjectFileTarget：两种都归一到同一个仓库 scope，跨项目/越界一律拒。
+			const repoPath = remoteGitRepoScope(typeof projectId === "string" ? projectId : "", repo);
+			const refs = await read(event, projectId, repoPath, (id, signal) => git.refs(id, repoPath, signal));
+			return refs.refs.map((ref) => ({ name: ref.name, fullName: ref.fullName, hash: ref.oid, type: ref.kind === "tag" ? "tag" : "head" }));
+		},
+		async listRepositories(event: IpcMainInvokeEvent, projectId: unknown): Promise<GitRepoInfo[]> {
+			const listing = await read(event, projectId, "", (id, signal) => git.listRepositories(id, signal));
+			const owner = typeof projectId === "string" ? projectId : "";
+			return listing.repos.map((repository) => ({
+				target: { projectId: owner, relativePath: repository.path },
+				relativePath: repository.path,
+				displayPath: repository.name,
+				name: repository.name,
+			}));
+		},
+		/**
+		 * 公共仓库列表（T7）：保留 truncated，带 revision/generation；旧 `listRepositories` 仍返回裸数组给兼容入口。
+		 */
+		async repositoryListing(event: IpcMainInvokeEvent, projectId: unknown): Promise<GitRepositoryListResult> {
+			try {
+				const listing = await read(event, projectId, "", (id, signal) => git.listRepositories(id, signal));
+				const owner = typeof projectId === "string" ? projectId : "";
+				repositoryListingRevision += 1;
+				return opOk({
+					repos: listing.repos.map((repository) => ({ target: { projectId: owner, relativePath: repository.path }, relativePath: repository.path, displayPath: repository.name, name: repository.name })),
+					truncated: listing.truncated,
+					revision: repositoryListingRevision,
+					generation: typeof projectId === "string" ? await generationFor(projectId) : "",
+				});
+			} catch (error) {
+				return opFailFromCode(remoteGitFailureCode(error));
+			}
+		},
+		/** 公共历史页（T7）：远端 HEAD-only，不编造 totalCount/过滤能力。 */
+		async historyPage(event: IpcMainInvokeEvent, projectId: unknown, options: unknown, repo: unknown): Promise<GitHistoryPageResult> {
+			try {
+				const repoPath = remoteGitRepoScope(typeof projectId === "string" ? projectId : "", repo);
+				const page = await read(event, projectId, repoPath, (id, signal) => git.log(id, options, repoPath, signal));
+				return opOk({
+					commits: page.commits.map((commit) => ({ oid: commit.oid, parents: [...commit.parents], subject: commit.subject, authorName: commit.authorName, authorEmail: commit.authorEmail, authorTimeMs: commit.authorTimeSec * 1000 })),
+					hasMore: page.hasMore,
+				});
+			} catch (error) {
+				return opFailFromCode(remoteGitFailureCode(error));
+			}
+		},
+		/** 公共比较（T7）：远端是两树比较（trees），不返还 ahead/behind。 */
+		async compareRefs(event: IpcMainInvokeEvent, projectId: unknown, base: unknown, head: unknown, repo: unknown): Promise<GitCompareRefsResult> {
+			try {
+				const repoPath = remoteGitRepoScope(typeof projectId === "string" ? projectId : "", repo);
+				const compare = await read(event, projectId, repoPath, (id, signal) => git.compare(id, base, head, repoPath, signal));
+				return opOk({
+					mode: "trees",
+					base: { ref: compare.base.ref, oid: compare.base.oid },
+					head: { ref: compare.head.ref, oid: compare.head.oid },
+					files: compare.files.map((file) => ({ status: file.status, path: file.path, ...(file.oldPath === undefined ? {} : { oldPath: file.oldPath }) })),
+				});
+			} catch (error) {
+				return opFailFromCode(remoteGitFailureCode(error));
+			}
+		},
+		/** 忽略判定（只读、零授权）：结果与请求逐位对应。 */
+		async checkIgnore(event: IpcMainInvokeEvent, projectId: unknown, repo: unknown, paths: unknown): Promise<boolean[]> {
+			const repoPath = compatRepo(typeof projectId === "string" ? projectId : "", repo);
+			if (!Array.isArray(paths) || paths.length === 0 || paths.length > 64 || paths.some((path) => typeof path !== "string")) throw new Error("GIT_RESULT_INVALID");
+			return read(event, projectId, repoPath, (id, signal) => git.checkIgnore(id, repoPath, paths as string[], signal));
+		},
+		/**
+		 * 文件写成功后（`remoteProjectIpc.afterWrite` 的对侧）：该项目**全部已缓存仓库**的事实过时了。
+		 *
+		 * 只标脏 + 逐仓发 status：不装载、不重放写，活跃面板按自己的 repoPath 精确匹配后重读。没有暖事实
+		 * 的项目不发通知（不制造空事件）。目录失效仍由文件写自己的 afterWrite 负责，所以这里不发 tree。
+		 */
+		invalidateProject(projectId: string): void {
+			const repos = facts.reposOf(projectId);
+			facts.invalidateProject(projectId);
+			for (const repoPath of repos) publishFacts(projectId, repoPath);
 		},
 		/** Pair with quit cleanup; sender destruction separately cancels only that window's pending reads. */
 		dispose() {

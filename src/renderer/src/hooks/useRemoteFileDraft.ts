@@ -28,7 +28,7 @@ export function useRemoteFileDraft(projectId: string, path: string) {
 			store.set(remoteFileDraftsAtom, next);
 			try {
 				const result = await desktopApi.remoteHosts.openProjectText(projectId, path);
-				setDrafts((held) => updateRemoteFileDraft(held, key, generation, (entry) => (result.ok ? { ...entry, ...result.document, savedContent: result.document.content, phase: "ready", errorCode: undefined, blocked: false } : { ...entry, phase: "failed", errorCode: result.code, blocked: true })));
+				setDrafts((held) => updateRemoteFileDraft(held, key, generation, (entry) => (result.ok ? { ...entry, ...result.value.document, savedContent: result.value.document.content, phase: "ready", errorCode: undefined, blocked: false } : { ...entry, phase: "failed", errorCode: result.code, blocked: true })));
 			} catch {
 				setDrafts((held) => updateRemoteFileDraft(held, key, generation, (entry) => ({ ...entry, phase: "failed", errorCode: "REMOTE_FILE_COMMAND_FAILED", blocked: true })));
 			}
@@ -54,7 +54,7 @@ export function useRemoteFileDraft(projectId: string, path: string) {
 		store.set(remoteFileDraftsAtom, (held) => updateRemoteFileDraft(held, key, generation, (value) => ({ ...value, phase: "saving", errorCode: undefined })));
 		try {
 			const result = await desktopApi.remoteHosts.saveProjectText(projectId, path, content, version);
-			setDrafts((held) => updateRemoteFileDraft(held, key, generation, (value) => (result.ok ? completeRemoteFileSave(value, content, result.version) : { ...value, phase: "ready", blocked: true, errorCode: result.code })));
+			setDrafts((held) => updateRemoteFileDraft(held, key, generation, (value) => (result.ok ? completeRemoteFileSave(value, content, result.value.version) : { ...value, phase: "ready", blocked: true, errorCode: result.code })));
 		} catch {
 			// 回执丢失可能已经提交：不谎报未写入，也不自动重试。草稿仍完整保留。
 			setDrafts((held) => updateRemoteFileDraft(held, key, generation, (value) => ({ ...value, phase: "ready", blocked: true, errorCode: "REMOTE_FILE_COMMAND_FAILED" })));

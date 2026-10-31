@@ -14,12 +14,11 @@ test("tab switch does not refresh the project file tree or git branches", () => 
 	// 会让空白新 tab 也整棵扫盘 + 巨大 IPC，两边切都会假死。
 	const effectStart = appSource.indexOf("setExpandedDirs(new Set());\n    void api.files");
 	assert.equal(effectStart, -1, "files.list effect must not clear expandedDirs (that belongs to project switch only)");
-	// 文件抽屉走 loadProjectFileTree（根层 maxDepth 0）；切会话不得把 currentSessionId 绑进扫盘。
+	// 文件抽屉走共用 lazyDirTree（每层 maxDepth 0）；切会话不得把 currentSessionId 绑进扫盘。
 	// （文件树加载已迁入 useProjectFileTreeController，断言跟随迁移。）
-	assert.match(fileTreeControllerSource, /loadProjectFileTree\(/);
-	// 对象实参可能被格式化到多行：用 \s* 容忍。根层 list 仍以 projectId 字符串调用（ProjectFileTarget
-	// 由 App 的 files facade 在远端项目分支使用；合并后文件树 owner 是 controller）。
-	assert.match(fileTreeControllerSource, /api\.files\.list\(\s*projectId,\s*\{\s*maxDepth: 0\s*\}\)/);
+	assert.match(fileTreeControllerSource, /createLazyDirTreeController\(/);
+	// 每层只拉 maxDepth 0；用项目 scope 的 target 调用，远端项目不会进入本机 files:list。
+	assert.match(fileTreeControllerSource, /api\.files\.list\(\s*\{\s*projectId,\s*relativePath: dir\s*\},\s*\{\s*maxDepth: 0\s*\}\s*\)/);
 	assert.match(appSource, /api\.git\.branches\(activeProjectId\)/);
 	assert.match(appSource, /\}, \[activeProjectId, activeProjectIsRemote\]\);/);
 	assert.doesNotMatch(appSource, /api\.git\.branches\(activeProjectId\)[\s\S]{0,400}\}, \[activeProjectId, currentSessionId/);

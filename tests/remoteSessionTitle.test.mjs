@@ -261,13 +261,13 @@ test("IPC title：注入 title 通道时注册并透传三档 origin；未注入
 	const named = fakeTitleRemote({ content: Buffer.from('{"type":"session_info","name":"Refactor the parser"}\n') });
 	const handlers = ipcFor({ enabled: true, service: () => named.port, channels: CHANNELS });
 	assert.equal(handlers.has(CHANNELS.title), true);
-	assert.deepEqual(plain(await handlers.get(CHANNELS.title)({}, HOST, stemId)), { ok: true, title: "Refactor the parser", titleOrigin: "authoritative" });
+	assert.deepEqual(plain(await handlers.get(CHANNELS.title)({}, HOST, stemId)), { ok: true, value: { title: "Refactor the parser", titleOrigin: "authoritative" } });
 	const weakRemote = fakeTitleRemote({ content: Buffer.from('{"type":"message","message":{"role":"user","content":"Fix the failing test"}}\n') });
 	const weakHandlers = ipcFor({ enabled: true, service: () => weakRemote.port, channels: CHANNELS });
-	assert.deepEqual(plain(await weakHandlers.get(CHANNELS.title)({}, HOST, stemId)), { ok: true, title: "Fix the failing test", titleOrigin: "inferred" });
+	assert.deepEqual(plain(await weakHandlers.get(CHANNELS.title)({}, HOST, stemId)), { ok: true, value: { title: "Fix the failing test", titleOrigin: "inferred" } });
 	const fallbackRemote = fakeTitleRemote({ content: Buffer.from("") });
 	const fallbackHandlers = ipcFor({ enabled: true, service: () => fallbackRemote.port, channels: CHANNELS });
-	assert.deepEqual(plain(await fallbackHandlers.get(CHANNELS.title)({}, HOST, stemId)), { ok: true, title: stemTitle, titleOrigin: "fallback" });
+	assert.deepEqual(plain(await fallbackHandlers.get(CHANNELS.title)({}, HOST, stemId)), { ok: true, value: { title: stemTitle, titleOrigin: "fallback" } });
 
 	// 装配还没注入 title 通道：不注册，而不是注册到 undefined 或拿 scan 顶上。
 	const withoutTitle = ipcFor({ enabled: true, service: () => named.port, channels: { scan: CHANNELS.scan, register: CHANNELS.register } });
@@ -285,7 +285,7 @@ test("IPC title：开关关掉/非法 hostId/非字符串 id 都不过边界，�
 		},
 		channels: CHANNELS,
 	});
-	assert.deepEqual(plain(await disabled.get(CHANNELS.title)({}, HOST, "ws/a.jsonl")), { ok: false, code: "REMOTE_FEATURE_DISABLED" });
+	assert.deepEqual(plain(await disabled.get(CHANNELS.title)({}, HOST, "ws/a.jsonl")), { ok: false, code: "REMOTE_FEATURE_DISABLED", outcome: "rejected" });
 	const bounded = ipcFor({
 		enabled: true,
 		service: () => {
@@ -295,9 +295,9 @@ test("IPC title：开关关掉/非法 hostId/非字符串 id 都不过边界，�
 		channels: CHANNELS,
 	});
 	for (const bad of ["", "not-a-uuid", undefined, 42]) {
-		assert.deepEqual(plain(await bounded.get(CHANNELS.title)({}, bad, "ws/a.jsonl")), { ok: false, code: REMOTE_SESSION_CODES.hostIdInvalid });
+		assert.deepEqual(plain(await bounded.get(CHANNELS.title)({}, bad, "ws/a.jsonl")), { ok: false, code: REMOTE_SESSION_CODES.hostIdInvalid, outcome: "rejected" });
 	}
-	assert.deepEqual(plain(await bounded.get(CHANNELS.title)({}, HOST, 7)), { ok: false, code: REMOTE_SESSION_CODES.idInvalid });
+	assert.deepEqual(plain(await bounded.get(CHANNELS.title)({}, HOST, 7)), { ok: false, code: REMOTE_SESSION_CODES.idInvalid, outcome: "rejected" });
 	assert.equal(called, false);
 });
 

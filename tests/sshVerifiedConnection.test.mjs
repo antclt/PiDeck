@@ -354,3 +354,31 @@ test("rejects pin and profile changes during or before config queries", async (t
 	});
 	await assert.rejects(buildBatch(secondDirectory, secondProfile.id, { client: disable.client }), /SSH_HOST_NOT_READY/);
 });
+
+test("password mode allows exactly one askpass prompt and never claims batch mode", async (t) => {
+	const { directory, profile } = await fixture(t);
+	const passwordConfig = (args) => strictConfig(profile.id, args).replace("batchmode yes", "batchmode no").replace("numberofpasswordprompts 0", "numberofpasswordprompts 1");
+	const { client, calls } = configRunner(profile.id, ({ args, strict }) => (strict ? { exitCode: 0, stdout: passwordConfig(args) } : undefined));
+	const invocation = await buildPinnedSshInvocation(directory, profile.id, "ssh-batch", { client, password: true });
+	const sshArgs = Array.from(invocation.args);
+	assert.ok(sshArgs.includes("BatchMode=no"));
+	assert.ok(sshArgs.includes("NumberOfPasswordPrompts=1"));
+	assert.ok(sshArgs.includes("PreferredAuthentications=password"));
+	// The pin, the strict config and the host-key policy are unchanged by the password method.
+	assert.ok(sshArgs.includes("StrictHostKeyChecking=yes"));
+	assert.ok(sshArgs.includes(`UserKnownHostsFile=${join(directory, "ssh-host-keys", profile.id)}`));
+	// The strict query carries the same expectation, otherwise a batch-mode config would be accepted.
+	assert.equal(calls[1].args.includes("NumberOfPasswordPrompts=1"), true);
+
+	// A client that carries an askpass bridge selects the mode by itself: every invocation of that host must
+	// ask, otherwise the bridge would never be used and the connection would fail as BatchMode.
+	const wrapped = { ...client, env: { ...client.env, SSH_ASKPASS: "/tmp/askpass", SSH_ASKPASS_REQUIRE: "force" } };
+	const implied = await buildPinnedSshInvocation(directory, profile.id, "ssh-batch", { client: wrapped });
+	assert.ok(Array.from(implied.args).includes("BatchMode=no"));
+	// The bridge variables ride in the invocation environment, never in argv.
+	assert.equal(implied.env.SSH_ASKPASS, "/tmp/askpass");
+	assert.equal(
+		Array.from(implied.args).some((arg) => arg.includes("askpass")),
+		false,
+	);
+});

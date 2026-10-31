@@ -36,6 +36,8 @@ const timeline = compile("src/renderer/src/hooks/useSessionTimelineController.ts
 	"../atoms/timeline-reveal-atoms": { clearTimelineRevealAtom: {}, requestTimelineRevealAtom: {} },
 	"../lib/pinTurnScroll": { animateScrollTop: () => () => undefined, pinScrollDurationMs: () => 320 },
 	"../desktopApi": {},
+	// 合并 origin/dev 后 controller 直接引用首屏分页函数；测试不驱动磁盘分页，给最小 stub。
+	"../components/session/sessionSubagentTranscript": { readSessionFirstScreenPage: async () => ({ messages: [], hasMore: false }) },
 	// 控制器用 t() 播报「DSH 已停止」文案，而 i18n.ts 会拉起整份字典 → 给最小 stub；
 	// sessionHistoryAvailability 是纯函数（只有 type import），照 browsePin 的做法编译真模块。
 	// 两个都必须在 stub 表里：缺失时 loader 回落到以 tests/ 为基准的 nodeRequire，解析 .ts 必失败。

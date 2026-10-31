@@ -10,7 +10,7 @@ import { fingerprintSshHostKey, readBoundedHostKey, type PreverifiedSshHostKey, 
 export type VerifiedSshEndpoint = Omit<SshDraftHostCandidate, "knownHostsBase64">;
 
 /** Pin enrollment only needs the route and alias; the client context is bound by the store itself. */
-type SshHostPinVerifier = (route: SshDraftRoute, pinAlias: string, preverifiedHostKey?: PreverifiedSshHostKey) => Promise<SshDraftHostCandidate>;
+type SshHostPinVerifier = (route: SshDraftRoute, pinAlias: string, preverifiedHostKey?: PreverifiedSshHostKey, options?: { allowUnauthenticatedHostKey?: boolean }) => Promise<SshDraftHostCandidate>;
 
 export type SshPinOffer = {
 	requestId: string;
@@ -92,7 +92,7 @@ export class SshHostPinStore {
 				}
 		},
 	});
-	private readonly byHost = new Map<string, { requestId: string; senderId: number; digest: string }>();
+	private readonly byHost = new Map<string, { requestId: string; senderId: number; digest: string; hostKeyOnly: boolean }>();
 	private readonly pendingRoutes = new Map<string, SshDraftRoute>();
 	private readonly senderEpoch = new Map<number, number>();
 	private closed = false;
@@ -119,7 +119,7 @@ export class SshHostPinStore {
 		// 直接调 POSIX-only 的解析器会在 Windows 必抛 SSH_CLIENT_UNSUPPORTED_PLATFORM（真机 e2e 抓到）。
 		this.resolvedClient ??= this.client ?? (await resolveVerifiedSshClient());
 		const client: SshClientRuntime = this.resolvedClient;
-		return (route, pinAlias, preverifiedHostKey) => verifyDraftSshHost(route, pinAlias, { client, ...(preverifiedHostKey === undefined ? {} : { preverifiedHostKey }) });
+		return (route, pinAlias, preverifiedHostKey, options) => verifyDraftSshHost(route, pinAlias, { client, ...(preverifiedHostKey === undefined ? {} : { preverifiedHostKey }), ...(options?.allowUnauthenticatedHostKey === true ? { allowUnauthenticatedHostKey: true } : {}) });
 	}
 
 	/** Reauthenticate a route against its published key before a repair may restore activation. */
@@ -140,7 +140,7 @@ export class SshHostPinStore {
 		return candidate;
 	}
 
-	async offer(input: { hostId: string; senderId: number; route: SshDraftRoute; preverifiedHostKey?: PreverifiedSshHostKey }): Promise<SshPinOffer> {
+	async offer(input: { hostId: string; senderId: number; route: SshDraftRoute; preverifiedHostKey?: PreverifiedSshHostKey; allowUnauthenticatedHostKey?: boolean }): Promise<SshPinOffer> {
 		if (this.closed) throw new Error("CONFIRMATION_CLOSED");
 		this.checkHostId(input.hostId);
 		if (!Number.isSafeInteger(input.senderId) || input.senderId < 1) throw new Error("CONFIRMATION_INVALID");
@@ -152,7 +152,8 @@ export class SshHostPinStore {
 		const trustedBytes = trusted === undefined ? undefined : Buffer.isBuffer(trusted.knownHostsBytes) ? Buffer.from(trusted.knownHostsBytes) : undefined;
 		if (trusted !== undefined && (trustedBytes === undefined || fingerprintSshHostKey(trustedBytes, `pideck-${input.hostId}`) !== trusted.fingerprint)) throw new Error("SSH_HOST_KEY_MISMATCH");
 		await assertPinAbsent(filePath);
-		const candidate = await (await this.verifierFor())(route, `pideck-${input.hostId}`, trustedBytes !== undefined && trusted !== undefined ? { knownHostsBytes: trustedBytes, fingerprint: trusted.fingerprint } : undefined);
+		const hostKeyOnly = input.allowUnauthenticatedHostKey === true;
+		const candidate = await (await this.verifierFor())(route, `pideck-${input.hostId}`, trustedBytes !== undefined && trusted !== undefined ? { knownHostsBytes: trustedBytes, fingerprint: trusted.fingerprint } : undefined, hostKeyOnly ? { allowUnauthenticatedHostKey: true } : undefined);
 		const bytes = candidateBytes(candidate, input.hostId);
 		if (trustedBytes !== undefined && !bytes.equals(trustedBytes)) throw new Error("SSH_HOST_KEY_MISMATCH");
 		await assertPinAbsent(filePath);
@@ -162,7 +163,7 @@ export class SshHostPinStore {
 		const previous = this.byHost.get(input.hostId);
 		if (previous) this.broker.cancel(previous.requestId);
 		const issued = this.broker.begin({ senderId: input.senderId, action: ACTION, subjectId: input.hostId, stateDigest: digest, payload: { candidate: snapshot, route } });
-		this.byHost.set(input.hostId, { requestId: issued.requestId, senderId: input.senderId, digest });
+		this.byHost.set(input.hostId, { requestId: issued.requestId, senderId: input.senderId, digest, hostKeyOnly });
 		this.pendingRoutes.set(input.hostId, { ...route });
 		return { ...issued, hostId: input.hostId, hostName: snapshot.hostName, user: snapshot.user, port: snapshot.port, pinAlias: snapshot.pinAlias, routeDigest: snapshot.routeDigest, hostKeyFingerprints: [...snapshot.hostKeyFingerprints] };
 	}
@@ -190,10 +191,15 @@ export class SshHostPinStore {
 		this.byHost.delete(input.hostId);
 		this.pendingRoutes.delete(input.hostId);
 		if (!authorized) return null;
-		const current = await (await this.verifierFor())(authorized.route, authorized.candidate.pinAlias, {
-			knownHostsBytes: candidateBytes(authorized.candidate, input.hostId),
-			fingerprint: authorized.candidate.hostKeyFingerprints[0],
-		});
+		const current = await (await this.verifierFor())(
+			authorized.route,
+			authorized.candidate.pinAlias,
+			{
+				knownHostsBytes: candidateBytes(authorized.candidate, input.hostId),
+				fingerprint: authorized.candidate.hostKeyFingerprints[0],
+			},
+			pending.hostKeyOnly ? { allowUnauthenticatedHostKey: true } : undefined,
+		);
 		const bytes = candidateBytes(current, input.hostId);
 		if (pinDigest(input.hostId, current) !== pending.digest) throw new Error("SSH_HOST_CANDIDATE_CHANGED");
 		this.assertActive(input.senderId, epoch);

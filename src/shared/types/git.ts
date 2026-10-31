@@ -1,4 +1,5 @@
 import type { ProjectFileTarget } from "./project";
+import type { Op } from "../op";
 
 // ── Git 基础类型 ──────────────────────────────────────────────────────
 
@@ -165,7 +166,18 @@ export type RemoteGitRefFileDiffResult = { ok: true; diff: RemoteGitRefFileDiff 
  */
 export type RemoteGitCompareSide = { ref: string; oid: string };
 export type RemoteGitCompareFile = { status: string; path: string; oldPath?: string };
-export type RemoteGitCompare = { base: RemoteGitCompareSide; head: RemoteGitCompareSide; files: RemoteGitCompareFile[] };
+export type RemoteGitCompare = {
+	base: RemoteGitCompareSide;
+	head: RemoteGitCompareSide;
+	files: RemoteGitCompareFile[];
+	/**
+	 * 公共 compareRefs（T7）答案的语义与三点计数：trees 才需要「无 merge-base / ahead-behind」说明，
+	 * merge-base 相反。旧的 remoteCompare 兼容壳不填（远端它本来就是两树比较）。
+	 */
+	mode?: GitCompareMode;
+	ahead?: number;
+	behind?: number;
+};
 export type RemoteGitCompareResult = { ok: true; compare: RemoteGitCompare } | { ok: false; code: string };
 /**
  * G5c explicit init: creates .git at the project root and reports the default branch of the new repository.
@@ -179,6 +191,12 @@ export type RemoteGitInitResult = { ok: true; branch: string | null } | { ok: fa
  */
 export type RemoteGitRepo = { path: string; name: string };
 export type RemoteGitReposResult = { ok: true; repos: RemoteGitRepo[]; truncated: boolean } | { ok: false; code: string };
+/**
+ * 忽略判定（helper 1.23.0）：`ignored` 与请求**逐位对应**——同序、同长、不省略。
+ * 由 git 自己回答（`check-ignore --no-index`），所以取反规则、嵌套 .gitignore、core.excludesFile
+ * 与 git status 的口径天然一致；PiDeck 不重写匹配器。
+ */
+export type RemoteGitIgnoreResult = Op<{ ignored: boolean[] }>;
 /** G3b branch write face: creating and switching both move a ref the user explicitly asked for. */
 export type RemoteGitBranchMutationResult = { ok: true } | { ok: false; code: string };
 /** G4a recoverable discard: the snapshot ref (null when the discarded change was a deletion) goes back to the panel. */
@@ -316,3 +334,44 @@ export type GitExecutableInfo = {
 	/** 系统自动探测结果：配置为空时展示占位，配置无效时提供一键填入的备选 */
 	system: GitSystemProbe | null;
 };
+
+// ── 公共 Git 面（v5 T7）：本地与 SSH 同一形状的读入口 ───────────────────
+/**
+ * 公共历史条目：两种 backend 都映射到这一份。本地额外的图谱/引用是可选字段，
+ * 远端 HEAD-only 时自然缺席；不允许用空数组/0 冒充“本地也支持”。
+ */
+export type GitHistoryCommit = {
+	oid: string;
+	parents: string[];
+	subject: string;
+	authorName: string;
+	authorEmail: string;
+	authorTimeMs: number;
+	shortHash?: string;
+	refNames?: string[];
+	graph?: string[];
+	fullMessage?: string;
+};
+
+/** 公共历史页：`totalCount` 只有本地能给；远端显式缺席（不填 0）。 */
+export type GitHistoryPage = { commits: GitHistoryCommit[]; hasMore: boolean; totalCount?: number };
+export type GitHistoryPageResult = Op<GitHistoryPage>;
+
+/** 比较语义必须显式：三点（merge-base）与直接两树（trees）不是同一件事。 */
+export type GitCompareMode = "merge-base" | "trees";
+export type GitCompareRefsSide = { ref: string; oid: string };
+export type GitCompareRefsFile = { status: string; path: string; oldPath?: string };
+export type GitCompareRefsValue = {
+	mode: GitCompareMode;
+	base: GitCompareRefsSide;
+	head: GitCompareRefsSide;
+	files: GitCompareRefsFile[];
+	/** 三点模式才有；远端两树比较不支持时缺席，不填 0。 */
+	ahead?: number;
+	behind?: number;
+};
+export type GitCompareRefsResult = Op<GitCompareRefsValue>;
+
+/** 仓库列表的公共结果：`truncated` 是发现阶段的真实元数据，不得在归一化时丢失。 */
+export type GitRepositoryListing = { repos: GitRepoInfo[]; truncated: boolean; revision: number; generation: string };
+export type GitRepositoryListResult = Op<GitRepositoryListing>;

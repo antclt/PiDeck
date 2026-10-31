@@ -13,7 +13,7 @@ export function SectionHeading(props: { title: ReactNode; description?: ReactNod
 	return (
 		<div className={cn("flex flex-col gap-1", props.className)}>
 			<strong className={props.titleClassName ?? "text-control font-semibold leading-5 text-foreground"}>{props.title}</strong>
-			{props.description && <small className={props.descriptionClassName ?? "text-caption font-normal text-muted-foreground"}>{props.description}</small>}
+			{props.description && <small className={props.descriptionClassName ?? "text-caption font-normal leading-4 text-muted-foreground"}>{props.description}</small>}
 		</div>
 	);
 }

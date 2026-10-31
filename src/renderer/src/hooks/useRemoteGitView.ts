@@ -1,7 +1,11 @@
+import { isWritableHostState } from "../../../shared/projectCapabilities";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RemoteProject } from "../../../shared/types/project";
 import { desktopApi } from "../desktopApi";
+import { useDocumentPageVisible } from "../hooks/useRemoteGitRefsPolling";
 import { createRemoteGitViewController, type RemoteGitViewState } from "../utils/remoteGitViewState";
+import { subscribeRemoteGitFacts } from "../utils/remoteGitFactsSubscription";
+import { remoteGitStatusPollingEnabled, startRemoteGitStatusPolling } from "../utils/remoteGitStatusPolling";
 
 /**
  * The read-only panel owns this state; neither currentSession atoms nor native Git polling are subscribed. `repoPath`
@@ -14,6 +18,8 @@ export function useRemoteGitView(project: RemoteProject, repoPath = "") {
 	// Polling is bounded by the host's observed state, not by guessing from a failed read: the optimistic initial
 	// value only covers the window before the first host event (the panel's own first read reports any failure).
 	const [hostReady, setHostReady] = useState(true);
+	// 隐藏的窗口不轮询：document 可见性只影响读的节奏，不影响已落地的事实。
+	const pageVisible = useDocumentPageVisible();
 	const controller = useRef<ReturnType<typeof createRemoteGitViewController> | null>(null);
 	useEffect(() => {
 		const reads = createRemoteGitViewController(project.id, projectKey, desktopApi.git, setState, repoPath);
@@ -22,19 +28,48 @@ export function useRemoteGitView(project: RemoteProject, repoPath = "") {
 		// first repository read, and afterwards only when the user acts (refresh or a sync verb). No effect watches
 		// the snapshot, so a refresh can never trigger a second, self-feeding load that moves the rows under the user.
 		void reads.refresh().then(() => reads.loadSync());
+		// 远端写面/目录写面只发事实通知；只有当前仓库的 status 标脏才让活跃面板强制重读。
+		const offFacts = subscribeRemoteGitFacts(desktopApi.remoteHosts, project.id, repoPath, (force) => void reads.refresh(force));
 		const unsubscribe = desktopApi.remoteHosts.onStateChange((change) => {
 			if (change.hostId !== project.locator.hostId) return;
 			// Only "ready" resumes polling; every other observed transition pauses it until the host is ready again.
-			setHostReady(change.state === "ready");
+			// 写面只在 ready 打开（degraded 的会话不健康，写错是数据损坏）：判据来自 shared。
+			setHostReady(isWritableHostState(change.state));
 			if (["disconnected", "offline", "degraded", "needs-attention", "reconnecting"].includes(change.state)) reads.invalidateConnection();
 		});
 		void reads.refresh();
 		return () => {
+			offFacts();
 			unsubscribe();
 			reads.dispose();
 			if (controller.current === reads) controller.current = null;
 		};
 	}, [project.id, project.locator.hostId, projectKey, repoPath]);
+	/**
+	 * 5 秒静默 status 轮询（P0-3）：外部 commit/checkout 不会让主进程标脏，只有轮询能发现。
+	 *
+	 * 闸门关闭时立即清定时器并退休在途结果；打开时重建一个 interval（effect 只在闸门值变化时重跑）。
+	 * 走 refreshStatus 而不是 refresh：后者置 loading 并清掉 diff/history/refs。不 fetch。
+	 */
+	const statusPolling = remoteGitStatusPollingEnabled({ pageVisible, hostReady, mutating: state.mutating === true, loading: state.loading, diffLoading: state.diffLoading });
+	useEffect(() => {
+		if (!statusPolling) {
+			controller.current?.stopStatusPolling();
+			return;
+		}
+		const stop = startRemoteGitStatusPolling({
+			isEnabled: () => true,
+			poll: () => controller.current?.refreshStatus() ?? Promise.resolve(),
+			timer: {
+				set: (callback, intervalMs) => window.setInterval(callback, intervalMs),
+				clear: (handle) => window.clearInterval(handle),
+			},
+		});
+		return () => {
+			stop();
+			controller.current?.stopStatusPolling();
+		};
+	}, [statusPolling, projectKey]);
 	const loadHistory = useCallback(() => {
 		void controller.current?.loadHistory();
 	}, []);
@@ -92,7 +127,7 @@ export function useRemoteGitView(project: RemoteProject, repoPath = "") {
 		state: state.projectKey === projectKey ? state : { projectKey, loading: true, diffLoading: false },
 		// Returning the promise lets an explicit refresh gesture sequence the sync-facts read after the snapshot
 		// read; the snapshot update replaces the whole state and would wipe facts read concurrently.
-		refresh: (): Promise<void> => controller.current?.refresh() ?? Promise.resolve(),
+		refresh: (force = false): Promise<void> => controller.current?.refresh(force) ?? Promise.resolve(),
 		openDiff: (group: Parameters<NonNullable<typeof controller.current>["openDiff"]>[0], target: Parameters<NonNullable<typeof controller.current>["openDiff"]>[1]) => {
 			void controller.current?.openDiff(group, target);
 		},

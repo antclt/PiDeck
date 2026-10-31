@@ -49,6 +49,9 @@ function fakeBootstrapSession(manifest, overrides = {}) {
 		write(line) {
 			const frame = JSON.parse(line);
 			written.push(frame);
+			// The reuse check (F3) is asked before any upload. These fixtures describe a host that does not have
+			// the bundle yet, so they answer `absent` and the ordinary staging upload follows.
+			if (frame.op === "finalize-verify") queueMicrotask(() => emit({ op: "verify-miss", reason: "absent" }));
 			if (frame.op === "finalize-commit")
 				queueMicrotask(() => {
 					if (overrides.exitAfterCommit) {
@@ -288,7 +291,8 @@ test("ready matches nonce and helper manifest before pinned scp and finalize", a
 	assert.ok(starts[0].timeoutMs >= 270_000, "entry lifetime must cover ready, upload and finalize budgets");
 	assert.deepEqual(
 		session.written.map((frame) => frame.op),
-		["finalize-begin", ...manifest.files.map(() => "finalize-file"), "finalize-commit"],
+		// F3：先一轮只读复用检查（这里是 absent，因为该主机还没有这个 bundle），再走原来的上传+finalize。
+		["finalize-begin", ...manifest.files.map(() => "finalize-file"), "finalize-verify", "finalize-begin", ...manifest.files.map(() => "finalize-file"), "finalize-commit"],
 	);
 	assert.deepEqual(session.stopped, ["shutdown"]);
 });

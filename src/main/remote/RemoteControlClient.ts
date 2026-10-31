@@ -9,7 +9,10 @@ import {
 	type RemoteHelperRequestFrame,
 	REMOTE_HELPER_MAX_HOST_ID_LENGTH,
 	REMOTE_HELPER_MAX_METHOD_LENGTH,
+	REMOTE_HELPER_MAX_PATH_LENGTH,
+	REMOTE_HELPER_MAX_WATCH_PATHS,
 } from "./RemoteHelperContract";
+import { remoteCallMeter, type RemoteCallMeterPort } from "./RemoteCallMeter";
 
 /**
  * Main-side client for helper protocol v1 (plan §7.1). It owns framing, host/generation fencing, the
@@ -90,10 +93,17 @@ export type RemoteControlClientOptions = {
 	send: (line: string) => void | Promise<void>;
 	now?: () => number;
 	onDiagnostic?: (entry: RemoteControlDiagnosticEntry) => void;
+	/** 变更事件（helper 1.24.0）：无 id 的推送帧只在这里出现，永远进不了 pending 表。 */
+	onEvent?: (event: { watchId: string; paths: readonly string[] }) => void;
 	/** Defaults to the contract limit, which is also the ceiling: a caller may lower it, never raise it. */
 	maxFrameBytes?: number;
 	defaultTimeoutMs?: number;
 	scheduler?: RemoteControlScheduler;
+	/**
+	 * Optional remote-call accounting (W0 baseline). Defaults to the process-wide meter so every helper
+	 * round trip is counted without touching call sites; tests inject a fake to keep it hermetic.
+	 */
+	meter?: RemoteCallMeterPort;
 };
 
 export type RemoteControlClient = {
@@ -135,6 +145,9 @@ export class RemoteControlError extends Error {
 // transient: pending entries settle on their own. Grouping them keeps the advice consistent.
 const RETRYABLE_CODES = new Set<string>(["REQUEST_TIMEOUT", "REMOTE_CONNECTION_LOST", "REMOTE_REQUEST_LIMIT"]);
 
+/** watchId 由 helper 生成（"w<n>-<requestId>"）；这里只按长度与控制字节设界。 */
+const MAX_WATCH_ID_LENGTH = 128;
+
 const DEFAULT_SCHEDULER: RemoteControlScheduler = {
 	setTimeout: (handler, delayMs) => setTimeout(handler, delayMs),
 	clearTimeout: (handle) => clearTimeout(handle),
@@ -145,6 +158,11 @@ type TimerHandle = ReturnType<typeof setTimeout>;
 /** One in-flight request. Its outcome can only come from `settle`, which the pending table calls at most once. */
 type PendingEntry = {
 	id: string;
+	/**
+	 * `request` is work the caller waits for; `cancel` is a withdrawal of such work. Only a `request` may be
+	 * cancelled, which is what keeps a cancel from being cancelled again into an unbounded chain.
+	 */
+	kind: "request" | "cancel";
 	/** Local deadline in `now()` terms: main holds its own clock instead of trusting two machines to agree. */
 	deadlineAt: number;
 	/** Counted early-wake re-arms, bounded by MAX_DEADLINE_REARMS. */
@@ -154,7 +172,12 @@ type PendingEntry = {
 };
 
 /** Validated inbound frame, or the reason it cannot be used. Host/generation checks happen in the caller. */
-type InboundRead = { kind: "invalid"; id?: string } | { kind: "ok"; hostId: string; generation: number; id: string; result: unknown } | { kind: "error"; hostId: string; generation: number; id: string; error: RemoteHelperErrorBody } | { kind: "error-body-invalid"; hostId: string; generation: number; id: string };
+type InboundRead =
+	| { kind: "invalid"; id?: string }
+	| { kind: "event"; hostId: string; generation: number; watchId: string; paths: string[] }
+	| { kind: "ok"; hostId: string; generation: number; id: string; result: unknown }
+	| { kind: "error"; hostId: string; generation: number; id: string; error: RemoteHelperErrorBody }
+	| { kind: "error-body-invalid"; hostId: string; generation: number; id: string };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -195,6 +218,21 @@ function readFrameId(record: Record<string, unknown>): string | undefined {
 	return typeof id === "string" && ID_PATTERN.test(id) ? id : undefined;
 }
 
+/** 变更事件帧（无 id）：与请求应答靠「没有 id」区分，所以两者永远不会互相冒充。 */
+function readEventFrame(value: Record<string, unknown>, hostId: string, generation: number): InboundRead {
+	const watchId = value.watchId;
+	if (typeof watchId !== "string" || watchId.length === 0 || watchId.length > MAX_WATCH_ID_LENGTH || CONTROL_CHARS.test(watchId)) return { kind: "invalid" };
+	if (value.event !== "changed") return { kind: "invalid" };
+	const paths = value.paths;
+	if (!Array.isArray(paths) || paths.length === 0 || paths.length > REMOTE_HELPER_MAX_WATCH_PATHS) return { kind: "invalid" };
+	const cleaned: string[] = [];
+	for (const path of paths) {
+		if (typeof path !== "string" || path.length > REMOTE_HELPER_MAX_PATH_LENGTH || CONTROL_CHARS.test(path)) return { kind: "invalid" };
+		cleaned.push(path);
+	}
+	return { kind: "event", hostId, generation, watchId, paths: cleaned };
+}
+
 function invalidFrame(id: string | undefined): InboundRead {
 	return id === undefined ? { kind: "invalid" } : { kind: "invalid", id };
 }
@@ -211,7 +249,7 @@ function readInboundFrame(value: unknown): InboundRead {
 	if (typeof hostId !== "string" || hostId.length === 0 || hostId.length > MAX_HOST_ID_LENGTH || CONTROL_CHARS.test(hostId)) return invalidFrame(id);
 	const generation = value.generation;
 	if (typeof generation !== "number" || !Number.isSafeInteger(generation) || generation < 0) return invalidFrame(id);
-	if (id === undefined) return { kind: "invalid" };
+	if (id === undefined) return readEventFrame(value, hostId, generation);
 	const ok = value.ok;
 	if (typeof ok !== "boolean") return invalidFrame(id);
 	if (ok) return { kind: "ok", hostId, generation, id, result: value.result };
@@ -254,6 +292,11 @@ export function createRemoteControlClient(options: RemoteControlClientOptions): 
 	const nowOption = options?.now;
 	const now = typeof nowOption === "function" ? nowOption : () => Date.now();
 	const scheduler = options?.scheduler ?? DEFAULT_SCHEDULER;
+	const providedMeter = options?.meter;
+	if (providedMeter !== undefined && typeof providedMeter.record !== "function") throw invalidOptions();
+	const meter: RemoteCallMeterPort = providedMeter ?? remoteCallMeter;
+	const optionsOnEvent = options?.onEvent;
+	if (optionsOnEvent !== undefined && typeof optionsOnEvent !== "function") throw invalidOptions();
 	const maxFrameBytes = readFrameLimit(options?.maxFrameBytes);
 	const defaultTimeoutMs = readTimeoutMs(options?.defaultTimeoutMs, REMOTE_HELPER_DEFAULT_REQUEST_TIMEOUT_MS);
 
@@ -261,6 +304,15 @@ export function createRemoteControlClient(options: RemoteControlClientOptions): 
 	let open = false;
 	let idCounter = 0;
 	const pending = new Map<string, PendingEntry>();
+	/**
+	 * In-flight withdrawals, keyed by the request they target.
+	 *
+	 * Re-cancelling a target while its cancel is still in flight must not mint a second frame: the same
+	 * answer is what the helper would give, and a caller that repeats `cancel()` (a retry, a double click, a
+	 * re-entrant guard) would otherwise grow the pending table and the timer list without bound. Entries live
+	 * exactly as long as their pending cancel request, so the map is bounded by the ordinary request cap.
+	 */
+	const cancels = new Map<string, Promise<RemoteHelperCancelResult>>();
 	/** Bounded FIFO of ids that already produced a terminal outcome, so a repeat can be named as a duplicate. */
 	const settled = new Map<string, "cancelled" | "settled">();
 
@@ -397,8 +449,8 @@ export function createRemoteControlClient(options: RemoteControlClientOptions): 
 		if (isPromiseLike(outcome)) void outcome.then(undefined, () => onSendFailure(entry));
 	}
 
-	function createPending(id: string, timeoutMs: number, settle: (error: RemoteControlError | null, result: unknown) => void): PendingEntry {
-		const entry: PendingEntry = { id, deadlineAt: now() + timeoutMs, rearms: 0, timer: undefined, settle };
+	function createPending(id: string, timeoutMs: number, kind: PendingEntry["kind"], settle: (error: RemoteControlError | null, result: unknown) => void): PendingEntry {
+		const entry: PendingEntry = { id, kind, deadlineAt: now() + timeoutMs, rearms: 0, timer: undefined, settle };
 		pending.set(id, entry);
 		armDeadline(entry, timeoutMs);
 		return entry;
@@ -423,6 +475,7 @@ export function createRemoteControlClient(options: RemoteControlClientOptions): 
 		generation += 1;
 		open = true;
 		settled.clear();
+		cancels.clear();
 		return generation;
 	}
 
@@ -432,6 +485,7 @@ export function createRemoteControlClient(options: RemoteControlClientOptions): 
 		const code = typeof reason === "string" && STABLE_CODE_PATTERN.test(reason) ? reason : "REMOTE_CONNECTION_LOST";
 		open = false;
 		failPending(code);
+		cancels.clear();
 	}
 
 	function handleLine(line: string): void {
@@ -461,14 +515,27 @@ export function createRemoteControlClient(options: RemoteControlClientOptions): 
 			diagnose(REMOTE_FRAME_DIAGNOSTIC_CODES.invalid, read.id);
 			return;
 		}
+		// 事件帧没有 id：诊断只带 id 时用 undefined，绝不为了「有个 id」去编造一个。
+		const frameId = read.kind === "event" ? undefined : read.id;
 		if (read.hostId !== hostId) {
-			diagnose(REMOTE_FRAME_DIAGNOSTIC_CODES.wrongHost, read.id);
+			diagnose(REMOTE_FRAME_DIAGNOSTIC_CODES.wrongHost, frameId);
 			return;
 		}
 		if (!open || read.generation !== generation) {
 			// Frames of a closed connection and frames of a superseded generation are equally unusable and
 			// must never touch the live generation's requests (§7.1 fencing rule).
-			diagnose(REMOTE_FRAME_DIAGNOSTIC_CODES.staleGeneration, read.id);
+			diagnose(REMOTE_FRAME_DIAGNOSTIC_CODES.staleGeneration, frameId);
+			return;
+		}
+		if (read.kind === "event") {
+			// 观察者不是事务的一部分：事件回调炸掉不能影响帧的结算。
+			if (optionsOnEvent !== undefined) {
+				try {
+					optionsOnEvent({ watchId: read.watchId, paths: read.paths });
+				} catch {
+					/* ignore: an observer must never break framing */
+				}
+			}
 			return;
 		}
 		const entry = pending.get(read.id);
@@ -506,6 +573,8 @@ export function createRemoteControlClient(options: RemoteControlClientOptions): 
 			diagnose("REMOTE_REQUEST_LIMIT");
 			throw new RemoteControlError("REMOTE_REQUEST_LIMIT", true);
 		}
+		// W0 基线：只统计将要发出帧的请求。连接已关闭 / 本地限流在上面就返回了，不构成真实往返。
+		meter.record(hostId, method);
 		const id = mintId();
 		const timeoutMs = readTimeoutMs(options?.timeoutMs, defaultTimeoutMs);
 		const frame: RemoteHelperRequestFrame = {
@@ -520,7 +589,7 @@ export function createRemoteControlClient(options: RemoteControlClientOptions): 
 		};
 		const line = encodeFrame(frame);
 		const deferred = createDeferred<unknown>();
-		const entry = createPending(id, timeoutMs, (error, result) => {
+		const entry = createPending(id, timeoutMs, "request", (error, result) => {
 			if (error !== null) deferred.reject(error);
 			else deferred.resolve(result);
 		});
@@ -540,18 +609,26 @@ export function createRemoteControlClient(options: RemoteControlClientOptions): 
 			diagnose("REMOTE_CONNECTION_LOST");
 			throw connectionLost();
 		}
-		if (!pending.has(requestId)) {
+		const target = pending.get(requestId);
+		if (target === undefined || target.kind !== "request") {
 			// The request already has a delivered outcome, so a "rolled back" answer would be a lie
-			// (§7.1: cancel must not fake a successful rollback).
+			// (§7.1: cancel must not fake a successful rollback). A cancel id is not withdrawable work either:
+			// refusing it keeps withdrawals from nesting without bound.
 			return { cancelled: false, reason: "already-settled" };
 		}
+		const inFlight = cancels.get(requestId);
+		if (inFlight !== undefined) return inFlight;
 		const id = mintId();
 		const timeoutMs = readTimeoutMs(options?.timeoutMs, defaultTimeoutMs);
 		const cancelParams: RemoteHelperCancelParams = { requestId };
 		const frame: RemoteHelperRequestFrame = { v: REMOTE_HELPER_PROTOCOL_VERSION, hostId, generation, id, method: "cancel", timeoutMs, params: cancelParams };
 		const line = encodeFrame(frame);
 		const deferred = createDeferred<RemoteHelperCancelResult>();
-		const entry = createPending(id, timeoutMs, (error, result) => {
+		const shared = deferred.promise.finally(() => {
+			if (cancels.get(requestId) === shared) cancels.delete(requestId);
+		});
+		cancels.set(requestId, shared);
+		const entry = createPending(id, timeoutMs, "cancel", (error, result) => {
 			if (error !== null) {
 				deferred.reject(error);
 				return;
@@ -568,11 +645,11 @@ export function createRemoteControlClient(options: RemoteControlClientOptions): 
 				deferred.resolve(read);
 				return;
 			}
-			const target = pending.get(requestId);
-			if (target !== undefined) {
+			const current = pending.get(requestId);
+			if (current !== undefined) {
 				// The helper aborted the work, so the target's single terminal outcome is REQUEST_CANCELLED.
 				// Settling it here keeps that guarantee even if the helper's own terminal frame is lost.
-				settlePending(target, requestCancelled(), undefined);
+				settlePending(current, requestCancelled(), undefined);
 				deferred.resolve({ cancelled: true });
 				return;
 			}
@@ -581,7 +658,7 @@ export function createRemoteControlClient(options: RemoteControlClientOptions): 
 			deferred.resolve(settled.get(requestId) === "cancelled" ? { cancelled: true } : { cancelled: false, reason: "already-settled" });
 		});
 		deliver(line, entry);
-		return deferred.promise;
+		return shared;
 	}
 
 	return {

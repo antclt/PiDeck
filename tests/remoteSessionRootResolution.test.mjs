@@ -54,17 +54,23 @@ function fakeRemote(options = {}) {
 	const session = {
 		async request(method, params) {
 			frames.push({ method, params: plain(params ?? {}) });
+			const describe = (relative) => {
+				const absolute = absOf(relative);
+				const content = contents[absolute];
+				if (content !== undefined) return { path: relative, kind: "file", bytes: content.length, mtimeMs: 7 };
+				if (dirs[absolute] !== undefined) return { path: relative, kind: "directory", bytes: 0, mtimeMs: 1 };
+				throw Object.assign(new Error("PATH_NOT_FOUND"), { code: "PATH_NOT_FOUND" });
+			};
 			const absolute = absOf(params.path);
 			if (method === "fs.list") {
 				const entries = dirs[absolute];
 				if (entries === undefined) throw Object.assign(new Error("PATH_NOT_FOUND"), { code: "PATH_NOT_FOUND" });
 				return { entries };
 			}
+			if (method === "fs.statMany") return { entries: params.paths.map(describe) };
 			if (method === "fs.stat") {
-				const content = contents[absolute];
-				if (content !== undefined) return { kind: "file", bytes: content.length, mtimeMs: 7 };
-				if (dirs[absolute] !== undefined) return { kind: "directory", bytes: 0, mtimeMs: 1 };
-				throw Object.assign(new Error("PATH_NOT_FOUND"), { code: "PATH_NOT_FOUND" });
+				const { kind, bytes, mtimeMs } = describe(params.path);
+				return { kind, bytes, mtimeMs };
 			}
 			if (method === "fs.read") {
 				const content = contents[absolute];
@@ -220,7 +226,7 @@ test("稳定码真的到达界面：IPC scan 返回 {ok:false,code}，渲染层�
 	const remote = fakeRemote(configuredFixture("relative/dir"));
 	registerRemoteSessionIpc({ enabled: true, service: () => remote.port, channels: { scan: "t:scan", register: "t:register", title: "t:title" } });
 	const result = await handlers.get("t:scan")({}, HOST);
-	assert.deepEqual(plain(result), { ok: false, code: INVALID });
+	assert.deepEqual(plain(result), { ok: false, code: INVALID, outcome: "rejected" });
 	// 渲染层：失败态必须带着这个码（H2 的三态之一），而不是被当成「空列表」。
 	assert.deepEqual(plain(readScanResponse(plain(result))), { kind: "failed", code: INVALID });
 	// 侧栏的错误文案把码原样呈现（未知码走 scanFailed 模板）。

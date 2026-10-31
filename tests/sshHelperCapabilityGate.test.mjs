@@ -28,6 +28,9 @@ const { createSshConnectionManager } = loadTsCommonJs("src/main/remote/SshConnec
 
 const HELPER_SESSION = { nodePath: "/usr/bin/node", deployRoot: "/home/dev/.pideck/remote-host", bundleSha256: "a".repeat(64) };
 const REQUIRED = ["fs.stat", "fs.list", "fs.read"];
+/** Optional at the gate, but needed by every session list: absence is diagnosed instead of refused. */
+const ADVISORY = "fs.statMany";
+const CODE_ADVISORY_MISSING = "SSH_HELPER_CAPABILITY_MISSING_FS_STAT_MANY";
 /** The terminal code of the gate; it is also the code that makes the failure fatal instead of retried. */
 const CODE_CAPABILITY_MISSING = "SSH_HELPER_CAPABILITY_MISSING";
 /** One diagnostic code per required operation, so the history names what is actually absent. */
@@ -39,7 +42,7 @@ const CODE_PER_OPERATION = {
 
 /** A legal hello result; only the capability list is varied by these tests. */
 function helloResult(overrides = {}) {
-	return { protocolVersion: 1, platform: "linux", arch: "x64", home: "/home/dev", root: null, capabilities: ["echo", ...REQUIRED], helperVersion: "1.6.0", nodeVersion: "v24.11.0", pid: 321, ...overrides };
+	return { protocolVersion: 1, platform: "linux", arch: "x64", home: "/home/dev", root: null, capabilities: ["echo", ...REQUIRED, ADVISORY], helperVersion: "1.22.0", nodeVersion: "v24.11.0", pid: 321, ...overrides };
 }
 
 /**
@@ -141,11 +144,23 @@ test("every absent operation is diagnosed, not only the first one", async (t) =>
 
 test("a complete capability list is ready, including capabilities this client never heard of", async (t) => {
 	// Additive rule: a newer helper advertising operations this client does not know must not be refused.
-	const session = await attempt(t, ["echo", ...REQUIRED, "fs.searchNames", "runtime.probePi", "artifact.create"]);
+	const session = await attempt(t, ["echo", ...REQUIRED, ADVISORY, "fs.searchNames", "runtime.probePi", "artifact.create"]);
 	assert.equal(session.state.state, "ready");
 	assert.equal(session.fake.requests.length, 1);
 	const codes = diagnosticCodes(session.manager, session.profile.id);
 	assert.equal(codes.includes(CODE_CAPABILITY_MISSING), false, "an unknown capability is not a missing one");
+	assert.equal(codes.includes(CODE_ADVISORY_MISSING), false, "a complete helper has nothing to warn about");
+});
+
+test("a helper without the batched metadata method stays ready but is diagnosed in advance", async (t) => {
+	// fs.statMany (helper 1.22.0) is advisory at the gate: an older helper still serves the read batch, so the
+	// session must not be refused. What would fail later is a session scan (METHOD_NOT_FOUND); naming the
+	// absence at handshake time is what turns that into a diagnosable fact instead of a mystery scan failure.
+	const session = await attempt(t, ["echo", ...REQUIRED]);
+	assert.equal(session.state.state, "ready", "an advisory capability must not gate readiness");
+	const codes = diagnosticCodes(session.manager, session.profile.id);
+	assert.ok(codes.includes(CODE_ADVISORY_MISSING), "the absent batch method is named: " + codes.join(","));
+	assert.equal(codes.includes(CODE_CAPABILITY_MISSING), false, "it is not the required-capability refusal");
 });
 
 test("a capability list that is not an array keeps failing the handshake", async (t) => {

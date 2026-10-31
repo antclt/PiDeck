@@ -18,10 +18,13 @@ import type { PiRuntimeLauncher } from "../pi/PiSpawnHandle";
 import { createSshConnectionManager, type SshConnectionManager, type SshHelperSession } from "./SshConnectionManager";
 import { createSshProcessLauncher } from "./SshProcessLauncher";
 import { diagnosticCodeFromError } from "./SshConnectionDiagnostics";
-import type { SshClientRuntime } from "./SshClientRuntime";
+import { withClientEnv, type SshClientRuntime } from "./SshClientRuntime";
+import { createSshAskpassBridge, type SshAskpassBridge } from "./SshAskpass";
+import { RemoteHostCredentialStore } from "./RemoteHostCredentialStore";
 import type { SshProcessLauncher } from "./RemoteHostConnectionTypes";
 import { uploadRemoteProjectFile } from "./RemoteProjectFileUpload";
 import type { ConnectionMachineState } from "./RemoteHostConnectionState";
+import type { RemoteHostConnectionState } from "./RemoteHostConnectionTypes";
 
 /**
  * The verified bootstrap result of one host, held for exactly as long as the store revision it was
@@ -89,6 +92,11 @@ export type RemoteHostConnectionServiceOptions = {
 	 * returns — a later degradation, a reconnect, or the shutdown that follows a successful ready.
 	 */
 	onStateChange?: (entry: { hostId: string; state: ConnectionMachineState }) => void;
+	/**
+	 * 变更事件（helper 1.24.0）：无 id 事件帧的出口。只报 watchId 与请求时的路径标签，
+	 * 订阅方按自己的注册表把它换成「哪个项目的哪些目录变了」，再标脏事实。
+	 */
+	onHelperEvent?: (entry: { hostId: string; watchId: string; paths: readonly string[] }) => void;
 	/** Explicit disconnect closes independent terminal PTYs, not ordinary helper root switches. */
 	onDisconnect?: (hostId: string) => void;
 	/**
@@ -118,6 +126,14 @@ export type RemoteProjectSession = {
 	/** The pin-confirmed route digest of this host revision; the ticket binds it, main never guesses it. */
 	readonly hostRouteDigest: string;
 	readonly hostRevision: number;
+	/**
+	 * 主进程持有的稳定 helper 会话身份：manager 实例 + 连接 generation。
+	 *
+	 * 一次会话里每次读都会新建一个 session 包装对象（这是有意的：包装绑定到当时的 manager），但它们
+	 * 代表同一个 helper，所以这个值不变。重连（manager 的 generation 前进）、换根或换 manager 都会
+	 * 换值。��阅类登记（目录 watcher）必须用它作 key：用包装对象会把同一次会话的每次读当成新会话。
+	 */
+	readonly connectionId: string;
 	runCommand(remoteCommand: string): Promise<{ exitCode: number; stdout: string }>;
 	/** Build and consume an interactive invocation under the host lock; no escaped stale spawn plan. */
 	withTerminalInvocation<T>(remoteCommand: string, launch: (invocation: PinnedSshInvocation, assertCurrent: () => Promise<void>) => T): Promise<T>;
@@ -175,7 +191,19 @@ type HostEntry = {
 	manager?: SshConnectionManager;
 	/** In-flight connect, so dispose can wait for it instead of racing the spawn. */
 	inFlight?: Promise<RemoteHostConnectResult>;
+	/**
+	 * The connect attempt currently inside the host lock, reachable from *outside* it.
+	 *
+	 * The lock is held for the whole bootstrap (node probe, ready, upload, finalize), so a cancel that
+	 * queued behind it would be waiting for the very work it is meant to stop. `disconnect()` and
+	 * `dispose()` therefore abort this controller before they enter the lock; the attempt then settles its
+	 * own waits and releases the lock promptly.
+	 */
+	attempt?: HostAttempt;
 };
+
+/** One connect attempt's identity and cancellation. `generation` names the attempt, not the pin. */
+type HostAttempt = { generation: number; controller: AbortController };
 
 const HOST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 /** 16 random bytes base64url: matches the 15–63 character nonce the frozen entry accepts. */
@@ -225,6 +253,31 @@ function extensionDeployCodeOf(error: unknown): string {
 	return typeof message === "string" && /^[A-Z][A-Z0-9_]{2,63}$/.test(message) ? message : "REMOTE_EXTENSIONS_DEPLOY_FAILED";
 }
 
+/**
+ * Stable code for "this attempt was cancelled". Reuses the existing disconnect code instead of minting a
+ * new public one: the renderer already renders it as "not connected", which is exactly the outcome.
+ */
+function throwIfCancelled(signal: AbortSignal | undefined): void {
+	if (signal?.aborted === true) throw new Error("SSH_HOST_DISCONNECTED");
+}
+
+/**
+ * Opaque identity for one live manager instance (see `RemoteProjectSession.connectionId`).
+ *
+ * A manager object is replaced on every root switch/rebind, so object identity already distinguishes those;
+ * the caller appends the machine generation to distinguish a reconnect on the same manager. Kept as a
+ * WeakMap so a discarded manager cannot be retained by this bookkeeping.
+ */
+const managerTokens = new WeakMap<object, number>();
+let managerTokenCounter = 0;
+function managerToken(manager: object): number {
+	const existing = managerTokens.get(manager);
+	if (existing !== undefined) return existing;
+	managerTokenCounter += 1;
+	managerTokens.set(manager, managerTokenCounter);
+	return managerTokenCounter;
+}
+
 function defaultPorts(): RemoteHostConnectionPorts {
 	return {
 		bootstrap: bootstrapPinnedHost,
@@ -242,12 +295,14 @@ function defaultPorts(): RemoteHostConnectionPorts {
  * Own the wired connection lifecycle of remote hosts: one verified bootstrap per host, held until the
  * store revision it was produced under changes, plus the manager that consumes it.
  *
- * Bootstrap and connect are deliberately separate steps. `bootstrapPinnedHost` takes no cancellation
- * parameter and only stops its own entry process in its own `finally`, so an abort can be honoured
- * *between* bootstrap and connect but never inside a running upload. Stating that here is cheaper than
- * pretending the seam is cancellable: the upload stays bounded by the coordinator's own session
- * deadline. Both fences are re-checked at every step, so a host whose profile changed mid-flight
- * never reaches the manager with a stale helper location.
+ * Bootstrap and connect are deliberately separate steps. Each attempt owns an `AbortController`:
+ * `disconnect()`/`dispose()` abort it **before** entering the host lock, and the signal reaches node
+ * discovery, the ready wait, the scp upload and the finalize wait, so the user's cancel settles those
+ * waits instead of queueing behind them (or waiting out the 30 s/300 s budgets). Every await re-checks the
+ * signal and the attempt identity too, so a late continuation of a cancelled attempt can only clean up its
+ * own handle, nonce and staging - it never publishes or tears down whatever replaced it.
+ * Both fences are re-checked at every step, so a host whose profile changed mid-flight never reaches the
+ * manager with a stale helper location.
  *
  * Nothing in this module is reachable in production: no IPC channel and no assembly site reference it.
  *
@@ -332,6 +387,58 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 		return { revision: snapshot.revision, routeDigest: endpoint.routeDigest };
 	}
 
+	/**
+	 * In-memory password material for hosts that authenticate with one.
+	 *
+	 * The secret never leaves this process: it is (a) not persisted, (b) not logged, (c) not passed to `ssh` as
+	 * an argument or an environment value. Each host gets its own askpass bridge and its own client view, so
+	 * `SSH_ASKPASS` is only inherited by the ssh processes of the host that actually holds a secret.
+	 */
+	const hostPasswords = new Map<string, string>();
+	const askpassBridges = new Map<string, SshAskpassBridge>();
+	const hostClients = new Map<string, SshClientRuntime>();
+	const credentials = new RemoteHostCredentialStore(options.userDataDir);
+
+	/** The client every pinned invocation of this host must use. */
+	function hostClient(hostId: string): SshClientRuntime {
+		return hostClients.get(hostId) ?? options.client;
+	}
+
+	async function releaseHostPassword(hostId: string): Promise<void> {
+		hostPasswords.delete(hostId);
+		hostClients.delete(hostId);
+		const bridge = askpassBridges.get(hostId);
+		askpassBridges.delete(hostId);
+		await bridge?.dispose();
+	}
+
+	async function applyHostPassword(hostId: string, secret: string): Promise<void> {
+		if (typeof secret !== "string" || secret.length === 0 || secret.length > 4096 || secret.includes(String.fromCharCode(0))) throw new Error("SSH_PASSWORD_INVALID");
+		await releaseHostPassword(hostId);
+		const bridge = await createSshAskpassBridge({ secret, executable: process.execPath });
+		try {
+			hostClients.set(hostId, withClientEnv(options.client, bridge.env));
+		} catch (error) {
+			await bridge.dispose();
+			throw error;
+		}
+		askpassBridges.set(hostId, bridge);
+		hostPasswords.set(hostId, secret);
+		// Persist a copy (OS-encrypted) so the next run does not ask again. A platform that cannot encrypt
+		// simply keeps the secret for this session; `set` returning false is not an error.
+		await credentials.set(hostId, secret).catch(() => false);
+	}
+
+	/** Best-effort profile read used only to decide whether a secret is required before connecting. */
+	async function readProfile(hostId: string) {
+		try {
+			const snapshot = (await RemoteHostStore.open(options.userDataDir)).getSnapshot();
+			return snapshot.status === "ready" ? snapshot.profiles.find((item) => item.id === hostId) : undefined;
+		} catch {
+			return undefined;
+		}
+	}
+
 	function entryFor(hostId: string): HostEntry {
 		const existing = hosts.get(hostId);
 		if (existing !== undefined) return existing;
@@ -341,13 +448,21 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 	}
 
 	/** Build the per-host connection manager over one verified helper session. */
-	function managerFor(held: HeldBootstrap): SshConnectionManager {
+	function managerFor(held: HeldBootstrap, hostId: string): SshConnectionManager {
 		let manager: SshConnectionManager | undefined;
 		manager = ports.createManager({
 			userDataDir: options.userDataDir,
-			client: options.client,
+			client: hostClient(hostId),
 			launcher,
 			helperSession: held.session,
+			...(options.onHelperEvent === undefined
+				? {}
+				: {
+						onEvent: (hostId: string, event: { watchId: string; paths: readonly string[] }) => {
+							// 只转述仍属于当前 manager 的事件：切根丢弃旧会话后，它的事件不得再影响事实。
+							if (manager && hosts.get(hostId)?.manager === manager) options.onHelperEvent?.({ hostId, watchId: event.watchId, paths: event.paths });
+						},
+					}),
 			...(options.onStateChange === undefined
 				? {}
 				: {
@@ -384,8 +499,9 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 	 * on the previous deploy root stayed alive. Reading the revision first and comparing afterwards
 	 * means any disagreement invalidates the held session instead of blessing it.
 	 */
-	async function ensureHeld(entry: HostEntry, hostId: string): Promise<HeldBootstrap> {
+	async function ensureHeld(entry: HostEntry, hostId: string, signal?: AbortSignal): Promise<HeldBootstrap> {
 		const current = await readRevision();
+		throwIfCancelled(signal);
 		if (entry.held !== undefined) {
 			if (entry.held.revision === current) return entry.held;
 			// A rebind/disable/re-verification superseded this helper location: the deploy root it names
@@ -398,11 +514,23 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 		// Resolve the node before bootstrapping. An explicit override skips discovery; otherwise the host
 		// user's own node is found via their login shell. Only a fresh bootstrap pays for discovery — a
 		// revision that already has a held session returns above without reaching here.
-		const nodePath = options.nodePath ?? (await ports.resolveNode({ userDataDir: options.userDataDir, hostId, client: options.client, sentinel: ports.createSentinel() })).nodePath;
-		const prepared = await ports.bootstrap({ userDataDir: options.userDataDir, hostId, generation, nonce, nodePath, client: options.client, launcher });
+		const discovered = options.nodePath === undefined ? await ports.resolveNode({ userDataDir: options.userDataDir, hostId, client: hostClient(hostId), sentinel: ports.createSentinel(), ...(signal === undefined ? {} : { signal }) }) : undefined;
+		const nodePath = discovered?.nodePath ?? options.nodePath;
+		if (nodePath === undefined) throw new Error("REMOTE_NODE_NOT_FOUND");
+		// A cancel between discovery and the entry spawn must not start an upload.
+		throwIfCancelled(signal);
+		// Discovery already asserted this version for this exact path; asking the host again costs a whole
+		// SSH connection and cannot produce a different answer this soon.
+		const prepared = await ports.bootstrap({ userDataDir: options.userDataDir, hostId, generation, nonce, nodePath, ...(discovered === undefined ? {} : { nodeVersion: discovered.version }), client: hostClient(hostId), launcher, ...(signal === undefined ? {} : { signal }) });
+		// A cancelled attempt owns nothing: it must not publish a held session (or a deploy root) for the
+		// next attempt to trust.
+		throwIfCancelled(signal);
+		// A newer attempt took this host over while the upload ran: its result is not this attempt's to publish.
+		if (entry.generation !== generation) throw new Error("SSH_HOST_NOT_READY");
 		// Re-read after the await: a rebind during the upload invalidates this result instead of
 		// publishing a helper location that the profile no longer describes.
 		const after = await readRevision();
+		throwIfCancelled(signal);
 		if (after !== current) throw new Error("SSH_HOST_NOT_READY");
 		// Read the effective root after any await: a confirmation that landed while this bootstrap was in
 		// flight must not be published under a session that started without it.
@@ -416,31 +544,75 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 		return held;
 	}
 
+	/**
+	 * Take this host's attempt slot for the duration of one operation that may bootstrap.
+	 *
+	 * The slot exists so `disconnect()`/`dispose()` can cancel work that owns the host lock *from outside
+	 * it*; a read that has to bootstrap holds the lock exactly like a connect, so it must be cancellable the
+	 * same way. Only one such operation runs at a time (all of them hold the host lock), which makes the slot
+	 * exclusive by construction. `cancelWith` links a caller-owned signal to the same cancellation, so a read
+	 * that named its own AbortSignal keeps reporting through it.
+	 */
+	async function withAttemptSlot<T>(entry: HostEntry, work: (signal: AbortSignal) => Promise<T>, cancelWith?: AbortSignal): Promise<T> {
+		const existing = entry.attempt;
+		const attempt: HostAttempt = existing ?? { generation: entry.generation, controller: new AbortController() };
+		if (existing === undefined) entry.attempt = attempt;
+		const onCancelWith = (): void => attempt.controller.abort();
+		if (cancelWith?.aborted === true) attempt.controller.abort();
+		cancelWith?.addEventListener("abort", onCancelWith, { once: true });
+		try {
+			return await work(attempt.controller.signal);
+		} catch (error) {
+			// A cancel that reached this slot owns the outcome: whatever the transport called the failure, the
+			// fact the caller needs is that their operation was cancelled (withProjectSession maps this back
+			// to REQUEST_CANCELLED when the caller's own signal was the cause).
+			throwIfCancelled(attempt.controller.signal);
+			throw error;
+		} finally {
+			cancelWith?.removeEventListener("abort", onCancelWith);
+			// Only the operation that created the slot may clear it; an existing one belongs to its owner.
+			if (existing === undefined && entry.attempt === attempt) entry.attempt = undefined;
+		}
+	}
+
 	async function connectLocked(hostId: string): Promise<RemoteHostConnectResult> {
 		if (disposed) return { ok: false, hostId, code: "REMOTE_CONNECTION_SERVICE_DISPOSED" };
 		if (!HOST_ID.test(hostId)) return { ok: false, hostId, code: "REMOTE_CONNECTION_HOST_ID_INVALID" };
 		const entry = entryFor(hostId);
 		if (explicitlyDisconnected.has(hostId)) return { ok: false, hostId, code: "SSH_HOST_DISCONNECTED" };
 		entry.generation += 1;
+		// Registered before the first await so disconnect()/dispose() can abort *this* attempt from outside
+		// the host lock instead of queueing behind its upload.
+		const attempt: HostAttempt = { generation: entry.generation, controller: new AbortController() };
+		entry.attempt = attempt;
+		const signal = attempt.controller.signal;
 		try {
 			// A machine latched by an explicit disconnect can never be revived — the reducer drops every later
 			// begin-attempt — so a latched manager is replaced instead of being reported as a live session.
 			// Without this, the user's own "connect" after a disconnect succeeded on paper while the session
 			// stayed dead, and every read kept failing with SSH_CONNECTION_NOT_READY.
 			if (entry.manager !== undefined && entry.manager.getState(hostId).latched === true) discard(entry);
-			const held = await ensureHeld(entry, hostId);
+			const held = await ensureHeld(entry, hostId, signal);
+			throwIfCancelled(signal);
 			if (disposed) return { ok: false, hostId, code: "REMOTE_CONNECTION_SERVICE_DISPOSED" };
-			const manager = entry.manager ?? managerFor(held);
+			const manager = entry.manager ?? managerFor(held, hostId);
 			entry.manager = manager;
 			// needs-attention is terminal for the reducer: `begin-attempt` is dropped there, so a plain connect
 			// would only report the terminal state back and the user's own "connect" could never leave it. The
 			// reducer's one legal exit is `user-retry`, which is exactly what an explicit connect means here.
 			const state = manager.getState(hostId).state === "needs-attention" ? await manager.retry(hostId) : await manager.connect(hostId);
+			// A cancel that landed while the manager was connecting still settles this attempt as cancelled
+			// rather than publishing "ready" for a user who walked away.
+			throwIfCancelled(signal);
 			return { ok: true, hostId, state };
 		} catch (error) {
-			// A failed connect must not leave a helper session behind that the next attempt would trust.
-			discard(entry);
+			// A failed/cancelled connect must not leave a helper session behind that the next attempt would trust.
+			if (entry.attempt === attempt) discard(entry);
+			if (disposed) return { ok: false, hostId, code: "REMOTE_CONNECTION_SERVICE_DISPOSED" };
+			if (signal.aborted) return { ok: false, hostId, code: "SSH_HOST_DISCONNECTED" };
 			return { ok: false, hostId, code: diagnosticCodeFromError(error) };
+		} finally {
+			if (entry.attempt === attempt) entry.attempt = undefined;
 		}
 	}
 
@@ -465,7 +637,7 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 	async function verifyProjectRoot(hostId: string, root: string): Promise<{ ok: true } | { ok: false; code: string }> {
 		let canonicalPath: string;
 		try {
-			canonicalPath = (await ports.verifyRoot({ userDataDir: options.userDataDir, hostId, client: options.client, userPath: root })).canonicalPath;
+			canonicalPath = (await ports.verifyRoot({ userDataDir: options.userDataDir, hostId, client: hostClient(hostId), userPath: root })).canonicalPath;
 		} catch {
 			// The probe's own code describes the probe, not the project boundary; callers act on the latter.
 			return rememberRootFailure(hostId, root, "SSH_PROJECT_ROOT_UNRESOLVED");
@@ -477,7 +649,7 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 		return { ok: true };
 	}
 
-	async function establishProjectSession(hostId: string, root: string): Promise<{ ok: true; session: RemoteProjectSession } | { ok: false; code: string }> {
+	async function establishProjectSession(hostId: string, root: string, signal?: AbortSignal): Promise<{ ok: true; session: RemoteProjectSession } | { ok: false; code: string }> {
 		const entry = entryFor(hostId);
 		// 保存令牌绑定host store代数；登记/重绑后不能一直复用旧held使所有重载永久失败。
 		if (entry.held && entry.held.revision !== (await readRevision())) discard(entry);
@@ -531,11 +703,22 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 			}
 		}
 		if (manager === undefined) {
-			const held = await ensureHeld(entry, hostId);
-			manager = managerFor(held);
-			entry.manager = manager;
-			const connected = await manager.connect(hostId);
-			if (connected.state !== "ready") return { ok: false, code: connected.lastCode ?? "SSH_HOST_NOT_READY" };
+			// A read that has to bootstrap holds the host lock for as long as a connect does, so it takes the
+			// same attempt slot: an explicit disconnect/quit must be able to cancel *this* one too, instead of
+			// waiting for the whole probe/upload budget it is supposed to stop.
+			const created = await withAttemptSlot(
+				entry,
+				async (attemptSignal) => {
+					const held = await ensureHeld(entry, hostId, attemptSignal);
+					throwIfCancelled(attemptSignal);
+					const built = managerFor(held, hostId);
+					entry.manager = built;
+					return { manager: built, connected: await built.connect(hostId) };
+				},
+				signal,
+			);
+			manager = created.manager;
+			if (created.connected.state !== "ready") return { ok: false, code: created.connected.lastCode ?? "SSH_HOST_NOT_READY" };
 		} else if (reestablish) {
 			// disconnected/offline: the verified helper location is still valid, so revive in place instead of
 			// paying for node discovery and another upload.
@@ -550,6 +733,8 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 		// launcher refuse to mint (it requires 64 hex) while reads stay independent of the ticket surface.
 		const route = await readVerifiedRoute(hostId);
 		if (route !== null && route.revision !== held.revision) return { ok: false, code: "SSH_HOST_NOT_READY" };
+		// 目录 watcher 的登记身份：同一个 manager、同一个连接代数 ⇒ 同一个 key；换根/重连/换 manager ⇒ 新 key。
+		const connectionId = `${hostId}#${managerToken(bound)}#${bound.getState(hostId).generation}`;
 		return {
 			ok: true,
 			session: {
@@ -559,13 +744,14 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 				bundleSha256: held.session.bundleSha256,
 				hostRouteDigest: route?.routeDigest ?? "",
 				hostRevision: held.revision,
+				connectionId,
 				async runCommand(remoteCommand) {
 					// 每块重新校验pin和host store代数；不能拿旧Node路径向重绑后的主机发写命令。
 					if (disposed || hosts.get(hostId)?.manager !== bound || bound.getState(hostId).state !== "ready" || (await readRevision()) !== held.revision) throw new Error("SSH_HOST_NOT_READY");
-					const invocation = await buildPinnedSshInvocation(options.userDataDir, hostId, "ssh-batch", { client: options.client, remoteCommand });
+					const invocation = await buildPinnedSshInvocation(options.userDataDir, hostId, "ssh-batch", { client: hostClient(hostId), remoteCommand });
 					// pin/route构造本身有await；必须在真正启动写命令前再次把host代数绑定到已验证Node。
 					if (disposed || hosts.get(hostId)?.manager !== bound || bound.getState(hostId).state !== "ready" || (await readRevision()) !== held.revision) throw new Error("SSH_HOST_NOT_READY");
-					const result = await options.client.run(invocation.executable, invocation.args);
+					const result = await hostClient(hostId).run(invocation.executable, invocation.args);
 					return { exitCode: result.exitCode, stdout: result.stdout };
 				},
 				async withTerminalInvocation(remoteCommand, launch) {
@@ -573,7 +759,7 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 						if (disposed || explicitlyDisconnected.has(hostId) || hosts.get(hostId)?.manager !== bound || bound.getState(hostId).state !== "ready" || (await readRevision()) !== held.revision) throw new Error("SSH_HOST_NOT_READY");
 					};
 					await assertBound();
-					const invocation = await buildPinnedSshInvocation(options.userDataDir, hostId, "ssh-terminal", { client: options.client, remoteCommand });
+					const invocation = await buildPinnedSshInvocation(options.userDataDir, hostId, "ssh-terminal", { client: hostClient(hostId), remoteCommand });
 					await assertBound();
 					// The PTY outlives helper-root switches, but never a host rebind, explicit disconnect or disposal.
 					const assertCurrent = async () => {
@@ -663,7 +849,7 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 				nodePath: held.session.nodePath,
 				deployRoot: held.session.deployRoot,
 				bytes,
-				client: options.client,
+				client: hostClient(hostId),
 				launcher,
 				nonce: ports.createNonce(),
 			});
@@ -696,16 +882,70 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 		 */
 		client: options.client,
 		/**
+		 * Replace this host's secret without opening a connection (the edit form's "save").
+		 *
+		 * Returns whether the value was also written to the encrypted store: a platform without an OS
+		 * keyring keeps it for this session only, and the caller must not claim otherwise.
+		 */
+		async setHostSecret(hostId: string, secret: string): Promise<{ persisted: boolean }> {
+			await applyHostPassword(hostId, secret);
+			return { persisted: await credentials.available() };
+		},
+		/** The stored secret, decrypted for the edit form. Never crosses into a log or a host store file. */
+		async readStoredSecret(hostId: string): Promise<string | undefined> {
+			return credentials.get(hostId);
+		},
+		/** Drop this host's stored secret (host removal). A plain disconnect keeps it for the next connect. */
+		async forgetHost(hostId: string): Promise<void> {
+			await releaseHostPassword(hostId);
+			await credentials.delete(hostId).catch(() => undefined);
+		},
+		/**
+		 * Current machine state per host that has a live manager.
+		 *
+		 * State changes are pushed, so a view that unmounts (leaving settings) loses them and would render
+		 * "disconnected" for a host that is still connected. This is the replay point for a fresh mount.
+		 */
+		states(): Record<string, RemoteHostConnectionState> {
+			const current: Record<string, RemoteHostConnectionState> = {};
+			for (const [hostId, entry] of hosts) {
+				const state = entry.manager?.getState(hostId).state;
+				if (state !== undefined) current[hostId] = state;
+			}
+			return current;
+		},
+		/** The client a pinned command for this host must use (a password host carries its askpass bridge). */
+		clientForHost(hostId: string): SshClientRuntime {
+			return hostClient(hostId);
+		},
+		/**
 		 * 与会话配对的远端启动器：复用本服务**已验证的** client 与同一个 ssh launcher。
 		 *
 		 * 为什么在这里造而不是让调用方自己 new：第二条通道一旦用另一个 client 实例，就会用一套不同于会话
 		 * 验证时的环境/路径去拉 ssh——那正是「连得上但行为不一样」的根源；而且 launcher 的生命周期本就属于本服务。
 		 */
-		createPiRuntimeLauncher(): PiRuntimeLauncher {
-			return createSshPiRuntimeLauncher({ userDataDir: options.userDataDir, client: options.client, launcher });
+		createPiRuntimeLauncher(hostId: string): PiRuntimeLauncher {
+			return createSshPiRuntimeLauncher({ userDataDir: options.userDataDir, client: hostClient(hostId), launcher });
 		},
 		/** Bootstrap-then-connect one host. Every failure is a stable code, never a thrown message. */
-		async connect(hostId: string): Promise<RemoteHostConnectResult> {
+		async connect(hostId: string, input?: { password?: string }): Promise<RemoteHostConnectResult> {
+			if (input?.password !== undefined) {
+				try {
+					await applyHostPassword(hostId, input.password);
+				} catch {
+					return { ok: false, hostId, code: "SSH_PASSWORD_INVALID" };
+				}
+			}
+			// A password host can only be driven while a secret is held: without it every ssh child below would
+			// start a password prompt that no bridge can answer, and the failure would surface as a generic timeout.
+			const profile = await readProfile(hostId);
+			if (profile?.authMethod === "password" && !hostClients.has(hostId)) {
+				// A stored secret (encrypted at rest) is the normal path after the first connect; only when
+				// none exists, or it cannot be decrypted on this machine, does the UI have to ask again.
+				const stored = await credentials.get(hostId);
+				if (stored !== undefined) await applyHostPassword(hostId, stored).catch(() => undefined);
+				if (!hostClients.has(hostId)) return { ok: false, hostId, code: "SSH_PASSWORD_REQUIRED" };
+			}
 			const entry = entryFor(hostId);
 			// Only this explicit user boundary may undo a disconnect; session scanning also uses connectLocked.
 			const run = operationLock.run(hostId, () => {
@@ -730,6 +970,26 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 		 */
 		async remoteHome(hostId: string): Promise<string | undefined> {
 			return readCachedHome(hostId);
+		},
+		/**
+		 * The capability names the last successful hello declared for this host, or undefined when no live
+		 * session proves any.
+		 *
+		 * Read-only and never connects: a project surface negotiates optional work (content search) from a
+		 * session that already exists, and "no session" must answer "unknown/unsupported" instead of waking a
+		 * host. Only a ready/degraded session may answer, for the same reason remoteHome refuses one.
+		 */
+		helperCapabilities(hostId: string): readonly string[] | undefined {
+			if (disposed || explicitlyDisconnected.has(hostId)) return undefined;
+			const manager = hosts.get(hostId)?.manager;
+			if (manager === undefined) return undefined;
+			try {
+				const state = manager.getState(hostId).state;
+				if (state !== "ready" && state !== "degraded") return undefined;
+				return manager.getCapabilities(hostId);
+			} catch {
+				return undefined;
+			}
 		},
 		/**
 		 * 与 `remoteHome` 同一语义，但缓存状态读不到时**按需建立会话**再读一次。
@@ -780,12 +1040,22 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 		 * explicit `connect` clears it again.
 		 */
 		async disconnect(hostId: string, reason: "abort" | "shutdown"): Promise<void> {
+			// The user's decision is recorded before anything waits, and the in-flight attempt is cancelled
+			// *before* the lock is entered: that attempt holds the lock for its whole upload/finalize, so a
+			// cancel queued behind the lock would wait for the very work it is meant to stop. A read that
+			// starts between the two observations sees the intent and reports SSH_HOST_DISCONNECTED.
+			if (HOST_ID.test(hostId)) {
+				explicitlyDisconnected.add(hostId);
+				hosts.get(hostId)?.attempt?.controller.abort();
+			}
 			await operationLock.run(hostId, async () => {
 				if (HOST_ID.test(hostId)) explicitlyDisconnected.add(hostId);
 				options.onDisconnect?.(hostId);
 				const entry = hosts.get(hostId);
 				const manager = entry?.manager;
 				if (manager !== undefined) await manager.disconnect(hostId, reason).catch(() => undefined);
+				// A disconnect ends the authenticated session, so the secret it needed must not outlive it.
+				await releaseHostPassword(hostId);
 			});
 		},
 		listDiagnostics(hostId?: string) {
@@ -818,7 +1088,7 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 					cached !== undefined && cached.revision === held.revision && cached.generation === held.generation
 						? cached
 						: await (async (): Promise<PiProbeFacts> => {
-								const observation = await ports.resolvePi({ userDataDir: options.userDataDir, hostId, client: options.client, sentinel: ports.createSentinel(), nodePath: held.session.nodePath });
+								const observation = await ports.resolvePi({ userDataDir: options.userDataDir, hostId, client: hostClient(hostId), sentinel: ports.createSentinel(), nodePath: held.session.nodePath });
 								const facts: PiProbeFacts = { revision: held.revision, generation: held.generation, piPath: observation.piPath, version: observation.version, ...(observation.warning === undefined ? {} : { warning: observation.warning }) };
 								entry.piProbe = facts;
 								return facts;
@@ -865,9 +1135,12 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 						generation: held.generation,
 						nonce: ports.createNonce(),
 						nodePath: held.session.nodePath,
-						client: options.client,
+						client: hostClient(hostId),
 						launcher,
 						snapshot: { dir: snapshot.dir, names: fileNames },
+						// An explicit disconnect/dispose during the upload cancels this attempt too; the cache is then
+						// not written, and the next session redeploys instead of trusting a half-finished result.
+						...(entry.attempt === undefined ? {} : { signal: entry.attempt.controller.signal }),
 					});
 					const root = deployedExtensionSnapshotRoot(deployed);
 					entry.extensionSnapshot = { revision: held.revision, generation: held.generation, sha256: deployed.bundleSha256, root, fileNames };
@@ -875,7 +1148,7 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 					void maintainDeployedBundles({
 						userDataDir: options.userDataDir,
 						hostId,
-						client: options.client,
+						client: hostClient(hostId),
 						nodePath: held.session.nodePath,
 						deployRoot: deployed.deployRoot,
 						activeBundleSha256: held.session.bundleSha256,
@@ -916,7 +1189,7 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 					relative: input.relative,
 					bytes: input.bytes,
 					overwrite: input.overwrite === true,
-					client: options.client,
+					client: hostClient(input.hostId),
 					launcher,
 					nonce: ports.createNonce(),
 				});
@@ -949,6 +1222,24 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 			return manager.cancel(hostId, requestId, options);
 		},
 		/**
+		 * 只读当前连接事实：稳定 helper 身份 + 当前状态。**不连接、不建会话、不持锁**。
+		 *
+		 * 事实缓存用它做两件事：把跨调用缓存围栏到一代 helper（换根/重连 ⇒ 新身份）；缓存命中前
+		 * 确认连接仍然可用（离线时不得返回暖缓存成功）。没有 manager 或已显式断开时返回 undefined。
+		 */
+		connectionFacts(hostId: string): { connectionId: string; state: RemoteHostConnectionState } | undefined {
+			if (disposed || explicitlyDisconnected.has(hostId)) return undefined;
+			const entry = hosts.get(hostId);
+			const manager = entry?.manager;
+			if (manager === undefined) return undefined;
+			try {
+				const state = manager.getState(hostId);
+				return { connectionId: `${hostId}#${managerToken(manager)}#${state.generation}`, state: state.state };
+			} catch {
+				return undefined;
+			}
+		},
+		/**
 		 * Run one whole read-only operation against a host confined to `root`, with the session pinned.
 		 *
 		 * This is the single per-host boundary the whole batch exists for: switching the root, establishing the
@@ -977,10 +1268,13 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 				if (readOptions?.requireReady && hosts.get(hostId)?.manager?.getState(hostId).state !== "ready") return { ok: false, code: "SSH_HOST_NOT_READY" };
 				let session: RemoteProjectSession;
 				try {
-					const established = await establishProjectSession(hostId, root);
+					const established = await establishProjectSession(hostId, root, readOptions?.signal);
 					if (!established.ok) return established;
 					session = established.session;
 				} catch (error) {
+					// A cancel during establishment is the caller's own withdrawal, reported with the read channel's
+					// code (the same one a cancel before or after establishment produces).
+					if (readOptions?.signal?.aborted) return { ok: false, code: "REQUEST_CANCELLED" };
 					// Establishing can fail in ways only the connection layer can name (a failed bootstrap, a
 					// disposed manager). Relaying its own stable code keeps the UI's hint truthful; a thrown
 					// surprise would otherwise be flattened into a generic read failure by the caller.
@@ -997,6 +1291,10 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 		dispose(): Promise<void> {
 			disposing ??= (async () => {
 				disposed = true;
+				// Abort every in-flight attempt before waiting for it: an upload that ignored the cancel would
+				// otherwise hold quit open for its whole session budget. Each attempt settles its own waits and
+				// releases the lock, so the awaits below converge promptly.
+				for (const entry of hosts.values()) entry.attempt?.controller.abort();
 				for (const hostId of hosts.keys()) options.onDisconnect?.(hostId);
 				const entries = [...hosts.values()];
 				const pending = entries.flatMap((entry) => (entry.inFlight === undefined ? [] : [entry.inFlight.catch(() => undefined)]));
@@ -1007,6 +1305,7 @@ export function createRemoteHostConnectionService(options: RemoteHostConnectionS
 					}),
 				);
 				hosts.clear();
+				await Promise.all([...askpassBridges.keys()].map((hostId) => releaseHostPassword(hostId)));
 			})();
 			return disposing;
 		},

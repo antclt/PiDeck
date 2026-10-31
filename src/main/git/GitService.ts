@@ -101,6 +101,11 @@ export class GitService {
 		}
 	}
 
+	/** 公共读入口用：把用户给的 ref 解析成提交 OID（不移动任何 ref）。 */
+	async resolveRefOid(cwd: string, ref: string): Promise<string | null> {
+		return await this.resolveCommitHash(cwd, ref);
+	}
+
 	/**
 	 * 判断给定目录是否处于一个 git 仓库内。
 	 * 启用工作区模式前做前置校验，避免非 git 项目开启后只能看到空列表、
@@ -409,11 +414,13 @@ export class GitService {
 	 * 获取提交历史列表。图谱由前端根据 parent hashes 构建连续 swimlane，
 	 * 与 VS Code 的 SCM History 模型一致，不再混用 git --graph 的 ASCII 行。
 	 */
-	async getCommitLog(cwd: string, options?: { maxEntries?: number; ref?: string; path?: string; allBranches?: boolean }): Promise<CommitEntry[]> {
+	async getCommitLog(cwd: string, options?: { maxEntries?: number; skip?: number; ref?: string; path?: string; allBranches?: boolean }): Promise<CommitEntry[]> {
 		// 列表只需要 subject；完整 body 仅在按需 commit detail 中读取，避免无用的大字符串传输。
 		const COMMIT_FORMAT = "%H%n%aN%n%aE%n%at%n%ct%n%P%n%D%n%s";
 		const maxEntries = Math.min(500, Math.max(1, Math.floor(options?.maxEntries ?? 32)));
+		const skip = Math.min(100_000, Math.max(0, Math.floor(options?.skip ?? 0)));
 		const args = ["log", `--format=${COMMIT_FORMAT}`, "-z", "--topo-order", `-n${maxEntries}`];
+		if (skip > 0) args.push(`--skip=${skip}`);
 		const useAll = options?.allBranches ?? true;
 
 		if (useAll && !options?.ref) {

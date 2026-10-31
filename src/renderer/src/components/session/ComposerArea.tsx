@@ -36,6 +36,8 @@ const EMPTY_REPLY_RULES: readonly ReplyActionRule[] = [];
 export type ComposerAreaProps = {
 	sessionId: string;
 	gitInfo?: GitBranchInfo;
+	/** 本栏项目 Git 拉取失败（非仓库/磁盘不可读）：底栏显示「Git 不可用」chip 而非静默消失。 */
+	gitUnavailable?: boolean;
 	/** 底栏分支下拉的切换回调（owner 为 App 级 switchBranch，保持 Git 面板同步） */
 	onSwitchBranch?: (branch: string) => void;
 	/** 输入框上方独立卡（todo / goal）；放在 widgets 槽位。 */
@@ -246,7 +248,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 									messages={props.replyActionMessages}
 									rules={props.replyActionRules ?? EMPTY_REPLY_RULES}
 									target={props.replyActionsTarget ?? null}
-									hidden={Boolean(props.replyActionsBlocked || composer.isBusy || composer.isStarting || composer.sendState.status === "sending" || composer.sendState.status === "unknown" || composer.mode === "imagegen" || composer.backend === "imagegen")}
+									hidden={Boolean(props.replyActionsBlocked || composer.isBusy || composer.isStarting || composer.sendState.status === "sending" || composer.sendState.status === "unknown" || composer.sendState.status === "error" || composer.mode === "imagegen" || composer.backend === "imagegen")}
 									sendDisabled={!composer.delivery.canSendQuickMessage}
 									onSend={composer.delivery.sendQuickMessage}
 								/>
@@ -366,10 +368,12 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 												modelPending={modelPendingMap[props.sessionId]}
 												composerAgentMode={composer.mode}
 												gitInfo={composerFeatureVisible("gitBranch") ? props.gitInfo : undefined}
+												gitUnavailable={composerFeatureVisible("gitBranch") ? props.gitUnavailable : undefined}
 												onSwitchBranch={props.onSwitchBranch}
 												record={composer.record}
 												defaultModel={composer.dshDefaultModel ?? composer.bootstrapDefaultModel}
 												backend={composer.backend}
+												backendFixedToPi={composer.backendFixedToPi}
 												enhance={composerFeatureVisible("enhance") ? composer.enhance : undefined}
 												onChangeBackend={composer.changeBackend}
 												acpTool={composer.acpTool}

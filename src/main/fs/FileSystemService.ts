@@ -1,4 +1,4 @@
-import { readdir, rename as fsRename, mkdir, writeFile, stat } from "node:fs/promises";
+import { readdir, realpath, rename as fsRename, mkdir, writeFile, stat } from "node:fs/promises";
 import { join, relative, dirname, resolve, sep, basename } from "node:path";
 import { trashPath } from "./trash";
 import { parseWslUncPath } from "../wsl/WslPaths";
@@ -18,6 +18,9 @@ export interface FileTreeListOptions {
 	/** composer @ 引用的整树扫描：额外跳过 build/dist/target 等产物目录。抽屉浏览不传。 */
 	skipGeneratedDirs?: boolean;
 }
+
+/** 单层目录页：`truncated` 表示条目超过单层上限后被截断（公共页要显式携带，不能伪装成完整）。 */
+export type FileTreePage = { nodes: FileTreeNode[]; truncated: boolean };
 
 /** 路径必须落在项目根内（resolve 后比较，防 ../ 逃逸）。 */
 export function isPathInsideProject(root: string, target: string): boolean {
@@ -47,20 +50,42 @@ export class FileSystemService {
 	 * maxDepth>0：继续向下递归，供 composer @ 引用一次性拿到有限深度清单。
 	 */
 	async listTree(root: string, maxDepth = DEFAULT_FILE_TREE_MAX_DEPTH, directory?: string, options?: FileTreeListOptions): Promise<FileTreeNode[]> {
+		const requested = directory ? resolve(directory) : root;
+		// 边界与读取都用 canonicalRoot：项目根可能是短路径/临时目录，而 target 解析给的是 realpath。
+		// 只 canonicalize 一次，node.path 也保持一致，避免同一文件出现两种绝对路径。
+		const canonicalRoot = await realpath(root).catch(() => resolve(root));
+		const current = await realpath(requested).catch(() => resolve(requested));
+		if (!isPathInsideProject(canonicalRoot, current)) {
+			throw new Error(`Invalid path: "${directory}" escapes project directory`);
+		}
+		const depthLimit = Math.max(0, Math.min(maxDepth, FILE_TREE_ABSOLUTE_MAX_DEPTH));
+		const ignored = options?.skipGeneratedDirs ? SCAN_IGNORED_NAMES : ALWAYS_IGNORED_NAMES;
+		return this.readDirectory(canonicalRoot, current, 0, depthLimit, ignored);
+	}
+
+	/**
+	 * 与 `listTree` 相同的读取规则，但超出单层上限时**截断并标记**，不报错。
+	 * 只给公共目录页用：旧调用方（整树扫描/搜索）继续拿全量或错误，行为不变。
+	 */
+	async listTreePage(root: string, maxDepth = 0, directory?: string, options?: FileTreeListOptions): Promise<FileTreePage> {
 		const current = directory ? resolve(directory) : resolve(root);
 		if (!isPathInsideProject(root, current)) {
 			throw new Error(`Invalid path: "${directory}" escapes project directory`);
 		}
 		const depthLimit = Math.max(0, Math.min(maxDepth, FILE_TREE_ABSOLUTE_MAX_DEPTH));
 		const ignored = options?.skipGeneratedDirs ? SCAN_IGNORED_NAMES : ALWAYS_IGNORED_NAMES;
-		return this.readDirectory(root, current, 0, depthLimit, ignored);
+		const truncated = { value: false };
+		const nodes = await this.readDirectory(root, current, 0, depthLimit, ignored, truncated);
+		return { nodes, truncated: truncated.value };
 	}
 
-	private async readDirectory(root: string, current: string, depth: number, maxDepth: number, ignored: Set<string>): Promise<FileTreeNode[]> {
-		const entries = await readdir(current, { withFileTypes: true });
-		// 单层过大时拒绝构造整层节点：否则 IPC + React 树会把渲染进程打崩。
+	private async readDirectory(root: string, current: string, depth: number, maxDepth: number, ignored: Set<string>, truncated?: { value: boolean }): Promise<FileTreeNode[]> {
+		let entries = await readdir(current, { withFileTypes: true });
+		// 单层过大时：旧调用方继续拒绝构造整层节点（IPC + React 树会被打崩）；目录页显式截断。
 		if (entries.length > FILE_TREE_MAX_DIRECTORY_ENTRIES) {
-			throw new Error(`FILE_TREE_DIRECTORY_TOO_LARGE:${entries.length}:${FILE_TREE_MAX_DIRECTORY_ENTRIES}`);
+			if (truncated === undefined) throw new Error(`FILE_TREE_DIRECTORY_TOO_LARGE:${entries.length}:${FILE_TREE_MAX_DIRECTORY_ENTRIES}`);
+			truncated.value = true;
+			entries = entries.slice(0, FILE_TREE_MAX_DIRECTORY_ENTRIES);
 		}
 		// 并行 stat：为排序（名称/更新时间/创建时间/大小）附加元数据。
 		// 目录 stat.size 无意义，恒置 0；目录仍保留时间戳用于“按更新时间/创建时间”排序。
@@ -102,7 +127,7 @@ export class FileSystemService {
 			if (entry.isDirectory()) {
 				// 达到深度上限时不再递归，只看一层是否还有可见子项，避免抽屉一次拉整棵仓库。
 				const canRecurse = depth < maxDepth;
-				const children = canRecurse ? await this.readDirectory(root, absolutePath, depth + 1, maxDepth, ignored) : undefined;
+				const children = canRecurse ? await this.readDirectory(root, absolutePath, depth + 1, maxDepth, ignored, truncated) : undefined;
 				nodes.push({
 					name: entry.name,
 					path: absolutePath,

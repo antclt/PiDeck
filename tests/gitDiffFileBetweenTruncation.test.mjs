@@ -73,7 +73,7 @@ describe("diffFileBetweenRefs 截断（M4）", () => {
 		const src = readFileSync("src/main/ipc/gitIpc.ts", "utf8");
 		// 抓块沿用仓库既有契约测试惯例（见 skillsRenameIpc.test.mjs）：search 定位起点 +
 		// indexOf("});") 截到块尾，避免脆弱的行尾正则（handler 均以 `\t\t},` 收尾）。
-		const start = src.search(/ipcMain\.handle\(\s*ipcChannels\.gitDiffFileBetween/);
+		const start = src.search(/handleProjectGit\(\s*ipcChannels\.gitDiffFileBetween/);
 		const handler = start >= 0 ? src.slice(start, src.indexOf("});", start) + 3) : "";
 		assert.ok(handler.length > 0, "找不到 gitDiffFileBetween handler");
 		assert.match(handler, /maxEditorFileSizeMB/);

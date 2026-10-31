@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Home, Maximize2, Minus, Plus, RefreshCw, Smartphone, Tablet, TriangleAlert, X } from "lucide-react";
 import { t } from "../../i18n";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
 import { Button } from "../ui-shadcn/button";
 import { Input } from "../ui-shadcn/input";
 
@@ -136,8 +137,6 @@ export function BrowserPanel(props: {
 	const [device, setDevice] = useState<DeviceType>(() => moduleState.device);
 	// 主框架加载失败（DNS/SSL/超时等非 -3）：显示错误页替代空白 webview，附重试
 	const [loadError, setLoadError] = useState<{ code: number; description: string; url: string } | null>(null);
-	const [deviceMenuOpen, setDeviceMenuOpen] = useState(false);
-	const deviceMenuRef = useRef<HTMLDivElement | null>(null);
 
 	const persistTabs = useCallback((nextTabs: TabEntry[], nextActiveId: string | null) => {
 		moduleState.tabs = nextTabs;
@@ -404,23 +403,11 @@ export function BrowserPanel(props: {
 		(nextDevice: DeviceType) => {
 			moduleState.device = nextDevice;
 			setDevice(nextDevice);
-			setDeviceMenuOpen(false);
 			// 仅改 UA 不会触发布局变化；同时切换 browser-panel 的 device class 限制 webview 视口宽度。
 			loadUrl(url || DEFAULT_HOME, nextDevice);
 		},
 		[loadUrl, url],
 	);
-
-	useEffect(() => {
-		if (!deviceMenuOpen) return;
-		const handleMouseDown = (event: MouseEvent) => {
-			if (!deviceMenuRef.current?.contains(event.target as Node)) {
-				setDeviceMenuOpen(false);
-			}
-		};
-		document.addEventListener("mousedown", handleMouseDown);
-		return () => document.removeEventListener("mousedown", handleMouseDown);
-	}, [deviceMenuOpen]);
 
 	const handleKeyDown = useCallback(
 		(event: React.KeyboardEvent) => {
@@ -510,36 +497,28 @@ export function BrowserPanel(props: {
 						placeholder={t("browser.urlPlaceholder")}
 					/>
 				</div>
-				<div className="relative flex shrink-0 items-center text-text-tertiary" ref={deviceMenuRef}>
-					<Button
-						type="button"
-						variant="outline"
-						size="sm"
-						className={`h-7 min-w-[68px] gap-1 border border-border-subtle bg-bg-panel px-2 text-xs text-text-secondary outline-none focus-visible:shadow-[var(--focus-ring)]${deviceMenuOpen ? " border-[var(--color-accent)] bg-bg-hover text-[color:var(--color-accent)]" : ""} hover:border-[var(--color-accent)] hover:bg-bg-hover hover:text-[color:var(--color-accent)]`}
-						onClick={() => setDeviceMenuOpen((open) => !open)}
-						title={t("browser.deviceLabel")}
-					>
-						{deviceIcon}
-						<span>{t(activeDevicePreset.label as Parameters<typeof t>[0])}</span>
-					</Button>
-					{deviceMenuOpen && (
-						<div className="absolute top-[calc(100%+6px)] right-0 z-30 min-w-[112px] rounded-md border border-border-subtle bg-bg-panel p-1 shadow-[var(--shadow-popover)]">
-							{DEVICE_PRESETS.map((preset) => (
-								<Button
-									key={preset.id}
-									type="button"
-									variant="ghost"
-									size="sm"
-									className={`h-[30px] w-full items-center gap-2 rounded-sm px-2 text-xs text-text-secondary text-left${preset.id === device ? " bg-bg-active text-[color:var(--color-accent)]" : ""} hover:bg-bg-hover hover:text-[color:var(--color-accent)]`}
-									onClick={() => selectDevice(preset.id)}
-								>
-									{preset.id === "mobile" ? <Smartphone size={13} /> : preset.id === "tablet" ? <Tablet size={13} /> : <span className="size-[13px] rounded-[3px] border border-current" />}
-									<span>{t(preset.label as Parameters<typeof t>[0])}</span>
-								</Button>
-							))}
-						</div>
-					)}
-				</div>
+				<DropdownMenu>
+					<DropdownMenuTrigger asChild>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							className="h-7 min-w-[68px] gap-1 border border-border-subtle bg-bg-panel px-2 text-xs text-text-secondary outline-none focus-visible:shadow-[var(--focus-ring)] hover:border-[var(--color-accent)] hover:bg-bg-hover hover:text-[color:var(--color-accent)] data-[state=open]:border-[var(--color-accent)] data-[state=open]:bg-bg-hover data-[state=open]:text-[color:var(--color-accent)]"
+							title={t("browser.deviceLabel")}
+						>
+							{deviceIcon}
+							<span>{t(activeDevicePreset.label as Parameters<typeof t>[0])}</span>
+						</Button>
+					</DropdownMenuTrigger>
+					<DropdownMenuContent align="end" className="min-w-[112px]">
+						{DEVICE_PRESETS.map((preset) => (
+							<DropdownMenuItem key={preset.id} className={`h-[30px] items-center gap-2 rounded-sm px-2 text-xs text-text-secondary text-left${preset.id === device ? " bg-bg-active text-[color:var(--color-accent)]" : ""}`} onClick={() => selectDevice(preset.id)}>
+								{preset.id === "mobile" ? <Smartphone size={13} /> : preset.id === "tablet" ? <Tablet size={13} /> : <span className="size-[13px] rounded-[3px] border border-current" />}
+								<span>{t(preset.label as Parameters<typeof t>[0])}</span>
+							</DropdownMenuItem>
+						))}
+					</DropdownMenuContent>
+				</DropdownMenu>
 				{props.isFullscreen ? (
 					<>
 						<Button variant="ghost" size="icon-sm" className="size-7 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-30" onClick={onMinimize} title={t("browser.minimize")}>

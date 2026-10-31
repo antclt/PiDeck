@@ -20,8 +20,8 @@ function enrollHarness() {
 	const enrolled = [];
 	const flags = { closed: 0, settings: 0, open: true };
 	let listResult = { ok: true, status: "ready", hosts: [HOST_A, HOST_UNVERIFIED, HOST_DISABLED] };
-	let enrollResult = { ok: true, status: "pending", hostId: "host-a", canonicalPath: "/srv/app" };
-	let answerResult = { ok: true, enrolled: true, projectId: "project-1" };
+	let enrollResult = { ok: true, value: { status: "pending", hostId: "host-a", canonicalPath: "/srv/app" } };
+	let answerResult = { ok: true, value: { enrolled: true, projectId: "project-1" } };
 
 	const { useRemoteProjectEnroll } = loadTsCommonJs("src/renderer/src/hooks/useRemoteProjectEnroll.ts", {
 		stubs: {
@@ -53,7 +53,7 @@ function enrollHarness() {
 						},
 						// 文件管理新增的 create 模式确认通道：本套件只测既有目录登记，但 hook 会同时订阅两条推送，
 						// 因此 harness 必须给出形状完整的 no-op（不改变任何既有断言）。
-						answerProjectCreate: async () => ({ ok: true, enrolled: false }),
+						answerProjectCreate: async () => ({ ok: true, value: { enrolled: false } }),
 						onProjectCreateConfirm: () => () => undefined,
 					},
 				},
@@ -173,7 +173,7 @@ test("拒绝确认是正常结果：回到路径态且不报错", async () => {
 	await tick();
 	const api = h.render();
 	api.setPath("/srv/app");
-	h.setAnswerResult({ ok: true, enrolled: false });
+	h.setAnswerResult({ ok: true, value: { enrolled: false } });
 	const submitted = api.submit();
 	h.pushConfirm({ requestId: "req-deny", expiresAt: Date.now() + 60_000, hostId: "host-a", label: "/srv/app", requestedPath: "/srv/app", canonicalPath: "/srv/app" });
 	await submitted;
@@ -234,7 +234,7 @@ test("IPC reject 后 busy 一定结束并可重试；回答失败保留确认态
 	assert.equal(state.busy, false);
 	assert.equal(state.errorCode, "REMOTE_ENROLL_REQUEST_FAILED");
 	// 重试成功：main 返回 pending，随后推送确认。
-	h.setEnrollResult({ ok: true, status: "pending", hostId: "host-a", canonicalPath: "/srv/app" });
+	h.setEnrollResult({ ok: true, value: { status: "pending", hostId: "host-a", canonicalPath: "/srv/app" } });
 	const retry = h.render().submit();
 	h.pushConfirm({ requestId: "req-9", expiresAt: Date.now() + 60_000, hostId: "host-a", label: "/srv/app", requestedPath: "/srv/app", canonicalPath: "/srv/app" });
 	await retry;
@@ -246,7 +246,7 @@ test("IPC reject 后 busy 一定结束并可重试；回答失败保留确认态
 	assert.equal(state.busy, false);
 	assert.equal(state.errorCode, "REMOTE_ENROLL_REQUEST_FAILED");
 	assert.equal(state.request.requestId, "req-9");
-	h.setAnswerResult({ ok: true, enrolled: true, projectId: "project-2" });
+	h.setAnswerResult({ ok: true, value: { enrolled: true, projectId: "project-2" } });
 	await h.render().answer("approve");
 	assert.equal(h.render().state.stage, "enrolled");
 });

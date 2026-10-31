@@ -37,6 +37,8 @@ export type RemoteExtensionDeploymentInput = {
 	readonly client: SshClientRuntime;
 	readonly launcher: SshProcessLauncher;
 	readonly snapshot: RemoteExtensionSnapshotInput;
+	/** Cancels this deployment attempt (same semantics as the helper bootstrap). */
+	readonly signal?: AbortSignal;
 };
 
 const HOST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -86,7 +88,16 @@ async function stageSnapshotFiles(snapshot: RemoteExtensionSnapshotInput): Promi
 }
 
 /** 上传 + finalize；只允许 target=extensions，避免调用方拿错目录写进去。 */
-async function deployStagedExtensionSnapshot(input: { connection: Parameters<typeof deployPreparedBundle>[0]["connection"]; ready: BootstrapReadyFrame; launcher: SshProcessLauncher; session: BootstrapSession; hostId: string; generation: number; snapshot: RemoteExtensionSnapshotInput }): Promise<PreparedBundleResult> {
+async function deployStagedExtensionSnapshot(input: {
+	connection: Parameters<typeof deployPreparedBundle>[0]["connection"];
+	ready: BootstrapReadyFrame;
+	launcher: SshProcessLauncher;
+	session: BootstrapSession;
+	hostId: string;
+	generation: number;
+	snapshot: RemoteExtensionSnapshotInput;
+	signal?: AbortSignal;
+}): Promise<PreparedBundleResult> {
 	const staged = await stageSnapshotFiles(input.snapshot);
 	try {
 		return await deployPreparedBundle({
@@ -99,6 +110,7 @@ async function deployStagedExtensionSnapshot(input: { connection: Parameters<typ
 			target: "extensions",
 			directory: staged.directory,
 			names: [...input.snapshot.names],
+			...(input.signal === undefined ? {} : { signal: input.signal }),
 		});
 	} finally {
 		await rm(staged.directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }).catch(() => undefined);
@@ -130,7 +142,8 @@ export async function deployRemoteExtensionSnapshot(input: RemoteExtensionDeploy
 		sshConnection,
 		scpConnection,
 		launcher: input.launcher,
-		deploy: (session, ready) => deployStagedExtensionSnapshot({ connection: scpConnection, ready, launcher: input.launcher, session, hostId: input.hostId, generation: input.generation, snapshot: input.snapshot }),
+		...(input.signal === undefined ? {} : { signal: input.signal }),
+		deploy: (session, ready) => deployStagedExtensionSnapshot({ connection: scpConnection, ready, launcher: input.launcher, session, hostId: input.hostId, generation: input.generation, snapshot: input.snapshot, ...(input.signal === undefined ? {} : { signal: input.signal }) }),
 	});
 }
 

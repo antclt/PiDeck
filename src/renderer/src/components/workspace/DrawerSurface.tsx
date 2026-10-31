@@ -1,5 +1,6 @@
 import { RemoteProjectPanel } from "../session/RemoteProjectPanel";
 import { isRemoteProject } from "../../../../shared/projectLocation";
+import { projectSupportsContentSearch } from "../../utils/fileSearchCapability";
 import { BrowserSurface } from "./BrowserSurface";
 import { GitDrawerHost, type GitDrawerApi } from "./GitDrawerHost";
 import { RemoteGitPanel } from "./RemoteGitPanel";
@@ -126,6 +127,10 @@ export interface DrawerSurfaceProps {
 
 export function DrawerSurface(props: DrawerSurfaceProps) {
 	const { drawer, drawerCollapsed, git, chrome, browser, files, rpcLog, scratchPad, branchTree, sideTask } = props;
+	// 文件抽屉的内容搜索能力按「文件面板所属项目」判定（projectId 的持有者是 git.activeProjectId）；
+	// 远端/WSL 不支持内容检索，由 WorkspaceSurface 下传给搜索 hook 与结果面板，避免无效 IPC。
+	const fileDrawerProject = files.activeProject !== undefined && files.activeProject.id === git.activeProjectId ? files.activeProject : files.projects?.find((project) => project.id === git.activeProjectId);
+	const contentSearchSupported = projectSupportsContentSearch(fileDrawerProject);
 
 	return (
 		<>
@@ -211,6 +216,7 @@ export function DrawerSurface(props: DrawerSurfaceProps) {
 						panel={drawer}
 						project={drawer === "sessions" ? files.sessionsProject : undefined}
 						projectId={git.activeProjectId}
+						contentSearchSupported={contentSearchSupported}
 						files={files.files}
 						fileTreeContentRevision={files.fileTreeContentRevision}
 						sessions={

@@ -11,8 +11,11 @@ export const FILE_SEARCH_DEBOUNCE_MS = 250;
 /** 内容检索的最小查询词长度：单字符几乎命中所有文件，扫盘纯噪音（与跨会话正文搜索口径一致）。 */
 export const FILE_CONTENT_SEARCH_MIN_QUERY_LENGTH = 2;
 
-export function useFileSearch(options: { projectId?: string }) {
+export function useFileSearch(options: { projectId?: string; contentSearchSupported?: boolean }) {
 	const { projectId } = options;
+	// 内容检索能力由调用点按项目位置传入（见 utils/fileSearchCapability）：
+	// 缺省 true 保持本机项目既有行为；远端/WSL 显式 false 时不发 IPC、不进入内容 loading。
+	const contentSearchSupported = options.contentSearchSupported !== false;
 	const [query, setQuery] = useState("");
 	const [results, setResults] = useState<FileSearchResult[] | null>(null);
 	const [isSearching, setIsSearching] = useState(false);
@@ -44,7 +47,7 @@ export function useFileSearch(options: { projectId?: string }) {
 			setIsSearching(true);
 			// 内容检索与名字检索并行（同一防抖窗口、同一代次）：
 			// 名字结果不参与前缀快照过滤的是内容那一份，内容只认最新请求，迟到结果直接丢弃。
-			const contentEnabled = trimmed.length >= FILE_CONTENT_SEARCH_MIN_QUERY_LENGTH;
+			const contentEnabled = trimmed.length >= FILE_CONTENT_SEARCH_MIN_QUERY_LENGTH && contentSearchSupported;
 			if (contentEnabled) setIsContentSearching(true);
 			else {
 				setContentResults(null);
@@ -76,8 +79,17 @@ export function useFileSearch(options: { projectId?: string }) {
 				if (seq === requestSeqRef.current) setIsSearching(false);
 			}
 		},
-		[projectId],
+		[projectId, contentSearchSupported],
 	);
+
+	// 能力关闭（切到远端/WSL 项目）时立刻清掉上一位置的内容态：既不能把旧命中带进
+	// 不支持的抽屉，也不能让在途内容请求的迟到回包再写回来（代次在此作废）。
+	useEffect(() => {
+		if (contentSearchSupported) return;
+		requestSeqRef.current += 1;
+		setContentResults(null);
+		setIsContentSearching(false);
+	}, [contentSearchSupported, projectId]);
 
 	// 防抖：停止输入 250ms 才发起扫描；切项目立即清态（旧项目的查询对新项目无意义）。
 	useEffect(() => {

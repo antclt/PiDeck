@@ -61,9 +61,9 @@ test("三处同步：shared 定义通道名、main 注册同一批 handler、pre
 test("门禁关闭 / 未装配：三条通道都返回稳定码，不暴露「有这条路」", async () => {
 	for (const input of [{ enabled: false, trust: () => createService() }, { enabled: true }]) {
 		const handlers = createIpc(input);
-		assert.deepEqual(plain(await handlers.get(ipcChannels.remoteTrustList)()), { ok: false, code: "REMOTE_FEATURE_DISABLED" });
-		assert.deepEqual(plain(await handlers.get(ipcChannels.remoteTrustSet)(undefined, HOST_ID, ROOT, "approve")), { ok: false, code: "REMOTE_FEATURE_DISABLED" });
-		assert.deepEqual(plain(await handlers.get(ipcChannels.remoteTrustClear)(undefined, HOST_ID, ROOT)), { ok: false, code: "REMOTE_FEATURE_DISABLED" });
+		assert.deepEqual(plain(await handlers.get(ipcChannels.remoteTrustList)()), fail("REMOTE_FEATURE_DISABLED"));
+		assert.deepEqual(plain(await handlers.get(ipcChannels.remoteTrustSet)(undefined, HOST_ID, ROOT, "approve")), fail("REMOTE_FEATURE_DISABLED"));
+		assert.deepEqual(plain(await handlers.get(ipcChannels.remoteTrustClear)(undefined, HOST_ID, ROOT)), fail("REMOTE_FEATURE_DISABLED"));
 	}
 });
 
@@ -72,13 +72,13 @@ test("set 的入参在边界第一行校验：hostId / 项目根 / 决策各有�
 	const handlers = createIpc({ enabled: true, trust: () => service });
 	const set = handlers.get(ipcChannels.remoteTrustSet);
 
-	assert.deepEqual(plain(await set(undefined, "not-a-host-id", ROOT, "approve")), { ok: false, code: "REMOTE_PROJECT_TRUST_HOST_INVALID" });
-	assert.deepEqual(plain(await set(undefined, undefined, ROOT, "approve")), { ok: false, code: "REMOTE_PROJECT_TRUST_HOST_INVALID" });
+	assert.deepEqual(plain(await set(undefined, "not-a-host-id", ROOT, "approve")), fail("REMOTE_PROJECT_TRUST_HOST_INVALID"));
+	assert.deepEqual(plain(await set(undefined, undefined, ROOT, "approve")), fail("REMOTE_PROJECT_TRUST_HOST_INVALID"));
 	for (const badRoot of ["srv/app", "/srv/app\nrm -rf /", "", "/" + "a".repeat(5000), 42, null]) {
-		assert.deepEqual(plain(await set(undefined, HOST_ID, badRoot, "approve")), { ok: false, code: "REMOTE_PROJECT_TRUST_ROOT_INVALID" }, `非法项目根必须被边界拒绝：${String(badRoot).slice(0, 24)}`);
+		assert.deepEqual(plain(await set(undefined, HOST_ID, badRoot, "approve")), fail("REMOTE_PROJECT_TRUST_ROOT_INVALID"), `非法项目根必须被边界拒绝：${String(badRoot).slice(0, 24)}`);
 	}
 	for (const badDecision of ["maybe", "trust", "", undefined, true]) {
-		assert.deepEqual(plain(await set(undefined, HOST_ID, ROOT, badDecision)), { ok: false, code: "REMOTE_PROJECT_TRUST_DECISION_INVALID" });
+		assert.deepEqual(plain(await set(undefined, HOST_ID, ROOT, badDecision)), fail("REMOTE_PROJECT_TRUST_DECISION_INVALID"));
 	}
 	assert.deepEqual(plain(service.calls.decide), [], "非法入参一律不得到达 service");
 });
@@ -88,22 +88,23 @@ test("set/clear 合法入参：原样交给 service，结果透传；clear 的 r
 	const handlers = createIpc({ enabled: true, trust: () => service });
 
 	const setResult = await handlers.get(ipcChannels.remoteTrustSet)(undefined, HOST_ID, ROOT, "deny");
-	assert.deepEqual(plain(setResult), { ok: true, entry: { hostId: HOST_ID, hostLabel: "Build box", canonicalRoot: ROOT, decision: "deny", decidedAt: "2026-10-01T00:00:00.000Z", status: "active" } });
+	// v5 单信封：成功载荷进 value。
+	assert.deepEqual(plain(setResult), { ok: true, value: { entry: { hostId: HOST_ID, hostLabel: "Build box", canonicalRoot: ROOT, decision: "deny", decidedAt: "2026-10-01T00:00:00.000Z", status: "active" } } });
 	assert.deepEqual(plain(service.calls.decide), [{ hostId: HOST_ID, remoteRoot: ROOT, decision: "deny" }], "handler 不改写也不补默认值（规范化在主进程 trust 域里做）");
 
 	const clearResult = await handlers.get(ipcChannels.remoteTrustClear)(undefined, HOST_ID, ROOT);
-	assert.deepEqual(plain(clearResult), { ok: true, removed: true });
+	assert.deepEqual(plain(clearResult), { ok: true, value: { removed: true } });
 	assert.deepEqual(plain(service.calls.revoke), [{ hostId: HOST_ID, remoteRoot: ROOT }]);
 	// 入参不合法时同样不得到达 service。
-	assert.deepEqual(plain(await handlers.get(ipcChannels.remoteTrustClear)(undefined, HOST_ID, "relative/path")), { ok: false, code: "REMOTE_PROJECT_TRUST_ROOT_INVALID" });
+	assert.deepEqual(plain(await handlers.get(ipcChannels.remoteTrustClear)(undefined, HOST_ID, "relative/path")), fail("REMOTE_PROJECT_TRUST_ROOT_INVALID"));
 });
 
 test("错误折叠：域内稳定码原样透出，自由文本一律折叠成不可用（不把内部措辞带出去）", async () => {
 	const domainCode = createIpc({ enabled: true, trust: () => createService({ decideError: new Error("REMOTE_PROJECT_TRUST_ENDPOINT_UNVERIFIED") }) });
-	assert.deepEqual(plain(await domainCode.get(ipcChannels.remoteTrustSet)(undefined, HOST_ID, ROOT, "approve")), { ok: false, code: "REMOTE_PROJECT_TRUST_ENDPOINT_UNVERIFIED" });
+	assert.deepEqual(plain(await domainCode.get(ipcChannels.remoteTrustSet)(undefined, HOST_ID, ROOT, "approve")), fail("REMOTE_PROJECT_TRUST_ENDPOINT_UNVERIFIED"));
 
 	const freeText = createIpc({ enabled: true, trust: () => createService({ decideError: new Error("EPERM: /home/user/.config/pideck/settings.json is busy") }) });
-	assert.deepEqual(plain(await freeText.get(ipcChannels.remoteTrustSet)(undefined, HOST_ID, ROOT, "approve")), { ok: false, code: "REMOTE_PROJECT_TRUST_UNAVAILABLE" });
+	assert.deepEqual(plain(await freeText.get(ipcChannels.remoteTrustSet)(undefined, HOST_ID, ROOT, "approve")), fail("REMOTE_PROJECT_TRUST_UNAVAILABLE"));
 
 	const listFailure = createIpc({
 		enabled: true,
@@ -115,8 +116,13 @@ test("错误折叠：域内稳定码原样透出，自由文本一律折叠成�
 			revoke: async () => false,
 		}),
 	});
-	assert.deepEqual(plain(await listFailure.get(ipcChannels.remoteTrustList)()), { ok: false, code: "REMOTE_PROJECT_TRUST_UNAVAILABLE" });
+	assert.deepEqual(plain(await listFailure.get(ipcChannels.remoteTrustList)()), fail("REMOTE_PROJECT_TRUST_UNAVAILABLE"));
 });
+
+/** 失败信封的完整期望形状：code 之外还必须有 outcome（单信封契约）。 */
+function fail(code) {
+	return { ok: false, code, outcome: "rejected" };
+}
 
 /** 沙箱里造的对象的原型与测试文件不同：比较前复制成本地值。 */
 function plain(value) {

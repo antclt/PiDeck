@@ -1,7 +1,7 @@
 import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import { join } from "node:path";
-import { buildVerifiedSshArgv, type VerifiedSshArgvInput, type VerifiedSshCommandKind } from "./SshCommandBuilder";
+import { buildVerifiedSshArgv, type SshDraftRoute, type VerifiedSshArgvInput, type VerifiedSshCommandKind } from "./SshCommandBuilder";
 import { runSshClientSelfCheck, type SshClientRuntime } from "./SshClientRuntime";
 import { assertNoForwardedEnvironment, querySshDraftRoute } from "./SshHostVerifier";
 import { SshHostPinStore } from "./SshHostPinStore";
@@ -9,7 +9,7 @@ import { RemoteHostStore, type RemoteHostStoreState } from "./RemoteHostStore";
 import { buildBootstrapCommand, type BootstrapCommandInput } from "./RemoteBootstrapContract";
 import { REMOTE_HELPER_MAX_REMOTE_COMMAND_LENGTH } from "./RemoteHelperContract";
 import type { RemoteHostProfile } from "./RemoteHostStoreCodec";
-import { parseSshResolvedRoute, sshRouteDigest } from "./SshRouteDigest";
+import { parseSshResolvedRoute, sshRouteDigest, type SshResolvedRoute } from "./SshRouteDigest";
 
 export type PinnedSshInvocation = {
 	/** Absolute path resolved by the runtime context; never a bare name that PATH could redirect. */
@@ -50,7 +50,7 @@ function assertSavedRoute(hostName: string, user: string, port: number, routeDig
 	if (hostName !== expected.verifiedEndpoint.hostName || user !== expected.verifiedEndpoint.user || port !== expected.verifiedEndpoint.port || routeDigest !== expected.verifiedEndpoint.routeDigest) throw new Error("SSH_HOST_ROUTE_CHANGED");
 }
 
-function assertStrictConfig(stdout: string, target: VerifiedSshArgvInput): void {
+function assertStrictConfig(stdout: string, target: VerifiedSshArgvInput, password: boolean): void {
 	assertNoForwardedEnvironment(stdout);
 	const values = new Map<string, string[]>();
 	for (const rawLine of stdout.split(/\r?\n/)) {
@@ -90,8 +90,8 @@ function assertStrictConfig(stdout: string, target: VerifiedSshArgvInput): void 
 	requireBoolean("verifyhostkeydns", false);
 	// OpenSSH omits disabled UpdateHostKeys from -G on Debian, but prints it when enabled.
 	if (values.has("updatehostkeys")) requireBoolean("updatehostkeys", false);
-	requireBoolean("batchmode", true);
-	requireOne("numberofpasswordprompts", "0");
+	requireBoolean("batchmode", !password);
+	requireOne("numberofpasswordprompts", password ? "1" : "0");
 	requireOne("connecttimeout", String(Math.ceil(target.connectTimeoutMs / 1000)));
 	requireOne("connectionattempts", "1");
 	requireOne("serveraliveinterval", "15");
@@ -125,8 +125,39 @@ async function assertReadableIdentity(filePath?: string): Promise<void> {
 	}
 }
 
+/**
+ * One connect builds several pinned invocations in a burst (shell probe, Node probe, bootstrap, helper),
+ * and each used to pay its own alias `ssh -G`. That query is the one check the strict query cannot replace:
+ * the strict argv forces HostName/User/Port, so only the alias's own resolution can report
+ * SSH_HOST_ROUTE_CHANGED when the alias is retargeted.
+ *
+ * Caching it is still safe because the query never decides where the connection goes: every invocation pins
+ * the verified endpoint explicitly, so a stale entry can only delay that diagnostic, never redirect a
+ * connection. The strict query stays per invocation for the same reason it exists: it proves the exact argv
+ * this process is about to run. The TTL bounds how long a config edit can go unreported.
+ */
+const CANDIDATE_ROUTE_TTL_MS = 10_000;
+const CANDIDATE_ROUTE_CACHE_LIMIT = 8;
+const candidateRoutes = new WeakMap<SshClientRuntime, Map<string, { at: number; route: SshResolvedRoute }>>();
+
+async function cachedCandidateRoute(route: SshDraftRoute, pinAlias: string, client: SshClientRuntime): Promise<SshResolvedRoute> {
+	const key = JSON.stringify([route.sshHost, route.user ?? null, route.port ?? null, route.proxyJump ?? null, pinAlias]);
+	let entries = candidateRoutes.get(client);
+	if (entries === undefined) {
+		entries = new Map();
+		candidateRoutes.set(client, entries);
+	}
+	const now = Date.now();
+	const cached = entries.get(key);
+	if (cached !== undefined && now - cached.at < CANDIDATE_ROUTE_TTL_MS) return cached.route;
+	const resolved = await querySshDraftRoute(route, pinAlias, { client });
+	if (entries.size >= CANDIDATE_ROUTE_CACHE_LIMIT) entries.clear();
+	entries.set(key, { at: now, route: resolved });
+	return resolved;
+}
+
 /** Build argv after fresh route/pin checks through the caller's client; ssh -G can evaluate Match exec or DNS. */
-export async function buildPinnedSshInvocation(userDataDir: string, hostId: string, kind: VerifiedSshCommandKind, options: { client: SshClientRuntime; remoteCommand?: string; bootstrap?: BootstrapCommandInput }): Promise<PinnedSshInvocation> {
+export async function buildPinnedSshInvocation(userDataDir: string, hostId: string, kind: VerifiedSshCommandKind, options: { client: SshClientRuntime; remoteCommand?: string; bootstrap?: BootstrapCommandInput; password?: boolean }): Promise<PinnedSshInvocation> {
 	if (typeof options?.client?.run !== "function" || typeof options.client.sshPath !== "string") throw new Error("SSH_HOST_CLIENT_CONTEXT_REQUIRED");
 	const client = options.client;
 	await assertNoPendingHostRebind(userDataDir);
@@ -147,19 +178,25 @@ export async function buildPinnedSshInvocation(userDataDir: string, hostId: stri
 		...(profile.proxyJump !== undefined ? { proxyJump: profile.proxyJump } : {}),
 		...(profile.identityFile !== undefined ? { identityFile: profile.identityFile } : {}),
 	};
-	const requestedArgs = buildVerifiedSshArgv(target, kind);
+	// A client that carries an askpass bridge must run interactively, otherwise the bridge is never asked.
+	// Which method the prompt belongs to is decided by the profile: password hosts narrow authentication to
+	// `password`, key hosts keep publickey (the bridge only answers the key's passphrase prompt).
+	const bridged = typeof options.client.env.SSH_ASKPASS === "string";
+	const password = options.password === true || (bridged && profile.authMethod === "password");
+	const passphrase = !password && bridged;
+	const requestedArgs = buildVerifiedSshArgv(target, kind, password || passphrase ? { ...(password ? { password: true } : {}), ...(passphrase ? { passphrase: true } : {}) } : {});
 	// The helper command is the one argv element a remote shell will parse; it stays optional so a plain
 	// preflight keeps producing exactly the argv earlier batches shipped, and it is never part of the
 	// resolved-config query (that query verifies the route, not the command).
 	const remoteCommand = options.bootstrap === undefined ? readRemoteCommand(options.remoteCommand, kind) : readBootstrapCommand(options.bootstrap, options.remoteCommand, kind);
 	await assertReadableIdentity(target.identityFile);
-	const candidate = await querySshDraftRoute(profile, target.pinAlias, { client });
+	const candidate = await cachedCandidateRoute(profile, target.pinAlias, client);
 	assertSavedRoute(candidate.hostName, candidate.user, candidate.port, sshRouteDigest(candidate), profile);
 	const strictArgs = kind === "scp" ? ["-G", ...requestedArgs, "--", target.sshHost] : ["-G", ...requestedArgs.slice(1)];
 	const strictQuery = await client.run(client.sshPath, strictArgs);
 	const effective = parseSshResolvedRoute(strictQuery);
 	assertSavedRoute(effective.hostName, effective.user, effective.port, sshRouteDigest(effective), profile);
-	assertStrictConfig(strictQuery.stdout, target);
+	assertStrictConfig(strictQuery.stdout, target, password || passphrase);
 	const current = (await RemoteHostStore.open(userDataDir)).getSnapshot();
 	const currentProfile = activeProfile(current, hostId);
 	if (current.revision !== initial.revision || JSON.stringify(currentProfile) !== JSON.stringify(profile)) throw new Error("SSH_HOST_NOT_READY");

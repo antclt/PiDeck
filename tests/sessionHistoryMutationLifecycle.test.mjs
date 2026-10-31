@@ -130,16 +130,15 @@ function harness(options = {}) {
 }
 
 for (const kind of ["resend", "edit"]) {
-	test(`${kind} confirmation retains the source session after focus changes`, async () => {
+	// pi 的 fork 全程不停进程、不改原文件，因此不再弹「停止后编辑」确认：入口直接开跑，
+	// 只有 focus 在 fork 完成前切走时目标会话仍须锁定发起方（旧实现会串号）。
+	test(`${kind} forks the source session immediately without confirmation`, async () => {
 		const h = harness();
 		const message = userMessage();
-		if (kind === "resend") h.hook.resendUserMessage(message);
-		else await h.hook.editMessage(message, "edited text");
-		assert.equal(h.confirmations.length, 1);
-		assert.deepEqual(h.calls, []);
-		assert.deepEqual(h.overlays, []);
+		const started = kind === "resend" ? (h.hook.resendUserMessage(message), Promise.resolve()) : h.hook.editMessage(message, "edited text");
+		assert.equal(h.confirmations.length, 0, "fork 化重发/编辑不得再弹确认");
 		h.render({ currentSessionId: "source-b" });
-		h.confirmations[0].onConfirm();
+		await started;
 		await h.flush();
 		const fork = h.calls.find(([operation]) => operation === "fork");
 		assert.deepEqual(fork, ["fork", { sessionId: "source-a", agentId: "agent-source-a", runtimeGeneration: 1 }, "entry-a", { mutationFork: true, branchMode: false }]);
@@ -155,22 +154,11 @@ for (const kind of ["resend", "edit"]) {
 			h.calls.find(([operation]) => operation === "send"),
 			["send", "fork-source-a", kind === "edit" ? "edited text" : message.text, message.images, { requireAppliedModel: true }],
 		);
-		assert.deepEqual(h.overlays, [
-			{ sessionId: "source-a", kind: kind === "edit" ? "editing" : "resending" },
-			{ sessionId: "source-a", kind: null },
-		]);
+		// 热会话不再挂全屏遮罩：只剩 finally 的清空调用（冷会话的 activating 另有覆盖）。
+		assert.deepEqual(h.overlays, [{ sessionId: "source-a", kind: null }]);
 		assert.equal(h.toasts.length, 0);
 	});
 }
-
-test("cancelling resend confirmation never activates, forks or sends", async () => {
-	const h = harness();
-	h.hook.resendUserMessage(userMessage());
-	await h.flush();
-	assert.equal(h.confirmations.length, 1);
-	assert.deepEqual(h.calls, []);
-	assert.deepEqual(h.overlays, []);
-});
 
 for (const phase of ["activate", "fork"]) {
 	test(`resend ${phase} failure is reported locally, clears overlay and remains retryable`, async () => {

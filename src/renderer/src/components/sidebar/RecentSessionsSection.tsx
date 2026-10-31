@@ -15,6 +15,7 @@ import { SessionActivityIndicator } from "../session/SessionActivityIndicator";
 import { SidebarStatusDot } from "./SidebarStatusDot";
 import { SessionHoverCard } from "./SessionHoverCard";
 import { TitleScrollText } from "./TitleScrollText";
+import { SESSION_ROW_CLASS, SESSION_ROW_SELECTED_CLASS, ROW_MORE_ACTIONS_CLASS } from "./sidebarRowStyles";
 import { SESSION_TAB_DRAG_MIME } from "../../utils/sessionSplitEdge";
 import { formatRelativeTime } from "../../utils/relativeTime";
 import { useSessionActivityAt } from "../../hooks/sidebar/useSessionActivityClock";
@@ -33,16 +34,12 @@ import type { RecentSessionRow } from "./activitySessionsModel";
  * 同一段列表里两种样式会让用户以为「最近」是另一类数据。
  */
 
-/** 与 `SessionTree.sessionRowClass` 逐字一致（history-session-row 的历史样式基座）。
- *  `tests/sidebarActivityRecent.test.mjs` 有逐字一致性断言：改这里必须同步 SessionTree。 */
-const recentRowClass =
-	"group/resource conversation agent-row relative flex min-h-8 w-full items-center gap-1.5 rounded-lg border border-transparent px-2 py-0 text-left text-body text-foreground shadow-none transition-[background-color,border-color,box-shadow] duration-base hover:border-border-subtle hover:bg-bg-hover hover:text-foreground focus-visible:bg-bg-hover focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset";
+/** 行样式基座来自 sidebarRowStyles（Wave 3 收敛，与 SessionTree 同源）；本地别名保持引用面不变。 */
+const recentRowClass = SESSION_ROW_CLASS;
 
-/** 与 `SessionTree.selectedRowClass` 逐字一致：选中底用 active 面，不用描边。 */
-const selectedRowClass = "active bg-bg-active text-foreground";
+const selectedRowClass = SESSION_ROW_SELECTED_CLASS;
 
-/** 与 `SessionTree.rowMoreActionsClass` 逐字一致：absolute 浮层，不挤压标题。 */
-const rowMoreActionsClass = "row-more-actions pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100";
+const rowMoreActionsClass = ROW_MORE_ACTIONS_CLASS;
 
 /**
  * 分页行基座：与项目页「查看更多 / 收起」（SessionTree 的 session-more-btn 组合）

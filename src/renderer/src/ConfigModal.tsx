@@ -8,16 +8,26 @@ import { cn } from "./lib/utils";
 import { WORKBENCH_DIALOG_SIZE_CLASS } from "./components/common/workbenchDialogSize";
 import { deepClone } from "./utils/deepEqual";
 import { showNotice } from "./utils/notice";
+import { formatIpcError } from "./utils/ipcError";
 import { applyAdaptiveTemplateReset, collectModelSpecPatches, deriveProviderCompat, mergeAdaptiveModelTemplate } from "./utils/modelSpecAutoFill";
 import type { FetchedModel, ConfigProxyMode } from "../../shared/types/fetchedModel";
 import { Component, forwardRef, useRef, useState, useEffect, useCallback, useImperativeHandle, useMemo, type ReactNode, type Ref } from "react";
 import type { PiDesktopApi } from "../../preload";
 import { AuthTab } from "./config/AuthTab";
-import { PiConfigTargetSelector, type PiConfigTargetHost } from "./config/PiConfigTargetSelector";
+import { PiConfigTargetSelector } from "./config/PiConfigTargetSelector";
+import { hasUnsavedConfigDrafts, samePiConfigTarget, toSshTargetHosts, toWslTargetHosts, type PiConfigTargetHost } from "./config/piConfigTargetModel";
 import { RemoteConfigPanel } from "./config/RemoteConfigPanel";
 import { REMOTE_CONFIG_UNSUPPORTED_TAB_COPY, RemoteConfigUnsupportedNotice } from "./config/RemoteConfigUnsupportedNotice";
+import { ConfigDiagnosticCard } from "./config/ConfigDiagnosticCard";
+import { WslConfigScopeNotice } from "./config/WslConfigScopeNotice";
+import { WslConfigSourceHint } from "./config/WslConfigSourceHint";
+import { usePiConfigDir } from "./config/usePiConfigDir";
+import { usePiConfigTargetView } from "./config/usePiConfigTargetView";
+import { ResourceTargetBar } from "./config/ResourceTargetBar";
+import { useConfigTransfer } from "./config/useConfigTransfer";
+import { resourceTargetErrorMessage } from "./config/resourceTargetErrorCopy";
+import { useResourceTarget } from "./config/useResourceTarget";
 import type { PiConfigTarget } from "../../shared/piConfig";
-import type { RemoteHostListItem } from "../../shared/types/remoteHost";
 import { buildProviderOrderScope } from "./utils/providerOrder";
 import { ModelsTab } from "./config/ModelsTab";
 import { TokenDancePanel, type TokendanceInstallOutcome } from "./config/TokenDancePanel";
@@ -155,41 +165,6 @@ function modelIdIndex(providers: ModelsFile["providers"]): ProviderModelIdIndex 
 	return new Map(Object.entries(providers).map(([name, provider]) => [name, new Set(provider.models.map((model) => model.id).filter(Boolean))] as const));
 }
 
-function ConfigDiagnosticCard(props: { diagnostic: ConfigFileDiagnostic; onOpenDocs: () => void; onOpenRaw: () => void }) {
-	const { diagnostic } = props;
-	return (
-		<div className="config-diagnostic-card">
-			<div>
-				<strong>{t("config.diagnosticLoadFailed", { fileName: diagnostic.fileName })}</strong>
-				<span>
-					{diagnostic.line && diagnostic.column
-						? t("config.diagnosticLocation", {
-								line: diagnostic.line,
-								column: diagnostic.column,
-								message: diagnostic.message,
-							})
-						: diagnostic.message}
-				</span>
-				<small>
-					{t("config.diagnosticHelp")}{" "}
-					<a href={diagnostic.docsUrl} onClick={openDocsInSystemBrowser(diagnostic.docsUrl)}>
-						{t("config.openOfficialDocs")}
-					</a>
-				</small>
-			</div>
-			{diagnostic.snippet && <pre>{diagnostic.snippet}</pre>}
-			<div className="config-diagnostic-actions">
-				<Button size="sm" variant="default" onClick={props.onOpenRaw}>
-					{t("config.openRawFile")}
-				</Button>
-				<Button size="sm" variant="outline" onClick={props.onOpenDocs}>
-					{t("config.openOfficialDocs")}
-				</Button>
-			</div>
-		</div>
-	);
-}
-
 type ConfigModalProps = {
 	open: boolean;
 	onClose: () => void;
@@ -229,6 +204,8 @@ export type ConfigPaneHandle = {
 export type ConfigPaneState = {
 	saving: boolean;
 	hasDirty: boolean;
+	/** 非本机目标（WSL/ssh）禁用配置导出/导入：外壳按钮据此置灰（handler 侧同样拒绝）。 */
+	exportImportAllowed: boolean;
 	/** 未保存清单（tabKey/itemKey 为 i18n key，关闭确认整体展示）。 */
 	unsaved: { totalCount: number; items: ConfigUnsavedItem[] };
 };
@@ -491,7 +468,11 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const [pendingTargetSwitch, setPendingTargetSwitch] = useState<PiConfigTarget | null>(null);
 	const [remoteDiscardConfirmOpen, setRemoteDiscardConfirmOpen] = useState(false);
 	const remoteTargetHostId = configTarget.kind === "ssh" ? configTarget.hostId : null;
-	const remoteHostLabel = remoteTargetHostId ? remoteConfigHosts.find((host) => host.id === remoteTargetHostId)?.label : undefined;
+	const remoteHostLabel = remoteTargetHostId ? remoteConfigHosts.find((host) => host.kind === "ssh" && host.id === remoteTargetHostId)?.label : undefined;
+	// 目标视图派生：WSL 档案（来源提示/未接入页说明）、本地编辑器 target 选项、provider 探针门禁。
+	const { wslHost: wslTargetHost, option: configTargetOption, guardProviderOp } = usePiConfigTargetView(remoteConfigHosts, configTarget);
+	// 资源三页（技能/提示词/扩展）的目标视图：本机/WSL 档案选择、IPC options、本轮只读门禁（W1）。
+	const { resourceTarget, setResourceTarget, targetHosts: resourceTargetHosts, options: resourceOptions, readOnly: resourceTargetReadOnly, blockMutation: blockResourceMutation } = useResourceTarget(remoteConfigHosts, resourceScope);
 	const hasDirty = dirtyTabs.size > 0;
 	// DSH/Pi 顶层分页与 DSH 左侧导航的黄点来源：dsh:<nav> 归 DSH，其余归 Pi
 	const dshDirtyNavIds = useMemo(() => {
@@ -612,7 +593,6 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	/** 待切换的源文件名：当前文件有未保存草稿时先弹确认，确认丢弃后才真正切换。 */
 	const [pendingRawFile, setPendingRawFile] = useState<string | null>(null);
 	// pi 全局配置目录（源文件页标注实际编辑位置）；加载失败时静默降级不显示路径。
-	const [piConfigDir, setPiConfigDir] = useState<string | null>(null);
 
 	// ── Pi 配置数据基准快照：脏检测改为「当前数据 vs 基准」真实差异，改回原值自动摘掉脏标记 ──
 	// 仅在 loadConfig 真正覆盖内存数据时同步更新；被 preserve（脏草稿保留）时不动基准，脏标记保持。
@@ -864,25 +844,35 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					// modelThinkingLevels（与全局默认档位同一条写入链路）。
 					// settings 读失败只降级（本页主数据是 models.json），settingsLoaded 保持 false
 					// 让编辑入口不渲染，避免空对象被当成磁盘内容保存。
-					const [res, settingsRes] = await Promise.all([api.config.getModels(), api.config.getSettings().catch(() => null)]);
-					if (!skipModels) {
-						const parsed = normalizeModelsFile(res.parsed);
-						setModelsData(parsed);
-						baselineModelsRef.current = deepClone(parsed);
-					}
-					if (settingsRes) {
-						if (!skipSettings) {
-							setSettingsData(settingsRes.parsed as SettingsFile);
-							baselineSettingsRef.current = deepClone(settingsRes.parsed as SettingsFile);
+					/** models 页数据落内存：本机与 WSL 目标共用同一条路径（settings 读失败只降级，settingsLoaded 保持 false）。 */
+					const applyModelsTab = (res: Awaited<ReturnType<typeof api.config.getModels>>, settingsRes: Awaited<ReturnType<typeof api.config.getSettings>> | null) => {
+						if (!skipModels) {
+							const parsed = normalizeModelsFile(res.parsed);
+							setModelsData(parsed);
+							baselineModelsRef.current = deepClone(parsed);
 						}
-						setSettingsLoaded(true);
+						if (settingsRes) {
+							if (!skipSettings) {
+								setSettingsData(settingsRes.parsed as SettingsFile);
+								baselineSettingsRef.current = deepClone(settingsRes.parsed as SettingsFile);
+							}
+							setSettingsLoaded(true);
+						}
+						if (!skipRaw) {
+							setRawContent(res.raw);
+							setRawFileName("models.json");
+							baselineRawRef.current = { fileName: "models.json", content: res.raw };
+						}
+						setConfigDiagnostic(res.diagnostic ?? null);
+					};
+					if (configTargetOption) {
+						// WSL 目标：读该档案的发行版 HOME（只有 models/settings 两个文件，auth/trust 属于 Windows 作用域）。
+						const [res, settingsRes] = await Promise.all([api.config.getModels(configTargetOption), api.config.getSettings(configTargetOption).catch(() => null)]);
+						applyModelsTab(res, settingsRes);
+					} else {
+						const [res, settingsRes] = await Promise.all([api.config.getModels(), api.config.getSettings().catch(() => null)]);
+						applyModelsTab(res, settingsRes);
 					}
-					if (!skipRaw) {
-						setRawContent(res.raw);
-						setRawFileName("models.json");
-						baselineRawRef.current = { fileName: "models.json", content: res.raw };
-					}
-					setConfigDiagnostic(res.diagnostic ?? null);
 				} else if (target === "auth") {
 					const res = await api.config.getAuth();
 					if (!skipAuth) {
@@ -896,14 +886,15 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					}
 					setConfigDiagnostic(res.diagnostic ?? null);
 				} else if (target === "settings") {
-					// 同时加载 settings、auth 和 models 数据，确保 defaultProvider / defaultModel 下拉能聚合所有可用信息
-					const [settingsRes, authRes, modelsRes] = await Promise.all([api.config.getSettings(), api.config.getAuth(), api.config.getModels()]);
+					// 同时加载 settings、auth 和 models 数据，确保 defaultProvider / defaultModel 下拉能聚合所有可用信息。
+					// 非本机目标（WSL）只有 models/settings 两个文件：auth 属于 Windows HOME，不能读进来冒充目标环境。
+					const [settingsRes, authRes, modelsRes] = await Promise.all([api.config.getSettings(configTargetOption), configTargetOption ? null : api.config.getAuth(), api.config.getModels(configTargetOption)]);
 					if (!skipSettings) {
 						setSettingsData(settingsRes.parsed as SettingsFile);
 						baselineSettingsRef.current = deepClone(settingsRes.parsed as SettingsFile);
 					}
 					setSettingsLoaded(true);
-					if (!skipAuth) {
+					if (!skipAuth && authRes) {
 						setAuthData(authRes.parsed as AuthFile);
 						baselineAuthRef.current = deepClone(authRes.parsed as AuthFile);
 					}
@@ -919,8 +910,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					}
 					setConfigDiagnostic(settingsRes.diagnostic ?? null);
 
-					// 对于 auth 中有但 models 中没有模型的供应商，自动尝试获取模型列表
-					const authProviders = authRes.parsed as AuthFile;
+					// 对于 auth 中有但 models 中没有模型的供应商，自动尝试获取模型列表（非本机目标没有 auth，因此不发探针）
+					const authProviders: AuthFile = authRes ? (authRes.parsed as AuthFile) : {};
 					const modelsProviders = normalizeModelsFile(modelsRes.parsed).providers;
 					const discovered: Record<string, Array<{ id: string; name?: string }>> = {};
 					const fetchPromises: Array<Promise<void>> = [];
@@ -1020,7 +1011,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 				setLoading(false);
 			}
 		},
-		[tab, clearDirty, applySuggestedBaseUrl],
+		[tab, clearDirty, applySuggestedBaseUrl, configTargetOption],
 	);
 
 	useEffect(() => {
@@ -1032,32 +1023,16 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		return () => window.removeEventListener("pideck:provider-migrated", onMigrated);
 	}, [open, loadConfig]);
 
-	useEffect(() => {
-		if (!open) return;
-		let cancelled = false;
-		void api.config
-			.getConfigDir()
-			.then((dir) => {
-				if (!cancelled) setPiConfigDir(dir);
-			})
-			.catch(() => {
-				// 获取失败不影响源文件编辑，仅不展示路径
-			});
-		return () => {
-			cancelled = true;
-		};
-	}, [open]);
+	const piConfigDir = usePiConfigDir(open);
 
-	// 远端配置目标选择器（Batch B）：只列出已验证且未禁用的主机；列表失败时仍保留「本机」，不阻塞本机配置。
+	// 配置目标选择器（Batch B + WS2）：ssh 只列已验证且未禁用的主机，WSL 列全部连接档案；两边失败都保留「本机」。
 	useEffect(() => {
 		if (!open) return;
 		let cancelled = false;
-		void api.remoteHosts
-			.list()
-			.then((result) => {
+		void Promise.all([api.remoteHosts.list(), api.remoteHosts.listWslHosts()])
+			.then(([sshResult, wslResult]) => {
 				if (cancelled) return;
-				const hosts: RemoteHostListItem[] = result.ok ? result.hosts : [];
-				setRemoteConfigHosts(hosts.filter((host) => host.verified && !host.disabled).map((host) => ({ id: host.id, label: host.label, sshHost: host.sshHost })));
+				setRemoteConfigHosts([...toSshTargetHosts(sshResult.ok ? sshResult.hosts.filter((host) => host.verified && !host.disabled) : []), ...toWslTargetHosts(wslResult.ok ? wslResult.hosts : [])]);
 			})
 			.catch(() => {
 				if (!cancelled) setRemoteConfigHosts([]);
@@ -1072,11 +1047,11 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		if (!open) return;
 		bumpResourceGeneration();
 		if (section === "skills") {
-			void refreshSkills();
+			void refreshSkills().catch((e) => setError(resourceTargetErrorMessage(e)));
 			return;
 		}
 		if (section === "prompts") {
-			void refreshPrompts();
+			void refreshPrompts().catch((e) => setError(resourceTargetErrorMessage(e)));
 			return;
 		}
 		if (section === "extensions") {
@@ -1088,16 +1063,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		void loadConfig(tab);
 	}, [open, section, tab, loadConfig, resourceScope, effectiveProjectId, bumpResourceGeneration]);
 
-	const showToast = (msg: string) => {
-		showNotice(msg, 2500);
-	};
-
-	/** 去掉 Electron IPC 包装前缀，只保留真正业务错误，方便 toast 阅读。 */
-	const formatIpcError = (error: unknown): string => {
-		const raw = error instanceof Error ? error.message : String(error);
-		const matched = raw.match(/Error invoking remote method '[^']+':\s*(?:Error:\s*)?([\s\S]+)$/i);
-		return (matched?.[1] ?? raw).trim();
-	};
+	const showToast = (msg: string) => showNotice(msg, 2500);
 
 	/** 统一保存流程：写盘 → 校验 → toast；成功时清除对应 tab 的未保存标记，返回是否成功。 */
 	const saveAndReload = async (saveFn: () => Promise<{ valid: boolean; error?: string }>, successMessage?: string, dirtyKey?: string): Promise<boolean> => {
@@ -1631,7 +1597,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		setSaving(true);
 		setError(null);
 		try {
-			const result = await api.config.saveModels(prunedData);
+			const result = await api.config.saveModels(prunedData, configTargetOption);
 			if (!result.valid) {
 				setError(result.error ?? t("config.saveFailed"));
 				return false;
@@ -1645,11 +1611,10 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 			// 即时反馈：主进程已解析刚写入的 models.json（0 fork），count 是本地配置的模型数。
 			// fork 真实 pi 的完整验证在主进程后台进行（~17-21s），失败时由全局
 			// useModelsVerifyNotifier 弹 toast——保存动作本身不再被验证阻塞。
-			if (result.modelLoadOk) {
-				showToast(t("config.modelsSavedVerified", { count: result.modelCount ?? 0 }));
-			} else {
-				showNotice(t("config.modelsSavedButEmpty"), 6000, "warning");
-			}
+			// 非本机目标没有本机模型加载校验（主进程不 fork 本机 pi），只报保存成功。
+			if (result.modelLoadOk) showToast(t("config.modelsSavedVerified", { count: result.modelCount ?? 0 }));
+			else if (configTargetOption) showToast(t("config.saved"));
+			else showNotice(t("config.modelsSavedButEmpty"), 6000, "warning");
 			await loadConfig("models", { force: true });
 			return true;
 		} catch (e) {
@@ -1780,7 +1745,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 
 	const handleSaveSettings = async (): Promise<boolean> => {
 		const pruned = pruneProviderThinkingLevelOrphans();
-		const ok = await saveAndReload(() => api.config.saveSettings(pruned), undefined, "config:settings");
+		const ok = await saveAndReload(() => api.config.saveSettings(pruned, configTargetOption), undefined, "config:settings");
 		await loadConfig("settings", { force: true });
 		return ok;
 	};
@@ -1792,7 +1757,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	 */
 	const saveSettingsDraftOnly = async (): Promise<boolean> => {
 		const pruned = pruneProviderThinkingLevelOrphans();
-		const ok = await saveAndReload(() => api.config.saveSettings(pruned), undefined, "config:settings");
+		const ok = await saveAndReload(() => api.config.saveSettings(pruned, configTargetOption), undefined, "config:settings");
 		// 基准同步到刚写下的内容，否则脏检测（数据 vs 基准）会把刚清掉的黄点又标回来。
 		if (ok) baselineSettingsRef.current = deepClone(pruned);
 		return ok;
@@ -1811,9 +1776,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const handleSaveRaw = async (): Promise<boolean> => {
 		const isModelsFile = rawFileName === "models.json";
 		const ok = await saveAndReload(() => api.config.saveRaw(rawFileName, rawContent), isModelsFile ? t("config.modelsSaved") : undefined, "config:raw");
-		if (isModelsFile) {
-			await loadConfig("models", { force: true });
-		} else if (rawFileName === "auth.json") await loadConfig("auth", { force: true });
+		if (isModelsFile) await loadConfig("models", { force: true });
+		else if (rawFileName === "auth.json") await loadConfig("auth", { force: true });
 		else if (rawFileName === "trust.json") await loadConfig("trust", { force: true });
 		else if (rawFileName === "mcp.json") await loadConfig("mcp", { force: true });
 		else await loadConfig("settings", { force: true });
@@ -1848,23 +1812,19 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 
 	// ── 导出 / 导入 ─────────────────────────────────────
 
-	/** 将三个配置文件打包为 JSON 并触发浏览器下载。 */
-	const handleExport = async () => {
-		try {
-			const json = await api.config.export();
-			const blob = new Blob([json], { type: "application/json" });
-			const url = URL.createObjectURL(blob);
-			const a = document.createElement("a");
-			a.href = url;
-			// 文件名含时间戳，便于用户区分多次备份
-			a.download = `pideck-config-${new Date().toISOString().slice(0, 10)}.json`;
-			a.click();
-			URL.revokeObjectURL(url);
-			showToast(t("config.exported"));
-		} catch (e) {
-			setError(e instanceof Error ? e.message : String(e));
-		}
-	};
+	// 导出/导入（非本机目标显式拒绝；文件动作在 config/useConfigTransfer 内，ConfigModal 保持瘦身）。
+	const { handleExport, handleImport } = useConfigTransfer({
+		target: configTarget,
+		exportConfig: () => api.config.export(),
+		importConfig: (text) => api.config.import(text),
+		notify: showToast,
+		onError: setError,
+		onImported: onSaved,
+		clearConfigDirty: () => {
+			for (const key of ALL_CONFIG_DIRTY_KEYS) clearDirty(key);
+		},
+		reloadAfterImport: () => loadConfig(tab, { force: true }),
+	});
 
 	/**
 	 * 刷新 prompt templates 列表：project 自有数据仅在 project scope 拉取，旧响应不得覆盖新 scope 结果。
@@ -1875,7 +1835,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		const generation = resourceGenerationRef.current;
 		const projectIdHere = resourceScope === "project" ? effectiveProjectId : undefined;
 		const [globalResult, projectResult, projectResourceResult, discoveryResult] = await Promise.all([
-			api.prompts.list(),
+			api.prompts.list(resourceOptions),
 			projectIdHere && hasProject ? api.prompts.listByProject(projectIdHere) : Promise.resolve(null),
 			projectIdHere && hasProject ? api.projectResources.list(projectIdHere) : Promise.resolve(emptyProjectResourceData()),
 			api.projectResources.discovery(projectIdHere),
@@ -1897,6 +1857,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 
 	/** 创建新 prompt template */
 	const handleCreatePrompt = async () => {
+		if (blockResourceMutation("prompts:create")) return;
 		setCreatingPrompt(true);
 		setError(null);
 		try {
@@ -1906,10 +1867,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					description: newPromptDescription,
 				});
 			} else {
-				await api.prompts.create({
-					name: newPromptName,
-					description: newPromptDescription,
-				});
+				await api.prompts.create({ name: newPromptName, description: newPromptDescription }, resourceOptions);
 			}
 			setNewPromptName("");
 			setNewPromptDescription("");
@@ -1925,6 +1883,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 
 	/** 确认删除 prompt template */
 	const confirmDeletePrompt = async (target: PiPromptTemplateSummary) => {
+		if (blockResourceMutation("prompts:delete")) return;
 		setError(null);
 		if (resourceScope === "project" && !isProjectPrompt(target)) return;
 		if (target.userCreated) {
@@ -1932,7 +1891,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 				if (isProjectPrompt(target) && effectiveProjectId) {
 					await api.prompts.deleteFromProject(effectiveProjectId, target.name);
 				} else {
-					await api.prompts.delete(target.path);
+					await api.prompts.delete(target.path, resourceOptions);
 				}
 				bumpResourceGeneration();
 				await refreshPrompts();
@@ -1967,7 +1926,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		setEditPromptLoading(true);
 		setError(null);
 		try {
-			const content = isProjectPrompt(template) && effectiveProjectId ? await api.files.readContent(template.path, undefined, { projectId: effectiveProjectId }) : await api.prompts.edit(template.path);
+			const content = isProjectPrompt(template) && effectiveProjectId ? await api.files.readContent(template.path, undefined, { projectId: effectiveProjectId }) : await api.prompts.edit(template.path, undefined, resourceOptions);
 			setEditPromptContent(content as string);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -1992,15 +1951,12 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		try {
 			if (!editingPrompt.userCreated) {
 				// 内置模板：先创建用户副本，再写入编辑内容
-				const created = await api.prompts.create({
-					name: editingPrompt.name,
-					description: editingPrompt.description,
-				});
-				await api.prompts.edit(created.path, editPromptContent);
+				const created = await api.prompts.create({ name: editingPrompt.name, description: editingPrompt.description }, resourceOptions);
+				await api.prompts.edit(created.path, editPromptContent, resourceOptions);
 			} else if (isProjectPrompt(editingPrompt) && effectiveProjectId) {
 				await api.files.writeContent(editingPrompt.path, editPromptContent, { projectId: effectiveProjectId });
 			} else {
-				await api.prompts.edit(editingPrompt.path, editPromptContent);
+				await api.prompts.edit(editingPrompt.path, editPromptContent, resourceOptions);
 			}
 			clearDirty("prompts");
 			showToast(t("config.promptSavedToast"));
@@ -2018,6 +1974,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 
 	/** Ctrl+S 快速保存：保存但不关闭弹框、不弹提示 */
 	const handleRenamePrompt = async (template: PiPromptTemplateSummary, newName: string) => {
+		if (blockResourceMutation("prompts:rename")) return;
 		setError(null);
 		try {
 			if (resourceScope === "project" && !isProjectPrompt(template)) {
@@ -2028,7 +1985,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 			if (isProjectPrompt(template) && effectiveProjectId) {
 				await api.prompts.renameInProject(effectiveProjectId, template.name, newName);
 			} else {
-				await api.prompts.rename(template.name, newName);
+				await api.prompts.rename(template.name, newName, resourceOptions);
 			}
 			bumpResourceGeneration();
 			await refreshPrompts();
@@ -2039,6 +1996,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	};
 
 	const handleTogglePrompt = async (template: PiPromptTemplateSummary, enabled: boolean) => {
+		if (blockResourceMutation("prompts:toggle")) return;
 		setError(null);
 		try {
 			if (resourceScope === "project" && effectiveProjectId) {
@@ -2058,7 +2016,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					});
 				}
 			} else {
-				await api.prompts.toggle(template.path, enabled);
+				await api.prompts.toggle(template.path, enabled, resourceOptions);
 			}
 			bumpResourceGeneration();
 			await refreshPrompts();
@@ -2074,15 +2032,12 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		setError(null);
 		try {
 			if (!editingPrompt.userCreated) {
-				const created = await api.prompts.create({
-					name: editingPrompt.name,
-					description: editingPrompt.description,
-				});
-				await api.prompts.edit(created.path, editPromptContent);
+				const created = await api.prompts.create({ name: editingPrompt.name, description: editingPrompt.description }, resourceOptions);
+				await api.prompts.edit(created.path, editPromptContent, resourceOptions);
 			} else if (isProjectPrompt(editingPrompt) && effectiveProjectId) {
 				await api.files.writeContent(editingPrompt.path, editPromptContent, { projectId: effectiveProjectId });
 			} else {
-				await api.prompts.edit(editingPrompt.path, editPromptContent);
+				await api.prompts.edit(editingPrompt.path, editPromptContent, resourceOptions);
 			}
 			clearDirty("prompts");
 			await refreshPrompts();
@@ -2102,7 +2057,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	const refreshSkills = async () => {
 		const generation = resourceGenerationRef.current;
 		const projectIdHere = resourceScope === "project" ? effectiveProjectId : undefined;
-		const [globalResult, projectResult, discoveryResult] = await Promise.all([api.skills.list(), projectIdHere && hasProject ? api.projectResources.list(projectIdHere) : Promise.resolve(emptyProjectResourceData()), api.projectResources.discovery(projectIdHere)]);
+		const [globalResult, projectResult, discoveryResult] = await Promise.all([api.skills.list(resourceOptions), projectIdHere && hasProject ? api.projectResources.list(projectIdHere) : Promise.resolve(emptyProjectResourceData()), api.projectResources.discovery(projectIdHere)]);
 		if (generation !== resourceGenerationRef.current) return;
 		setDiscoveryData(discoveryResult);
 		setProjectResourcesData(projectResult);
@@ -2114,6 +2069,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	};
 
 	const handleCreateSkill = async () => {
+		if (blockResourceMutation("skills:create")) return;
 		setCreatingSkill(true);
 		setError(null);
 		try {
@@ -2126,11 +2082,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					locationId,
 				});
 			} else {
-				await api.skills.create({
-					name: newSkillName,
-					description: newSkillDescription,
-					locationId: newSkillLocationId,
-				});
+				await api.skills.create({ name: newSkillName, description: newSkillDescription, locationId: newSkillLocationId }, resourceOptions);
 			}
 			setNewSkillName("");
 			setNewSkillDescription("");
@@ -2145,6 +2097,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	};
 
 	const handleToggleSkill = async (skill: PiSkillSummary, enabled: boolean) => {
+		if (blockResourceMutation("skills:toggle")) return;
 		setError(null);
 		try {
 			if (resourceScope === "project" && effectiveProjectId) {
@@ -2165,7 +2118,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 					});
 				}
 			} else {
-				await api.skills.toggle(skill.path, enabled);
+				await api.skills.toggle(skill.path, enabled, resourceOptions);
 			}
 			bumpResourceGeneration();
 			await refreshSkills();
@@ -2176,6 +2129,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	};
 
 	const confirmDeleteSkill = async () => {
+		if (blockResourceMutation("skills:delete")) return;
 		if (!deleteSkillConfirm) return;
 		const target = deleteSkillConfirm;
 		setDeleteSkillConfirm(null);
@@ -2185,7 +2139,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 			if (resourceScope === "project" && effectiveProjectId) {
 				await api.projectResources.deleteSkill(effectiveProjectId, target.path);
 			} else {
-				await api.skills.delete(target.path);
+				await api.skills.delete(target.path, resourceOptions);
 			}
 			bumpResourceGeneration();
 			await refreshSkills();
@@ -2196,6 +2150,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	};
 
 	const handleRenameGlobalSkill = async (skill: PiSkillSummary, newName: string) => {
+		if (blockResourceMutation("skills:rename")) return;
 		setError(null);
 		try {
 			if (resourceScope === "project" && !isProjectSkill(skill)) {
@@ -2206,7 +2161,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 			if (resourceScope === "project" && isProjectSkill(skill) && effectiveProjectId) {
 				await api.projectResources.renameSkill(effectiveProjectId, skill.path, newName);
 			} else {
-				await api.skills.rename(skill.path, newName);
+				await api.skills.rename(skill.path, newName, resourceOptions);
 			}
 			bumpResourceGeneration();
 			await refreshSkills();
@@ -2217,6 +2172,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	};
 
 	const handleEditGlobalSkill = async (skill: PiSkillSummary) => {
+		if (blockResourceMutation("skills:edit")) return;
 		// Inherited global rows are read-only in project scope.
 		if (resourceScope === "project" && !isProjectSkill(skill)) {
 			showNotice(t("config.resourceScope.inheritedReadOnly"), 4000, "warning");
@@ -2283,7 +2239,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		const generation = resourceGenerationRef.current;
 		const projectIdHere = resourceScope === "project" ? effectiveProjectId : undefined;
 		try {
-			const [globalResult, projectResult, discoveryResult] = await Promise.all([api.extensions.list(forceRefresh), projectIdHere && hasProject ? api.projectResources.list(projectIdHere) : Promise.resolve(emptyProjectResourceData()), api.projectResources.discovery(projectIdHere)]);
+			const [globalResult, projectResult, discoveryResult] = await Promise.all([api.extensions.list(forceRefresh, resourceOptions), projectIdHere && hasProject ? api.projectResources.list(projectIdHere) : Promise.resolve(emptyProjectResourceData()), api.projectResources.discovery(projectIdHere)]);
 			if (generation !== resourceGenerationRef.current) return;
 			setDiscoveryData(discoveryResult);
 			const globalExtensions = globalResult.extensions.filter((extension) => !isProjectExtension(extension));
@@ -2298,7 +2254,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 			});
 			setExtensionsData({ ...globalResult, extensions: mergedExtensions });
 		} catch (e) {
-			setError(e instanceof Error ? e.message : String(e));
+			// 资源域失败给稳定码文案；其它异常保留原文。
+			setError(resourceTargetErrorMessage(e));
 		} finally {
 			if (generation === resourceGenerationRef.current) setExtensionsLoading(false);
 		}
@@ -2306,6 +2263,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 
 	/** Extension toggles in project view are project overrides, never global mutations. */
 	const handleToggleExtension = async (extension: PiExtensionSummary, enabled: boolean) => {
+		if (blockResourceMutation("extensions:toggle")) return;
 		if (resourceScope === "project" && effectiveProjectId) {
 			if (isProjectExtension(extension) && extension.path) {
 				await api.projectResources.toggleExtension(effectiveProjectId, extension.path, enabled);
@@ -2326,16 +2284,18 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 			return;
 		}
 		// 传路径与项目上下文：本地文件扩展需要精确路径，项目作用域需要 projectId 写项目 .pi/settings.json。
-		await api.extensions.toggle(extension.source, enabled, extension.scope, extension.path, effectiveProjectId);
+		await api.extensions.toggle(extension.source, enabled, extension.scope, extension.path, effectiveProjectId, resourceOptions);
 	};
 
 	const handleRequestExtensionUninstall = (extension: PiExtensionSummary) => {
+		if (blockResourceMutation("extensions:uninstall")) return;
 		// A global row shown as inherited by a project is read-only in that project.
 		if (resourceScope === "project" && !isProjectExtension(extension)) return;
 		setUninstallExtensionConfirm(extension);
 	};
 
 	const handleRequestProjectPackageUninstall = (item: DiscoveredExtensionItem) => {
+		if (blockResourceMutation("extensions:uninstall")) return;
 		setUninstallProjectPackageConfirm({ source: item.source });
 	};
 
@@ -2359,6 +2319,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	};
 
 	const confirmUninstallExtension = async () => {
+		if (blockResourceMutation("extensions:uninstall")) return;
 		if (!uninstallExtensionConfirm) return;
 		const target = uninstallExtensionConfirm;
 		setUninstallExtensionConfirm(null);
@@ -2406,6 +2367,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	 * 不动全局缓存与磁盘文件；卸载态复用 uninstallingExtensionSource（发现行按 source 匹配）。
 	 */
 	const confirmUninstallProjectPackage = async () => {
+		if (blockResourceMutation("extensions:uninstall")) return;
 		if (!uninstallProjectPackageConfirm) return;
 		const target = uninstallProjectPackageConfirm;
 		setUninstallProjectPackageConfirm(null);
@@ -2428,33 +2390,6 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		} finally {
 			setUninstallingExtensionSource(null);
 		}
-	};
-
-	const handleImport = async () => {
-		const input = document.createElement("input");
-		input.type = "file";
-		input.accept = ".json";
-		input.onchange = async () => {
-			const file = input.files?.[0];
-			if (!file) return;
-			try {
-				const text = await file.text();
-				const result = await api.config.import(text);
-				if (!result.valid) {
-					setError(result.error ?? t("config.importFailed"));
-					return;
-				}
-				onSaved();
-				// 导入会整体替换四个配置文件：当前 tab 由 loadConfig 重载并清标记，其余 tab 的数据在磁盘上已全部变化，
-				// 统一清除它们的脏标记，避免残留黄点/关闭误弹确认（skills/prompts 编辑不涉及配置文件，保留）。
-				for (const key of ALL_CONFIG_DIRTY_KEYS) clearDirty(key);
-				await loadConfig(tab, { force: true });
-				showToast(t("config.imported"));
-			} catch (e) {
-				setError(e instanceof Error ? e.message : String(e));
-			}
-		};
-		input.click();
 	};
 
 	/** 安全管理面板句柄（顶部统一保存按钮经 saveByKey 调用其 save） */
@@ -2588,8 +2523,12 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 
 	/** 切换配置目标：同目标忽略；远端有未应用 patch 时先显式确认（丢弃草稿不能静默发生）。 */
 	const handleConfigTargetChange = (next: PiConfigTarget) => {
-		const same = next.kind === configTarget.kind && (next.kind === "local" || (configTarget.kind === "ssh" && next.hostId === configTarget.hostId));
-		if (same) return;
+		if (samePiConfigTarget(next, configTarget)) return;
+		// 本目标的配置草稿必须先落地或放弃：留着会按新目标保存（作用域错配），直接丢是静默数据丢失。
+		if (hasUnsavedConfigDrafts(dirtyTabsRef.current)) {
+			showNotice(t("config.target.switchDirtyBlocked"), 5000, "warning");
+			return;
+		}
 		if (remoteConfigDirty) {
 			setPendingTargetSwitch(next);
 			return;
@@ -2661,9 +2600,10 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		props.onPaneStateChange?.({
 			saving,
 			hasDirty: hasDirty || remoteConfigDirty,
+			exportImportAllowed: configTarget.kind === "local",
 			unsaved: configUnsavedSummary ? { totalCount: configUnsavedSummary.totalCount, items: configUnsavedSummary.items } : { totalCount: 0, items: [] },
 		});
-	}, [saving, hasDirty, configUnsavedSummary, props.onPaneStateChange]);
+	}, [saving, hasDirty, configUnsavedSummary, configTarget, props.onPaneStateChange]);
 
 	/**
 	 * 关闭确认框选择保存并关闭：汇总**全部**脏来源逐个保存（不是只存当前 tab），
@@ -2841,6 +2781,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						<TabsContent value="config:models" className="config-main min-w-0">
 							<div className="config-content">
 								<PiConfigTargetSelector target={configTarget} hosts={remoteConfigHosts} disabled={saving} onChange={handleConfigTargetChange} />
+								{wslTargetHost ? <WslConfigSourceHint host={wslTargetHost} file="models" /> : null}
 								{remoteTargetHostId ? (
 									<RemoteConfigPanel key={"remote-models-" + remoteTargetHostId} file="models" hostId={remoteTargetHostId} hostLabel={remoteHostLabel} onDirtyChange={setRemoteConfigDirty} />
 								) : (
@@ -2855,7 +2796,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 													data={modelsData}
 													expandedProvider={expandedProvider}
 													focusProvider={focusedProvider}
-													onOpenUsageProbeDialog={(provider) => openUsageProbeDialogFor(provider, "pi")}
+													onOpenUsageProbeDialog={(provider) => guardProviderOp(() => openUsageProbeDialogFor(provider, "pi"))}
 													addingProvider={addingProvider}
 													providerPageSaveRef={providerPageSaveRef}
 													hiddenProviders={hiddenProviders}
@@ -2899,8 +2840,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 													onDeleteModels={handleDeleteModels}
 													onResetModel={handleResetModelToAdaptive}
 													resettingModelKey={resettingModelKey}
-													onFetchModels={handleFetchModels}
-													onTestProvider={handleTestProvider}
+													onFetchModels={(name) => guardProviderOp(() => handleFetchModels(name))}
+													onTestProvider={(name) => guardProviderOp(() => handleTestProvider(name))}
 													onChangeTestModelId={(providerName, modelId) =>
 														setTestModelIdByProvider((current) => ({
 															...current,
@@ -2939,6 +2880,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 							<div className="config-content">
 								{remoteTargetHostId ? (
 									<RemoteConfigUnsupportedNotice bodyKey={REMOTE_CONFIG_UNSUPPORTED_TAB_COPY.auth.bodyKey} code={REMOTE_CONFIG_UNSUPPORTED_TAB_COPY.auth.code} hostLabel={remoteHostLabel} testId="remote-config-unsupported-auth" />
+								) : wslTargetHost ? (
+									<WslConfigScopeNotice file="auth" host={wslTargetHost} />
 								) : (
 									<>
 										{statusBlock}
@@ -2981,6 +2924,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						<TabsContent value="config:settings" className="config-main min-w-0">
 							<div className="config-content">
 								<PiConfigTargetSelector target={configTarget} hosts={remoteConfigHosts} disabled={saving} onChange={handleConfigTargetChange} />
+								{wslTargetHost ? <WslConfigSourceHint host={wslTargetHost} file="settings" /> : null}
 								{remoteTargetHostId ? (
 									<RemoteConfigPanel key={"remote-settings-" + remoteTargetHostId} file="settings" hostId={remoteTargetHostId} hostLabel={remoteHostLabel} onDirtyChange={setRemoteConfigDirty} />
 								) : (
@@ -3009,6 +2953,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						<TabsContent value="skills" className="config-main min-w-0">
 							<div className="config-content">
 								{statusBlock}
+								{resourceScope === "global" ? <ResourceTargetBar target={resourceTarget} hosts={resourceTargetHosts} disabled={saving} readOnly={resourceTargetReadOnly} onChange={setResourceTarget} /> : null}
 								{!loading &&
 									(editingGlobalSkill ? (
 										<div className="prompts-editor-backdrop" onClick={() => setEditingGlobalSkill(null)}>
@@ -3072,7 +3017,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 													void api.projectResources.openDirectory(effectiveProjectId, kind).catch((err) => setError(err instanceof Error ? err.message : String(err)));
 													return;
 												}
-												void api.skills.openFolder().catch((err) => setError(err instanceof Error ? err.message : String(err)));
+												void api.skills.openFolder(undefined, resourceOptions).catch((err) => setError(err instanceof Error ? err.message : String(err)));
 											}}
 											onChangeNewName={setNewSkillName}
 											onChangeNewDescription={setNewSkillDescription}
@@ -3090,6 +3035,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						<TabsContent value="prompts" className="config-main min-w-0">
 							<div className="config-content">
 								{statusBlock}
+								{resourceScope === "global" ? <ResourceTargetBar target={resourceTarget} hosts={resourceTargetHosts} disabled={saving} readOnly={resourceTargetReadOnly} onChange={setResourceTarget} /> : null}
 								{!loading && (
 									<PromptsTab
 										scope={resourceScope}
@@ -3112,7 +3058,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 												void api.projectResources.openDirectory(effectiveProjectId, "prompts").catch((err) => setError(err instanceof Error ? err.message : String(err)));
 												return;
 											}
-											void api.prompts.openFolder().catch((err) => setError(err instanceof Error ? err.message : String(err)));
+											void api.prompts.openFolder(resourceOptions).catch((err) => setError(err instanceof Error ? err.message : String(err)));
 										}}
 										onDelete={setDeletePromptConfirm}
 										onEdit={handleEditPrompt}
@@ -3136,6 +3082,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						<TabsContent value="extensions" className="config-main min-w-0">
 							<div className="config-content">
 								{statusBlock}
+								{resourceScope === "global" ? <ResourceTargetBar target={resourceTarget} hosts={resourceTargetHosts} disabled={saving} readOnly={resourceTargetReadOnly} onChange={setResourceTarget} /> : null}
 								<ExtensionsTab
 									scope={resourceScope}
 									projectId={resourceScope === "project" ? effectiveProjectId : undefined}
@@ -3171,6 +3118,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 							<div className="config-content flex min-h-0 flex-col">
 								{remoteTargetHostId ? (
 									<RemoteConfigUnsupportedNotice bodyKey={REMOTE_CONFIG_UNSUPPORTED_TAB_COPY.mcp.bodyKey} code={REMOTE_CONFIG_UNSUPPORTED_TAB_COPY.mcp.code} hostLabel={remoteHostLabel} testId="remote-config-unsupported-mcp" />
+								) : wslTargetHost ? (
+									<WslConfigScopeNotice file="mcp" host={wslTargetHost} />
 								) : (
 									<>
 										{/* 全局作用域：activeProjectId 只作导入扫描的项目来源，配置仍写全局 mcp.json。 */}
@@ -3202,6 +3151,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 							<div className="config-content">
 								{remoteTargetHostId ? (
 									<RemoteConfigUnsupportedNotice bodyKey={REMOTE_CONFIG_UNSUPPORTED_TAB_COPY.trust.bodyKey} code={REMOTE_CONFIG_UNSUPPORTED_TAB_COPY.trust.code} hostLabel={remoteHostLabel} testId="remote-config-unsupported-trust" />
+								) : wslTargetHost ? (
+									<WslConfigScopeNotice file="trust" host={wslTargetHost} />
 								) : (
 									<>
 										{statusBlock}
@@ -3226,6 +3177,8 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 							<div className="config-content flex min-h-0 flex-col">
 								{remoteTargetHostId ? (
 									<RemoteConfigUnsupportedNotice bodyKey={REMOTE_CONFIG_UNSUPPORTED_TAB_COPY.raw.bodyKey} code={REMOTE_CONFIG_UNSUPPORTED_TAB_COPY.raw.code} hostLabel={remoteHostLabel} testId="remote-config-unsupported-raw" />
+								) : wslTargetHost ? (
+									<WslConfigScopeNotice file="raw" host={wslTargetHost} />
 								) : (
 									<>
 										{statusBlock}
@@ -3393,11 +3346,11 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 						</Button>
 						{backendPane === "pi" && section === "config" ? (
 							<>
-								<Button variant="outline" size="sm" onClick={handleExport}>
+								<Button variant="outline" size="sm" onClick={handleExport} disabled={configTarget.kind !== "local"} title={configTarget.kind === "local" ? undefined : t("config.target.exportLocalOnly")}>
 									{t("common.export")}
 								</Button>
 								{/* 导入与导出统一 outline 白底描边：与深色「保存」主按钮形成主次层级，避免并排按钮一描边一填充的不一致（对齐 SettingsModal 同款按钮组） */}
-								<Button variant="outline" size="sm" onClick={handleImport}>
+								<Button variant="outline" size="sm" onClick={handleImport} disabled={configTarget.kind !== "local"} title={configTarget.kind === "local" ? undefined : t("config.target.exportLocalOnly")}>
 									{t("common.import")}
 								</Button>
 							</>

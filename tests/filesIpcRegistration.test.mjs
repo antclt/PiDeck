@@ -34,7 +34,7 @@ test("project-scoped reads route through registered local backend boundaries", (
 	assert.match(filesIpc, /const localProject = \(projectId: string\)/);
 	assert.match(filesIpc, /const project = projectStore\.get\(projectId\);/);
 	assert.match(filesIpc, /localProject\(rawScope\.projectId\)/);
-	assert.match(filesIpc, /createProjectFileReadBoundary\(toWindowsPath\(project\.path\)\)/);
+	assert.match(filesIpc, /createProjectFileReadBoundary\(toWindowsPath\(project\.path, project\)\)/);
 	assert.match(filesIpc, /resolveProjectFileReadPath\(boundary, hostPath\)/);
 	// 远端 feature 的 project-relative file contract：本地实现 + 路由必须同时存在。
 	assert.match(filesIpc, /new LocalProjectFileBackend\(/);
@@ -80,7 +80,7 @@ test("files:list routes project-relative targets through the backend and validat
 	assert.match(block[0], /const backend = projectFileBackendRouter\.forProject\(projectId\)/);
 	assert.match(block[0], /if \(target\) return await listOrEmpty\(target\)/);
 	// legacy directory（字符串 + directory 选项）仍走注册根 realpath 边界，不信任 renderer 自报。
-	assert.match(block[0], /resolveProjectFileReadPath\(boundary, toWindowsPath\(legacyDirectory\)\)/);
+	assert.match(block[0], /resolveProjectFileReadPath\(boundary, toWindowsPath\(legacyDirectory, project\)\)/);
 	assert.match(block[0], /return await listOrEmpty\(\{ projectId, relativePath \}\)/);
 	// ENOENT 分档（dev 2026-10 语义）：根 listing 由 backend 映射为稳定错误码；展开中的子目录
 	// 返回空子树（抽屉记住的展开态可能已被 pi-subagents 清理）；非 ENOENT 仍须原样抛。

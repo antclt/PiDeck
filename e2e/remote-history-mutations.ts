@@ -1,6 +1,6 @@
 import { expect, type Page, type TestInfo } from "@playwright/test";
 import { assertRemoteMutationMatchesLocal, effectiveHistoryMessages, freshRemoteTurn, historyEntries, historyMessages } from "./remoteHistoryAssertions";
-import { runRemoteCommand, test, type RemoteAcceptanceCredentials } from "./remote-fixtures";
+import { runRemoteCommand, openSessionRunMenu, test, type RemoteAcceptanceCredentials } from "./remote-fixtures";
 
 /** 仅操作当前 runId 的真实 pi 文件；所有写操作由真实界面触发，不直调 IPC 或手写远端结果。 */
 export async function verifyRemoteHistoryMutations(input: { window: Page; credentials: RemoteAcceptanceCredentials; evidenceFile: string; evidenceDirectory: string; prompt: string; timeoutMs: number; testInfo: TestInfo }): Promise<void> {
@@ -96,8 +96,8 @@ export async function verifyRemoteHistoryMutations(input: { window: Page; creden
 		await preserve("conflict", before, editedDocument);
 		const leftovers = await runRemoteCommand(credentials, "find '" + directory + "' -maxdepth 1 -name '." + name + ".*.pideck-tmp' -exec stat -c '%a' -- {} +", 20_000);
 		expect(leftovers.stdout.trim().split(/\s+/)).toEqual(["600"]);
-		await window.locator(".session-tabs-actions").getByRole("button", { name: "更多操作" }).click();
-		await window.getByRole("menuitem", { name: "重新加载会话", exact: true }).click();
+		await openSessionRunMenu(window);
+		await window.getByRole("menuitem", { name: "从磁盘重新加载消息", exact: true }).click();
 		await expect(timeline.locator(".assistant-text")).toContainText("远端编辑验收_END", { timeout: timeoutMs });
 		await assertSameSession();
 		console.log("[p45c-acceptance] conflict: externalAppendPreserved=true reloadNotice=true privateResidual=true");
@@ -195,8 +195,8 @@ export async function verifyRemoteHistoryMutations(input: { window: Page; creden
 		expect(effectiveHistoryMessages(after, "assistant")).toHaveLength(0);
 		await assertSameSession();
 
-		await window.locator(".session-tabs-actions").getByRole("button", { name: "更多操作" }).click();
-		await window.getByRole("menuitem", { name: "重新加载会话", exact: true }).click();
+		await openSessionRunMenu(window);
+		await window.getByRole("menuitem", { name: "从磁盘重新加载消息", exact: true }).click();
 		await expect(timeline.locator(".user-turn")).toHaveCount(0);
 		await expect(timeline.locator(".assistant-text")).toHaveCount(0);
 		expect(await readRemote()).toBe(after);

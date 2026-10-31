@@ -35,5 +35,5 @@ test("changeBackend 在改 record 前回收未使用的 runtime", () => {
 	assert.ok(update > stop, "必须先停进程再改 record：主进程要求无绑定 runtime 才接受 backend 变更");
 	// 停不掉不拦：交给主进程守卫给出明确报错
 	assert.match(change, /await desktopApi\.system\.stopAgent\(boundAgentId\);\s*\n\s*\} catch \{/, "stopAgent 必须自带兜底，失败不阻断切换链");
-	assert.match(change, /\[backendLocked, isGuideBootstrapSession, record, runtime\?\.agentId, sessionId, store, upsertSession\]/, "deps 必须带 runtime?.agentId");
+	assert.match(change, /\[backendLocked, isGuideBootstrapSession, isRemoteProjectSession, record, runtime\?\.agentId, sessionId, store, upsertSession\]/, "deps 必须带 runtime?.agentId 与远端固定 pi 守卫");
 });

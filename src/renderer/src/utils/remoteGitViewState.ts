@@ -1,5 +1,7 @@
 import type {
 	GitCommitResult,
+	GitCompareRefsResult,
+	GitHistoryPageResult,
 	GitIndexMutationResult,
 	GitReadSnapshot,
 	GitReadSnapshotResult,
@@ -25,6 +27,7 @@ import type {
 	RemoteGitRefsResult,
 } from "../../../shared/types/git";
 import type { ProjectFileTarget } from "../../../shared/types/project";
+import { createRemoteGitStatusRefresher } from "./remoteGitStatusPolling";
 
 export type RemoteGitViewState = {
 	projectKey: string;
@@ -81,12 +84,18 @@ export type RemoteGitViewApi = {
 	mutateRemoteIndex(projectId: string, operation: "stage" | "unstage", group: GitResourceGroupType, target: ProjectFileTarget, token: string, repo?: string): Promise<GitIndexMutationResult>;
 	/* Every read and every write names its repository scope ("" is the project root). */
 	remoteSnapshot(projectId: string, repo?: string): Promise<GitReadSnapshotResult>;
+	/** 显式刷新（force）：越过已完成的事实缓存；未实现的宿主退回普通读。 */
+	refreshRemoteSnapshot?(projectId: string, repo?: string): Promise<GitReadSnapshotResult>;
 	workspaceFileDiff(projectId: string, group: GitResourceGroupType, target: ProjectFileTarget, repoPath?: ProjectFileTarget): Promise<GitWorkspaceFileDiff | null>;
 	remoteLog(projectId: string, options?: { maxCount?: number; skip?: number }, repo?: string): Promise<RemoteGitLogResult>;
+	/** 公共历史页（T7）：存在时优先于旧的 remoteLog；远端仍是 HEAD-only。 */
+	historyPage?(projectId: string, options?: { maxCount?: number; skip?: number }, repo?: ProjectFileTarget): Promise<GitHistoryPageResult>;
 	remoteCommitDetail(projectId: string, oid: string, repo?: string): Promise<RemoteGitCommitDetailResult>;
 	remoteRefs(projectId: string, repo?: string): Promise<RemoteGitRefsResult>;
 	remoteRefFileDiff(projectId: string, base: string | null, head: string, target: ProjectFileTarget, repo?: string): Promise<RemoteGitRefFileDiffResult>;
 	remoteCompare(projectId: string, base: string, head: string, repo?: string): Promise<RemoteGitCompareResult>;
+	/** 公共比较（T7）：存在时优先；mode/ahead/behind 只在需要时展示，这里只取两端与文件。 */
+	compareRefs?(projectId: string, base: string, head: string, repo?: ProjectFileTarget): Promise<GitCompareRefsResult>;
 	initRemote(projectId: string): Promise<RemoteGitInitResult>;
 	createRemoteBranch(projectId: string, name: string, token: string, repo?: string): Promise<RemoteGitBranchMutationResult>;
 	switchRemoteBranch(projectId: string, name: string, token: string, repo?: string): Promise<RemoteGitBranchMutationResult>;
@@ -99,33 +108,8 @@ export type RemoteGitViewApi = {
 	pushRemote(projectId: string, remote: string, branch: string, token: string, repo?: string): Promise<{ ok: true; outcome: RemoteGitPushOutcome } | { ok: false; code: string }>;
 	pullRemote(projectId: string, remote: string, branch: string, token: string, repo?: string): Promise<{ ok: true; outcome: RemoteGitPullOutcome } | { ok: false; code: string }>;
 };
-/**
- * The same name rules main enforces, kept in step with `validateRemoteGitBranchName` on purpose: the panel refuses
- * locally so an unusable name never leaves the window, while the main process stays the authority. A pseudo-ref such
- * as HEAD is a name Git would refuse - the panel must not offer it and pretend the click could work.
- */
-export function validRemoteGitBranchName(name: unknown): name is string {
-	if (typeof name !== "string" || name.length === 0 || new TextEncoder().encode(name).length > 1024 || /[\x00-\x1f\x7f\\]/.test(name)) return false;
-	if (name === "@" || name.startsWith("-") || name.includes("@{") || name.startsWith("refs/")) return false;
-	if (/^(?:HEAD|FETCH_HEAD|ORIG_HEAD|MERGE_HEAD|CHERRY_PICK_HEAD|REVERT_HEAD|BISECT_HEAD)$/.test(name)) return false;
-	return !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(name);
-}
-
-/**
- * A compare names full local refs (refs/heads/* or refs/tags/*), exactly the strings `remoteRefs` returns.
- * These rules mirror main's `validateRemoteGitRefFullName` and the frozen helper's readRef; the panel refuses
- * locally so an unusable pair never leaves the window. Git's own check-ref-format is not enough: it accepts
- * an option-like component, a lone `@` and braces (measured), all of which this protocol refuses.
- */
-const REMOTE_GIT_REF_FORBIDDEN = /[\u0000-\u0020\u007f~^:?*[\\{}]/;
-export function validRemoteGitRefFullName(value: unknown): value is string {
-	if (typeof value !== "string" || new TextEncoder().encode(value).length > 1024 || REMOTE_GIT_REF_FORBIDDEN.test(value) || value.includes("..") || value.includes("@{") || value.includes("//")) return false;
-	const prefix = value.startsWith("refs/heads/") ? "refs/heads/" : value.startsWith("refs/tags/") ? "refs/tags/" : null;
-	if (prefix === null) return false;
-	const name = value.slice(prefix.length);
-	if (!name) return false;
-	return !name.split("/").some((part) => !part || part === "." || part === ".." || part === "@" || part.startsWith(".") || part.startsWith("-") || part.endsWith(".") || part.endsWith(".lock"));
-}
+import { validRemoteGitBranchName, validRemoteGitRefFullName } from "./remoteGitRefValidation";
+export { validRemoteGitBranchName, validRemoteGitRefFullName } from "./remoteGitRefValidation";
 
 function errorCode(error: unknown): string {
 	const raw = error instanceof Error ? error.message : String(error);
@@ -168,8 +152,33 @@ export function createRemoteGitViewController(projectId: string, projectKey: str
 		state = next.initNotice === undefined && state.initNotice !== undefined ? { ...withSyncNotice, initNotice: state.initNotice } : withSyncNotice;
 		if (active) publish(state);
 	}
+	// 静默 status 刷新（P0-3）：策略/闸门/单飞在 remoteGitStatusPolling，控制器只提供状态、事实代次与读口。
+	const statusRefresher = createRemoteGitStatusRefresher<RemoteGitViewState>({
+		isActive: () => active,
+		current: () => state,
+		factGeneration: () => epoch,
+		publish: update,
+		readSnapshot: () => {
+			const forceRead = api.refreshRemoteSnapshot;
+			// 静默读也要越过主进程已完成的事实缓存：外部 commit/checkout 不会让主进程标脏。
+			return forceRead === undefined ? api.remoteSnapshot(projectId, repoPath) : forceRead(projectId, repoPath);
+		},
+		codeOf: errorCode,
+	});
+	async function readHistoryPage(maxCount: number, skip?: number): Promise<RemoteGitLogResult> {
+		if (api.historyPage === undefined) return api.remoteLog(projectId, { maxCount, ...(skip === undefined ? {} : { skip }) }, repoPath);
+		const result = await api.historyPage(projectId, { maxCount, ...(skip === undefined ? {} : { skip }) }, { projectId, relativePath: repoPath });
+		if (!result.ok) return { ok: false, code: result.code };
+		return {
+			ok: true,
+			page: {
+				commits: result.value.commits.map((commit) => ({ oid: commit.oid, parents: [...commit.parents], subject: commit.subject, authorName: commit.authorName, authorEmail: commit.authorEmail, authorTimeSec: Math.floor(commit.authorTimeMs / 1000) })),
+				hasMore: result.value.hasMore,
+			},
+		};
+	}
 	const controller = {
-		async refresh(): Promise<void> {
+		async refresh(force = false): Promise<void> {
 			if (!active || state.loading || state.diffLoading || state.mutating) return;
 			const generation = ++epoch;
 			diffEpoch += 1;
@@ -185,10 +194,14 @@ export function createRemoteGitViewController(projectId: string, projectKey: str
 			// A failed refresh cannot resolve an uncertain write; only fresh repository facts can.
 			update({ projectKey, loading: true, diffLoading: false, ...(uncertainWrite ? { errorCode: "GIT_WRITE_RESULT_UNCONFIRMED" } : {}) });
 			try {
-				const result = await api.remoteSnapshot(projectId, repoPath);
+				// 显式刷新必须重新核对：已完成的旧缓存不能满足一次明确的刷新请求。
+				const result = force && api.refreshRemoteSnapshot !== undefined ? await api.refreshRemoteSnapshot(projectId, repoPath) : await api.remoteSnapshot(projectId, repoPath);
 				if (!active || generation !== epoch) return;
-				if (result.ok) update({ projectKey, loading: false, diffLoading: false, snapshot: result.snapshot });
-				else update({ projectKey, loading: false, diffLoading: false, errorCode: failureCode(result.code) });
+				if (result.ok) {
+					// 一次成功的显式刷新才能解除「连接失效后暂停自动轮询」；失败/断开本身绝不重放一次读。
+					statusRefresher.resume();
+					update({ projectKey, loading: false, diffLoading: false, snapshot: result.snapshot });
+				} else update({ projectKey, loading: false, diffLoading: false, errorCode: failureCode(result.code) });
 			} catch (error) {
 				if (active && generation === epoch) update({ projectKey, loading: false, diffLoading: false, errorCode: failureCode(errorCode(error)) });
 			}
@@ -271,7 +284,7 @@ export function createRemoteGitViewController(projectId: string, projectKey: str
 			const generation = ++historyEpoch;
 			update({ ...state, history: undefined, historyErrorCode: undefined, historyLoading: true, detail: undefined, detailOid: undefined, detailErrorCode: undefined });
 			try {
-				const result = await api.remoteLog(projectId, { maxCount: 50 }, repoPath);
+				const result = await readHistoryPage(50);
 				if (!active || generation !== historyEpoch) return;
 				if (result.ok) update({ ...state, historyLoading: false, history: result.page });
 				else update({ ...state, historyLoading: false, historyErrorCode: result.code });
@@ -285,7 +298,7 @@ export function createRemoteGitViewController(projectId: string, projectKey: str
 			const skip = state.history.commits.length;
 			update({ ...state, historyMoreLoading: true, historyErrorCode: undefined });
 			try {
-				const result = await api.remoteLog(projectId, { maxCount: 50, skip }, repoPath);
+				const result = await readHistoryPage(50, skip);
 				if (!active || generation !== historyEpoch) return;
 				if (result.ok) update({ ...state, historyMoreLoading: false, history: { commits: [...state.history.commits, ...result.page.commits], hasMore: result.page.hasMore } });
 				// A failed page keeps the rows already on screen; only a fresh full load replaces them.
@@ -335,7 +348,27 @@ export function createRemoteGitViewController(projectId: string, projectKey: str
 			const generation = ++compareEpoch;
 			update({ ...state, compare: undefined, compareErrorCode: undefined, compareLoading: true });
 			try {
-				const result = await api.remoteCompare(projectId, base, head, repoPath);
+				const result =
+					api.compareRefs === undefined
+						? await api.remoteCompare(projectId, base, head, repoPath)
+						: await api.compareRefs(projectId, base, head, { projectId, relativePath: repoPath }).then(
+								(answer): RemoteGitCompareResult =>
+									answer.ok
+										? {
+												ok: true,
+												compare: {
+													// 语义必须跟着答案走：trees 才显示「无 merge-base / ahead-behind」的能力说明，
+													// merge-base 有 ahead/behind，不能再提示缺失。
+													mode: answer.value.mode,
+													...(answer.value.ahead === undefined ? {} : { ahead: answer.value.ahead }),
+													...(answer.value.behind === undefined ? {} : { behind: answer.value.behind }),
+													base: { ref: answer.value.base.ref, oid: answer.value.base.oid },
+													head: { ref: answer.value.head.ref, oid: answer.value.head.oid },
+													files: answer.value.files.map((file) => ({ status: file.status, path: file.path, ...(file.oldPath === undefined ? {} : { oldPath: file.oldPath }) })),
+												},
+											}
+										: { ok: false, code: answer.code },
+							);
 				if (!active || generation !== compareEpoch) return;
 				if (result.ok && result.compare.base.ref === base && result.compare.head.ref === head) update({ ...state, compareLoading: false, compare: result.compare });
 				else update({ ...state, compareLoading: false, compareErrorCode: result.ok ? "GIT_RESOURCE_CHANGED" : result.code });
@@ -369,6 +402,9 @@ export function createRemoteGitViewController(projectId: string, projectKey: str
 		stopRefsPolling() {
 			refsPollEpoch += 1;
 		},
+		// 静默 status 刷新（P0-3）：只换 snapshot/errorCode；不置 loading、不清 diff/history/refs。
+		refreshStatus: statusRefresher.refreshStatus,
+		stopStatusPolling: statusRefresher.stop,
 		/** One file's two sides between two revisions, on the same surface as a workspace diff. */
 		async openHistoryFileDiff(base: string | null, head: string, target: ProjectFileTarget) {
 			if (!active || state.loading || state.diffLoading || state.mutating || target.projectId !== projectId) return;
@@ -645,6 +681,8 @@ export function createRemoteGitViewController(projectId: string, projectKey: str
 		/** Connection transitions invalidate facts without automatically reconnecting or refreshing. */
 		invalidateConnection() {
 			if (!active) return;
+			// 断开/重连只作废事实，不自己读回来：暂停自动轮询，直到一次成功的显式 refresh()。
+			statusRefresher.pause();
 			epoch += 1;
 			diffEpoch += 1;
 			historyEpoch += 1;

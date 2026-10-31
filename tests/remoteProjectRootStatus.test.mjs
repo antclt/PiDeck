@@ -201,14 +201,14 @@ test("a drifted project is needs-attention with its code while a healthy project
 		assert.equal(readA.code, "SSH_PROJECT_ROOT_CHANGED");
 
 		const statusA = await api.status(PROJECT_A);
-		assert.deepEqual(plain(statusA), { ok: true, status: "needs-attention", code: "SSH_PROJECT_ROOT_CHANGED" });
+		assert.deepEqual(plain(statusA), { ok: true, value: { status: "needs-attention", code: "SSH_PROJECT_ROOT_CHANGED" } });
 
 		// 同主机另一个健康项目：读取照常成功，状态仍是 ok。这是 (i) 相对主机级 needs-attention 的核心差异。
 		const readB = await api.read(PROJECT_B, "only-b.txt");
 		assert.equal(readB.ok, true, JSON.stringify(readB));
-		assert.equal(Buffer.from(readB.contentBase64, "base64").toString("utf8"), "ONLY-B");
-		assert.deepEqual(plain(await api.status(PROJECT_B)), { ok: true, status: "ok" });
-		assert.deepEqual(plain(await api.status(PROJECT_A)), { ok: true, status: "needs-attention", code: "SSH_PROJECT_ROOT_CHANGED" }, "B 的建立不得清掉 A 的记录");
+		assert.equal(Buffer.from(readB.value.contentBase64, "base64").toString("utf8"), "ONLY-B");
+		assert.deepEqual(plain(await api.status(PROJECT_B)), { ok: true, value: { status: "ok" } });
+		assert.deepEqual(plain(await api.status(PROJECT_A)), { ok: true, value: { status: "needs-attention", code: "SSH_PROJECT_ROOT_CHANGED" } }, "B 的建立不得清掉 A 的记录");
 
 		// 漂移没有驱动主机状态机：同主机 B 的会话建立成功，而 A 的记录只是 A 的。
 		assert.deepEqual(plain(api.ports.calls.reportCalls), [], "漂移不得把主机推入 needs-attention");
@@ -219,8 +219,8 @@ test("a drifted project is needs-attention with its code while a healthy project
 		const managersBefore = api.ports.calls.createManager.length;
 		const bootstrapsBefore = api.ports.calls.bootstrap.length;
 		const verifiesBefore = api.ports.calls.verifyCalls.length;
-		assert.deepEqual(plain(await api.status(PROJECT_A)), { ok: true, status: "needs-attention", code: "SSH_PROJECT_ROOT_CHANGED" });
-		assert.deepEqual(plain(await api.status(PROJECT_B)), { ok: true, status: "ok" });
+		assert.deepEqual(plain(await api.status(PROJECT_A)), { ok: true, value: { status: "needs-attention", code: "SSH_PROJECT_ROOT_CHANGED" } });
+		assert.deepEqual(plain(await api.status(PROJECT_B)), { ok: true, value: { status: "ok" } });
 		assert.equal(api.ports.calls.requests.length, requestsBefore, "状态查询不得发 helper 请求");
 		assert.equal(api.ports.calls.createManager.length, managersBefore, "状态查询不得建立会话");
 		assert.equal(api.ports.calls.bootstrap.length, bootstrapsBefore, "状态查询不得 bootstrap");
@@ -231,8 +231,8 @@ test("a drifted project is needs-attention with its code while a healthy project
 test("a status query reads past results only: no probe, no connect, no bootstrap, no session", async () => {
 	await harness(async (api) => {
 		// 从未读过这两个项目：只知道「没有记录到问题」，而不是去问主机。
-		assert.deepEqual(plain(await api.status(PROJECT_A)), { ok: true, status: "ok" });
-		assert.deepEqual(plain(await api.status(PROJECT_B)), { ok: true, status: "ok" });
+		assert.deepEqual(plain(await api.status(PROJECT_A)), { ok: true, value: { status: "ok" } });
+		assert.deepEqual(plain(await api.status(PROJECT_B)), { ok: true, value: { status: "ok" } });
 		assert.equal(api.ports.calls.verifyCalls.length, 0);
 		assert.equal(api.ports.calls.createManager.length, 0);
 		assert.equal(api.ports.calls.bootstrap.length, 0);
@@ -245,13 +245,13 @@ test("a successful re-check of the same boundary clears the record back to ok", 
 	await harness(async (api) => {
 		api.control.drifted.add(ROOT_A);
 		assert.equal((await api.read(PROJECT_A, "data.txt")).code, "SSH_PROJECT_ROOT_CHANGED");
-		assert.deepEqual(plain(await api.status(PROJECT_A)), { ok: true, status: "needs-attention", code: "SSH_PROJECT_ROOT_CHANGED" });
+		assert.deepEqual(plain(await api.status(PROJECT_A)), { ok: true, value: { status: "needs-attention", code: "SSH_PROJECT_ROOT_CHANGED" } });
 
 		// 用户把远端路径恢复；下一次建立会话重新复核成功 → 该键回到 ok，且读取重新可用。
 		api.control.drifted.delete(ROOT_A);
 		const served = await api.read(PROJECT_A, "data.txt");
 		assert.equal(served.ok, true, JSON.stringify(served));
-		assert.deepEqual(plain(await api.status(PROJECT_A)), { ok: true, status: "ok" });
+		assert.deepEqual(plain(await api.status(PROJECT_A)), { ok: true, value: { status: "ok" } });
 	});
 });
 
@@ -259,28 +259,28 @@ test("a record forces the next read to re-verify even on a ready session, so a f
 	await harness(async (api) => {
 		api.control.drifted.add(ROOT_A);
 		assert.equal((await api.read(PROJECT_A, "data.txt")).code, "SSH_PROJECT_ROOT_CHANGED");
-		assert.deepEqual(plain(await api.status(PROJECT_A)), { ok: true, status: "needs-attention", code: "SSH_PROJECT_ROOT_CHANGED" });
+		assert.deepEqual(plain(await api.status(PROJECT_A)), { ok: true, value: { status: "needs-attention", code: "SSH_PROJECT_ROOT_CHANGED" } });
 
 		// 用户把远端路径恢复后按「连接」。connect 不是边界复核，也不该为它新增复核义务；但记录仍在，
 		// 所以下一次读取必须重新复核——否则「已建立会话就复用、不复核」会让这条警告永久残留。
 		api.control.drifted.delete(ROOT_A);
 		assert.equal((await api.service.connect(HOST_ID)).ok, true);
-		assert.deepEqual(plain(await api.status(PROJECT_A)), { ok: true, status: "needs-attention", code: "SSH_PROJECT_ROOT_CHANGED" }, "connect 本身不清除记录");
+		assert.deepEqual(plain(await api.status(PROJECT_A)), { ok: true, value: { status: "needs-attention", code: "SSH_PROJECT_ROOT_CHANGED" } }, "connect 本身不清除记录");
 
 		const served = await api.read(PROJECT_A, "data.txt");
 		assert.equal(served.ok, true, JSON.stringify(served));
-		assert.deepEqual(plain(await api.status(PROJECT_A)), { ok: true, status: "ok" }, "读取触发的那次复核成功后记录被清除");
+		assert.deepEqual(plain(await api.status(PROJECT_A)), { ok: true, value: { status: "ok" } }, "读取触发的那次复核成功后记录被清除");
 	});
 });
 
 test("unknown, non-ssh and malformed project ids each answer a stable code", async () => {
 	await harness(async (api) => {
-		assert.deepEqual(plain(await api.status("no-such-project")), { ok: false, code: "REMOTE_PROJECT_NOT_FOUND" });
-		assert.deepEqual(plain(await api.status(PROJECT_LOCAL)), { ok: false, code: "UNSUPPORTED_PROJECT_LOCATION" });
-		assert.deepEqual(plain(await api.status("")), { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID" });
-		assert.deepEqual(plain(await api.status("   ")), { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID" });
-		assert.deepEqual(plain(await api.status(7)), { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID" });
-		assert.deepEqual(plain(await api.status("x".repeat(257))), { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID" });
+		assert.deepEqual(plain(await api.status("no-such-project")), { ok: false, code: "REMOTE_PROJECT_NOT_FOUND", outcome: "rejected" });
+		assert.deepEqual(plain(await api.status(PROJECT_LOCAL)), { ok: false, code: "UNSUPPORTED_PROJECT_LOCATION", outcome: "rejected" });
+		assert.deepEqual(plain(await api.status("")), { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID", outcome: "rejected" });
+		assert.deepEqual(plain(await api.status("   ")), { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID", outcome: "rejected" });
+		assert.deepEqual(plain(await api.status(7)), { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID", outcome: "rejected" });
+		assert.deepEqual(plain(await api.status("x".repeat(257))), { ok: false, code: "REMOTE_PROJECT_TARGET_INVALID", outcome: "rejected" });
 		// 入参非法时一个主机都不该被问到。
 		assert.equal(api.ports.calls.verifyCalls.length, 0);
 		assert.equal(api.ports.calls.createManager.length, 0);
@@ -291,9 +291,9 @@ test("disabled, unwired and unavailable service each answer their own stable cod
 	const projects = { enroll: async () => ({ projectId: PROJECT_A }), locator: (projectId) => LOCATORS[projectId] };
 	const channel = ipcChannels.remoteProjectRootStatus;
 	const disabled = loadProjectIpc({ enabled: false, service: () => undefined, projects });
-	assert.deepEqual(plain(await disabled.get(channel)({}, PROJECT_A)), { ok: false, code: "REMOTE_FEATURE_DISABLED" });
+	assert.deepEqual(plain(await disabled.get(channel)({}, PROJECT_A)), { ok: false, code: "REMOTE_FEATURE_DISABLED", outcome: "rejected" });
 	const unwired = loadProjectIpc({ enabled: true, service: () => undefined });
-	assert.deepEqual(plain(await unwired.get(channel)({}, PROJECT_A)), { ok: false, code: "REMOTE_PROJECT_ENROLL_UNAVAILABLE" });
+	assert.deepEqual(plain(await unwired.get(channel)({}, PROJECT_A)), { ok: false, code: "REMOTE_PROJECT_ENROLL_UNAVAILABLE", outcome: "rejected" });
 	const unavailable = loadProjectIpc({ enabled: true, service: () => undefined, projects });
-	assert.deepEqual(plain(await unavailable.get(channel)({}, PROJECT_A)), { ok: false, code: "REMOTE_CONNECTION_SERVICE_UNAVAILABLE" });
+	assert.deepEqual(plain(await unavailable.get(channel)({}, PROJECT_A)), { ok: false, code: "REMOTE_CONNECTION_SERVICE_UNAVAILABLE", outcome: "rejected" });
 });

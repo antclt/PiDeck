@@ -2,12 +2,14 @@ import type { LegacyProjectLocationFields, ProjectLocation, ProjectLocator } fro
 import type { LegacySessionLocationFields, SessionLocator } from "./types/session";
 
 /** Converts the persisted v1 path/environment pair into the canonical local locator. */
-export function projectLocatorFromLegacy(fields: LegacyProjectLocationFields & { wslDistro?: string }): ProjectLocator {
+export function projectLocatorFromLegacy(fields: LegacyProjectLocationFields & { wslDistro?: string; wslUser?: string; wslHostId?: string }): ProjectLocator {
 	return {
 		kind: "local",
 		environment: fields.environment === "wsl" ? "wsl" : "native",
 		localPath: fields.path,
 		...(fields.wslDistro ? { wslDistro: fields.wslDistro } : {}),
+		...(fields.wslUser ? { wslUser: fields.wslUser } : {}),
+		...(fields.wslHostId ? { wslHostId: fields.wslHostId } : {}),
 	};
 }
 
@@ -18,6 +20,8 @@ export function projectLocationFromLocator(locator: ProjectLocator): ProjectLoca
 		kind: "local",
 		environment: locator.environment,
 		...(locator.wslDistro ? { wslDistro: locator.wslDistro } : {}),
+		...(locator.wslUser ? { wslUser: locator.wslUser } : {}),
+		...(locator.wslHostId ? { wslHostId: locator.wslHostId } : {}),
 	};
 }
 
@@ -28,6 +32,8 @@ export function projectLocatorToLegacyFields(locator: ProjectLocator): LegacyPro
 		path: locator.localPath,
 		environment: locator.environment === "wsl" ? "wsl" : "windows",
 		...(locator.wslDistro ? { wslDistro: locator.wslDistro } : {}),
+		...(locator.wslUser ? { wslUser: locator.wslUser } : {}),
+		...(locator.wslHostId ? { wslHostId: locator.wslHostId } : {}),
 	};
 }
 

@@ -7,6 +7,7 @@ import type { SessionTimelineController } from "../../hooks/useSessionTimelineCo
 import { isLanWeb, desktopApi as api } from "../../desktopApi";
 import { SessionHeader } from "./SessionHeader";
 import { SessionBranchBar } from "./SessionBranchBar";
+import { RemoteSessionConnectionNotice } from "./RemoteSessionConnectionNotice";
 import { RemoteSessionTrustNotice } from "./RemoteSessionTrustNotice";
 import { SessionGoalStrip } from "./SessionGoalStrip";
 import { SessionSubagentsStrip } from "./SessionSubagentsStrip";
@@ -86,6 +87,8 @@ export type SessionViewProps = {
 	// ── Composer ──
 	enqueueSessionPrompt: (sessionId: string, snapshot: EnqueuePromptSnapshot) => boolean;
 	gitInfo?: GitBranchInfo;
+	/** 本栏项目 Git 拉取失败：底栏显示「Git 不可用」chip（Wave 4 §5）。 */
+	gitUnavailable?: boolean;
 	/** 底栏分支下拉的切换回调（透传给 ComposerArea，owner 为 App 级 switchBranch） */
 	onSwitchBranch?: (branch: string) => void;
 	ensureSessionId?: (sessionId: string) => Promise<string>;
@@ -163,6 +166,7 @@ export function SessionView({
 	onOpenBranchSession,
 	enqueueSessionPrompt,
 	gitInfo,
+	gitUnavailable,
 	onSwitchBranch,
 	ensureSessionId,
 	queuePanel,
@@ -332,6 +336,8 @@ export function SessionView({
 			{/* 远端会话的 trust 现状提示（P4.2）：标记存在时常驻在会话头下方；
 			  本地/WSL 会话与旧 main（无标记）不渲染任何东西。 */}
 			<RemoteSessionTrustNotice sessionId={sessionId} />
+			{/* 主机掉线时会话页也要有入口：trust 条只回答资源加载，不回答连接。 */}
+			<RemoteSessionConnectionNotice sessionId={sessionId} />
 			<ResizablePanelGroup
 				// 面板数只随终端挂载变化：输入栏在时间线列内，不再改变 Group 面板数。
 				key={`${sessionId}:${sessionResizableGroupKey(sessionPanels)}`}
@@ -377,6 +383,7 @@ export function SessionView({
 								sessionId={sessionId}
 								turnCount={countUserTurns(sessionTimeline.messages)}
 								gitInfo={gitInfo}
+								gitUnavailable={gitUnavailable}
 								onSwitchBranch={onSwitchBranch}
 								enqueue={enqueueSessionPrompt}
 								ensureSessionId={ensureSessionId}

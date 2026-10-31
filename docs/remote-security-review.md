@@ -536,3 +536,59 @@ This review verified code and tests, not deployed behavior. Every “strong” p
 source at the snapshot; the only runtime evidence available was the targeted test batches and two probes. The
 Phase 5 ordering is therefore: fix/waive F1–F5, close the §6 gate items, run §7's real-host and packaged-build
 checks, then have an independent reviewer sign the clean-tree candidate.
+
+
+## 7. Addendum (W2, helper 1.25.0): bounded remote content search
+
+> Scope note: this section is an implementation addendum to the reviewed remote surface, written by the lane
+> that changed it (W2). It does not re-audit the rest of this report. No push/release claim is implied.
+
+### 7.1 Capability matrix (content search)
+
+| Layer | Behaviour |
+| --- | --- |
+| Helper method | `fs.searchContent` (`{ path, query, maxMatches? }` → `{ matches, matchedFiles, scannedFiles, scannedBytes, truncated, reason? }`), advertised as capability `fs.searchContent` in `hello` (helper build 1.25.0). |
+| Main reader | `RemoteSearchReader.searchContent` rebuilds/validates every field and count against `RemoteHelperContract.ts`; an over-limit match list is `RESULT_TOO_LARGE`, malformed shapes/counts are `PROTOCOL_INVALID`; `maxMatches` is clamped to 200. |
+| Main route | `files:search-content` for an SSH project goes through `withProjectSession` → `remoteProjectIpc.searchContent`, which reads the live hello capability list; `capability missing` returns `{ok:true,value:null}` without sending a helper frame. |
+| Renderer gate | `rootStatus.helperCapabilities` (hello answer) is the only source: `fs.searchContent` present ⇒ content section; absent/malformed/unknown ⇒ no content section, only `drawer.fileSearchNameOnlyHint`, and **no `files.searchContent` IPC is sent** (asserted in `tests/remoteContentSearchCapabilityUi.test.mjs`). |
+| WSL / local | WSL still answers null (index roots intentionally empty, UNC is not scanned host-side); local keeps the existing file-index path unchanged. |
+
+**Old-helper fallback:** a helper whose `hello` list lacks `fs.searchContent` remains fully usable for name
+search and file reads; only the content section and its IPC are withheld. Unknown capability is treated as
+unsupported, never as "try and see".
+
+### 7.2 Security boundaries of the frozen `search-content.mjs`
+
+- **Root-confined, no symlink following.** The walk starts at the request path the entry already resolved
+  inside the canonical root; dirent link entries are never descended into, `O_NOFOLLOW` is used on open, and
+  every descendant path is `path.join` of an opened directory and a name that directory reported.
+- **No raw file body ever leaves the helper.** A match carries relative path, basename, 1-based line, 0-based
+  column and a snippet of at most 200 characters of that line; the frame never contains file bytes.
+- **Text only, honest skips.** A binary file (NUL in the first 8 KiB probe) and a file failing strict UTF-8
+  decoding are skipped, not returned; the probe is read first so a binary file never costs its full size.
+  Fixed VCS/package directories (`.git`, `.hg`, `.svn`, `node_modules`, `.pideck-trash`) are not walked.
+- **Bounded resources.** 200 matches, 2000 files, 16 MiB read, one file >1 MiB skipped without reading,
+  depth 12, 8 s scanning budget, plus the helper's request deadline and 4-slot concurrency. Reaching a bound
+  stops the walk and answers `truncated:true` with `reason` (`matches|files|bytes|time|depth|file-size`), so a
+  bounded answer is a deterministic prefix and never looks complete.
+- **Cancellable exactly once.** `cancel` aborts a running content walk at its next entry boundary; the terminal
+  frame is one `REQUEST_CANCELLED`, never a partial result. Main-side, an `AbortSignal` is forwarded as a
+  helper cancel by request id.
+- **Result hygiene at the main boundary.** Helper answers are remote data: exact field sets, relative POSIX
+  paths, name/path agreement, bounded line/column/snippet and cross-checked counts. The route also filters
+  `.pideck-trash` and upload temporary names, mirroring the filename search.
+
+### 7.3 Evidence and residual risk
+
+Targeted tests (all green on the W2 branch, see the lane handoff for exact commands/exit codes):
+`tests/remoteHelperSearchContent.test.mjs` (real child process: capability, case-insensitive matches,
+binary/UTF-8/link skips, fixed-directory skip, match ceiling, oversized file, refusals, host-only, cancel),
+`tests/remoteSearchContentReader.test.mjs`, `tests/remoteContentSearchRouting.test.mjs`,
+`tests/remoteContentSearchCapabilityUi.test.mjs`, and the capability regression in
+`tests/remoteProjectRootStatusIsolation.test.mjs`.
+
+Residual risks: the 8 s/16 MiB budget can still be slow over a high-latency link (bounded, cancellable, but
+user-perceived latency is untested on a real host); snippets may contain path-like or secret-looking text from
+the project's own files, so the UI must not treat them as authority (they are display-only and never become a
+command/path input); real-host e2e for content search is **not yet run** — capability/fallback routing is
+unit-tested, the remote end-to-end case is left to the verification lane.

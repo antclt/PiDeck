@@ -4,8 +4,19 @@ import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const { createRemoteWorkspaceReader, REMOTE_WORKSPACE_DIAGNOSTIC_CODES, REMOTE_WORKSPACE_MAX_READ_BYTES, REMOTE_WORKSPACE_MAX_READ_CHUNKS, REMOTE_WORKSPACE_READER_CODES } = loadTsCommonJs("src/main/remote/RemoteWorkspaceReader.ts");
-const { REMOTE_HELPER_ERROR_CODES, REMOTE_HELPER_MAX_CHUNK_BYTES, REMOTE_HELPER_MAX_LIST_ENTRIES, REMOTE_HELPER_MAX_PATH_LENGTH, REMOTE_HELPER_METHOD_CANCEL, REMOTE_HELPER_METHOD_FS_LIST, REMOTE_HELPER_METHOD_FS_READ, REMOTE_HELPER_METHOD_FS_STAT, REMOTE_HELPER_PROTOCOL_VERSION } =
-	loadTsCommonJs("src/main/remote/RemoteHelperContract.ts");
+const {
+	REMOTE_HELPER_ERROR_CODES,
+	REMOTE_HELPER_MAX_CHUNK_BYTES,
+	REMOTE_HELPER_MAX_LIST_ENTRIES,
+	REMOTE_HELPER_MAX_PATH_LENGTH,
+	REMOTE_HELPER_MAX_STAT_MANY_PATHS,
+	REMOTE_HELPER_METHOD_CANCEL,
+	REMOTE_HELPER_METHOD_FS_LIST,
+	REMOTE_HELPER_METHOD_FS_READ,
+	REMOTE_HELPER_METHOD_FS_STAT,
+	REMOTE_HELPER_METHOD_FS_STAT_MANY,
+	REMOTE_HELPER_PROTOCOL_VERSION,
+} = loadTsCommonJs("src/main/remote/RemoteHelperContract.ts");
 const { createRemoteControlClient } = loadTsCommonJs("src/main/remote/RemoteControlClient.ts");
 
 const HOST = "host-1";
@@ -698,4 +709,105 @@ test("a transport rejection with its own stable code and retryable flag is relay
 test("the reader refuses to be built without a usable transport", () => {
 	assert.throws(() => createRemoteWorkspaceReader({ port: {} }), /REMOTE_WORKSPACE_READER_OPTIONS_INVALID/);
 	assert.throws(() => createRemoteWorkspaceReader({ port: { request: () => Promise.resolve(undefined) }, onDiagnostic: "later" }), /REMOTE_WORKSPACE_READER_OPTIONS_INVALID/);
+});
+
+/*
+ * F4: `fs.statMany` — one bounded request, the single call's per-path semantics, and a fail-closed decode.
+ */
+
+test("statMany describes a path list in one frame and rebuilds the answer field by field", async (t) => {
+	const helper = createHelperHarness();
+	t.after(() => helper.close());
+	const paths = ["ws/a.jsonl", "ws/b.jsonl", "root.jsonl"];
+	helper.nextResult(REMOTE_HELPER_METHOD_FS_STAT_MANY, {
+		entries: [
+			{ path: "ws/a.jsonl", kind: "file", bytes: 10, mtimeMs: FIXED_MTIME },
+			{ path: "ws/b.jsonl", kind: "directory", bytes: 0, mtimeMs: FIXED_MTIME + 1 },
+			{ path: "root.jsonl", kind: "other", bytes: 3, mtimeMs: FIXED_MTIME + 2 },
+		],
+	});
+	const result = await helper.reader.statMany(HOST, paths);
+	assert.deepEqual(Object.keys(result), ["entries"]);
+	assert.deepEqual(plain(result.entries), [
+		{ path: "ws/a.jsonl", kind: "file", bytes: 10, mtimeMs: FIXED_MTIME },
+		{ path: "ws/b.jsonl", kind: "directory", bytes: 0, mtimeMs: FIXED_MTIME + 1 },
+		{ path: "root.jsonl", kind: "other", bytes: 3, mtimeMs: FIXED_MTIME + 2 },
+	]);
+	const frames = helper.ofMethod(REMOTE_HELPER_METHOD_FS_STAT_MANY);
+	assert.equal(frames.length, 1, "one request for the whole list");
+	assert.deepEqual(Object.keys(frames[0].params), ["paths"]);
+	assert.deepEqual(frames[0].params.paths, paths);
+});
+
+test("statMany answers an empty list without writing a frame", async (t) => {
+	const helper = createHelperHarness();
+	t.after(() => helper.close());
+	const result = await helper.reader.statMany(HOST, []);
+	assert.deepEqual(plain(result), { entries: [] });
+	assert.equal(helper.frames.length, 0, "there is nothing to ask the remote");
+});
+
+test("statMany refuses an oversized or malformed list before sending anything", async (t) => {
+	const helper = createHelperHarness();
+	t.after(() => helper.close());
+	for (const paths of [Array.from({ length: REMOTE_HELPER_MAX_STAT_MANY_PATHS + 1 }, () => "a.jsonl"), ["a.jsonl", 7], "a.jsonl", undefined, [""], ["a".repeat(REMOTE_HELPER_MAX_PATH_LENGTH + 1)]]) {
+		const error = await rejection(helper.reader.statMany(HOST, paths));
+		assert.equal(error.code, "PROTOCOL_INVALID");
+	}
+	assert.equal(helper.frames.length, 0, "an invalid call never reaches the host");
+});
+
+test("statMany refuses an answer that does not match the request position by position", async (t) => {
+	const helper = createHelperHarness();
+	t.after(() => helper.close());
+	const paths = ["a.jsonl", "b.jsonl"];
+	const cases = [
+		{ entries: [{ path: "a.jsonl", kind: "file", bytes: 1, mtimeMs: FIXED_MTIME }] },
+		{
+			entries: [
+				{ path: "b.jsonl", kind: "file", bytes: 1, mtimeMs: FIXED_MTIME },
+				{ path: "a.jsonl", kind: "file", bytes: 1, mtimeMs: FIXED_MTIME },
+			],
+		},
+		{
+			entries: [
+				{ path: "a.jsonl", kind: "file", bytes: 1, mtimeMs: FIXED_MTIME, extra: 1 },
+				{ path: "b.jsonl", kind: "file", bytes: 1, mtimeMs: FIXED_MTIME },
+			],
+		},
+		{
+			entries: [
+				{ path: "a.jsonl", kind: "socket", bytes: 1, mtimeMs: FIXED_MTIME },
+				{ path: "b.jsonl", kind: "file", bytes: 1, mtimeMs: FIXED_MTIME },
+			],
+		},
+		{
+			entries: [
+				{ path: "a.jsonl", kind: "file", bytes: -1, mtimeMs: FIXED_MTIME },
+				{ path: "b.jsonl", kind: "file", bytes: 1, mtimeMs: FIXED_MTIME },
+			],
+		},
+		{
+			entries: [
+				{ path: "a.jsonl", kind: "file", bytes: 1, mtimeMs: "now" },
+				{ path: "b.jsonl", kind: "file", bytes: 1, mtimeMs: FIXED_MTIME },
+			],
+		},
+		{ entries: "a.jsonl" },
+		{},
+	];
+	for (const answer of cases) {
+		helper.nextResult(REMOTE_HELPER_METHOD_FS_STAT_MANY, answer);
+		const error = await rejection(helper.reader.statMany(HOST, paths));
+		assert.equal(error.code, "PROTOCOL_INVALID", JSON.stringify(answer));
+	}
+});
+
+test("statMany relays the helper's own refusal instead of a partial list", async (t) => {
+	const helper = createHelperHarness();
+	t.after(() => helper.close());
+	helper.nextError(REMOTE_HELPER_METHOD_FS_STAT_MANY, { code: "PATH_NOT_FOUND", retryable: false });
+	const error = await rejection(helper.reader.statMany(HOST, ["a.jsonl", "gone.jsonl"]));
+	assert.equal(error.code, "PATH_NOT_FOUND", "the batch's own all-or-nothing code is relayed unchanged");
+	assert.ok(helper.codes().includes("PATH_NOT_FOUND"), "the diagnostic names the same code");
 });

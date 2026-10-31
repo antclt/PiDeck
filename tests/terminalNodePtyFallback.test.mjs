@@ -180,7 +180,8 @@ test("spawn 失败不消耗标题序号：node-pty 恢复后仍从 1 开始编�
 	// 失败路径不能留下空桶，也不能把序号推到 2
 	state.failure = null;
 	const tab = manager.create(projectTarget);
-	assert.match(tab.title, / 1$/, `失败的 create 不得消耗序号（实际 ${tab.title}）`);
+	// 合并 origin/dev 后标题带项目后缀（「pwsh 1 · p1」）；序号仍必须是 1，后缀不参与编号。
+	assert.match(tab.title, / 1(?: · .+)?$/, `失败的 create 不得消耗序号（实际 ${tab.title}）`);
 	assert.deepEqual(plain(manager.list(projectTarget).map((item) => item.title)), [tab.title]);
 });
 
