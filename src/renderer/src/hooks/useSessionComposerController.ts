@@ -168,10 +168,10 @@ export type UseSessionComposerControllerOptions = {
 	 * 引导页等无 record 虚拟会话的项目上下文（ProjectEmptyState 经
 	 * SessionStartSurface 传选中的 activeProject.id）。有 record 时一律以
 	 * record.projectId 为准；仅给 @ 文件引用/默认偏好提供项目来源，不参与
-	 * 会话创建（发送仍由 App.ensureSessionForSend 落地）。
+	 * 会话创建（发送 / 选择 ACP 均由 App.ensureSessionForSend 落地）。
 	 */
 	bootstrapProjectId?: string;
-	/** target：引导页首次发送时的后端选择（缺省按设置默认创建）。 */
+	/** target：引导页首次发送 / 选择 ACP 时的后端选择（缺省按设置默认创建）。 */
 	ensureSessionId?: (sessionId: string, target?: NewSessionBackendTarget) => Promise<string>;
 	/** 用户主动发消息时回调（预览 Tab 晋升常驻）；来自 SessionPaneServices 装配。 */
 	onPromoteSession?: (sessionId: string) => void;
@@ -296,6 +296,10 @@ function composerImageNotice(error: unknown): string {
 
 export function useSessionComposerController(options: UseSessionComposerControllerOptions) {
 	const { sessionId, enqueue, ensureSessionId, suppressQueuedDrain } = options;
+	// changeBackend 的依赖数组是既有契约测试锁定的形状；ensureSessionId 会随
+	// activeProjectId 变化，用 ref 取最新值，避免闭包拿到旧项目上下文。
+	const ensureSessionIdRef = useRef(ensureSessionId);
+	ensureSessionIdRef.current = ensureSessionId;
 	const store = useStore();
 	const record = useAtomValue(sessionRecordByIdAtomFamily(sessionId));
 	const enhanceModelConfig = useAtomValue(enhanceModelAtom);
@@ -346,7 +350,8 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	// 引导页虚拟会话的后端显式选择：无 record、不落 catalog，切换只写本页 state。
 	// 刻意不从 localStorage 恢复「上次选择」：新建会话默认后端只跟随设置项——
 	// 自动沿用 ACP 会在冷启动把握手加载态塞进输入框（用户反馈体验差），用户要
-	// 换后端就在输入框里手动切，首次发送按当前选择创建真实会话。
+	// 换后端就在输入框里手动切；pi/DSH 首次发送按当前选择创建真实会话，
+	// ACP 选择即创建（configOptions 需要 runtime 握手，见 changeBackend）。
 	const defaultAgentBackend = useAtomValue(effectiveAgentBackendAtom);
 	const isGuideBootstrapSession = sessionId === GUIDE_BOOTSTRAP_SESSION_ID;
 	const [guideBackendOverride, setGuideBackendOverride] = useState<AgentBackend | undefined>(undefined);
@@ -1108,6 +1113,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	const sessionTurnRunning = isSessionTurnRunning(runtime?.state, runtime?.status);
 	const isBusy = isSessionRuntimeBusy(runtime?.status, runtime?.state, isAcpBackend ? "acp" : undefined);
 	// 预热只创建进程，不能把编辑器 setEditable(false)：contenteditable 关掉会失焦，输入一半就断。
+	// 「启动中」只认 activating（用户按下发送后的会话创建期）：预热（prewarm）不算——
+	// 预热进程不阻塞输入，用户此时编辑草稿/选模型都是合法的（有意设计，非漏判；
+	// 若把预热也当启动，输入框会在后台预热时被无理由锁住）。
 	const isStarting = isUserFacingSessionStart(sendState.status);
 	// ACP 预热（握手 + 枚举 configOptions）可能持续数秒：编辑器照常可输入，
 	// 输入框底栏同时显示初始化指示。**发送不被它拦住**：主进程的激活闸门（ensureRuntime 复用同一条
@@ -2232,6 +2240,21 @@ export function useSessionComposerController(options: UseSessionComposerControll
 					}
 					guideToolId = toolId;
 				}
+				// ACP 与其它后端不同：configOptions（模型/模式枚举）只能由 runtime 握手
+				// （session/new/load）产出，而引导页是 renderer-only 虚拟会话，activateRuntime
+				// 必然查不到 catalog 记录。只写本地偏好的话，用户在选择 ACP 后永远看不到
+				// 参数加载、ACP 进程也不会启动，必须等到首次发送（2026-10 用户反馈：
+				// 导入新目录后选 ACP 不自动加载/启动）。选择 ACP 即用户意图：立刻落成真实
+				// draft 并切过去，与项目「+」/Tab「+」的 createAcp 同一条创建链；composer
+				// 状态（草稿/附件/模式）由 App.ensureSessionForSend 整体提升，不丢输入。
+				if (next === "acp" && ensureSessionIdRef.current) {
+					try {
+						await ensureSessionIdRef.current(GUIDE_BOOTSTRAP_SESSION_ID, { backend: "acp", acpToolId: guideToolId });
+					} catch (error) {
+						showNotice(error instanceof Error ? error.message : String(error), 4000);
+					}
+					return;
+				}
 				setGuideBackendOverride(next);
 				// acp→acp 换工具：后端同值不触发重渲染，工具 id 单独 set（见 state 声明处注释）
 				if (guideToolId) setGuideAcpToolOverride(guideToolId);
@@ -2531,14 +2554,17 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			/**
 			 * 快捷消息直发可用性：与 canSend 同源，但去掉「草稿非空」这一项——
 			 * 快捷消息的正文来自清单，发它的时候输入框通常是空的。
+			 * submittingVideo 与 canSend 一致纳入（Wave 4 状态统一）：视频提交中任何发送入口都应锁。
 			 */
-			canSendQuickMessage: !isStarting && !generatingImage && (!isDshBackend || runtime?.state?.modelRoutable !== false),
+			canSendQuickMessage: !isStarting && !generatingImage && !submittingVideo && (!isDshBackend || runtime?.state?.modelRoutable !== false),
 			// 并行发送（拆分菜单）：当前草稿文本进独立 Ask 会话后台处理，成功后清空草稿。
 			// 上下文由 useAskPanel 按 originSessionId 自动生成（与队列面板共用同一口径），
 			// 这里只负责把来源会话传下去；不要在本入口另建一份 context，否则会再次分叉。
 			// 仅投递纯文本：并行问询不支持图片附件（与队列面板 onSendAsk 的 canAsk 判据一致），
 			// 带图时 ComposerSendControls 端按 canSendParallel=false 置灰。
-			canSendParallel: Boolean(draft.trim()) && attachments.length === 0 && !isStarting && !generatingImage && Boolean(effectiveProjectId),
+			// 不查 modelRoutable（并行走 Ask 会话独立后端，不吃当前 DSH 绑定）；
+			// submittingVideo 纳入（Wave 4 状态统一）：视频提交中任何发送入口都应锁。
+			canSendParallel: Boolean(draft.trim()) && attachments.length === 0 && !isStarting && !generatingImage && !submittingVideo && Boolean(effectiveProjectId),
 			sendParallel: () => {
 				const text = draft.trim();
 				if (!text || !effectiveProjectId) return;

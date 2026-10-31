@@ -6,7 +6,7 @@ import { t, type TranslationKey } from "../../../i18n";
  * 用户可能先改外观再改语言，但「常用设置」里的项更容易对上导航。
  */
 
-export type SettingsUnsavedTabId = "common" | "shortcuts" | "appearance" | "proxy" | "web" | "editors" | "git" | "dev" | "im" | "pet" | "notification" | "storage" | "usage" | "process" | "vision" | "imagegen" | "acp";
+export type SettingsUnsavedTabId = "common" | "shortcuts" | "appearance" | "terminal" | "proxy" | "web" | "editors" | "git" | "dev" | "im" | "pet" | "notification" | "storage" | "usage" | "process" | "vision" | "imagegen" | "videogen" | "acp";
 
 /** 单条变更项：tab 名 + 字段名（均为 i18n key，渲染时再翻译）。 */
 export type SettingsUnsavedItem = {
@@ -31,6 +31,7 @@ const TAB_LABEL_KEYS: Record<SettingsUnsavedTabId, TranslationKey> = {
 	common: "settings.tabs.common",
 	shortcuts: "settings.tabs.shortcuts",
 	appearance: "settings.tabs.appearance",
+	terminal: "settings.tabs.terminal",
 	proxy: "settings.tabs.proxy",
 	web: "settings.tabs.web",
 	editors: "settings.tabs.editors",
@@ -44,6 +45,7 @@ const TAB_LABEL_KEYS: Record<SettingsUnsavedTabId, TranslationKey> = {
 	process: "settings.tabs.process",
 	vision: "settings.tabs.vision",
 	imagegen: "settings.tabs.imagegen",
+	videogen: "settings.tabs.videogen",
 	acp: "settings.tabs.acp",
 };
 
@@ -68,6 +70,16 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "idleAgentAutoRelease", tab: "common", itemKey: "settings.idleAgentAutoRelease" },
 	{ field: "idleAgentKeepCount", tab: "common", itemKey: "settings.idleAgentKeepCount" },
 	{ field: "idleAgentTimeoutMin", tab: "common", itemKey: "settings.idleAgentTimeoutMin" },
+	{ field: "terminalTheme", tab: "terminal", itemKey: "settings.terminal.theme" },
+	{ field: "terminalFontSize", tab: "terminal", itemKey: "settings.terminal.fontSize" },
+	{ field: "terminalFontFamily", tab: "terminal", itemKey: "settings.terminal.font" },
+	{ field: "terminalPaddingY", tab: "terminal", itemKey: "settings.terminal.paddingY" },
+	{ field: "terminalScrollback", tab: "terminal", itemKey: "settings.terminal.scrollback" },
+	{ field: "terminalCursorStyle", tab: "terminal", itemKey: "settings.terminal.cursorStyle" },
+	{ field: "terminalCursorBlink", tab: "terminal", itemKey: "settings.terminal.cursorBlink" },
+	{ field: "terminalCopyOnSelect", tab: "terminal", itemKey: "settings.terminal.copyOnSelect" },
+	{ field: "terminalConfirmClose", tab: "terminal", itemKey: "settings.terminal.confirmClose" },
+	{ field: "terminalStartupCommand", tab: "terminal", itemKey: "settings.terminal.startupCommand" },
 	{ field: "enableNotifications", tab: "notification", itemKey: "settings.enableNotifications" },
 	{ field: "askNotificationEnabled", tab: "notification", itemKey: "settings.askNotification" },
 	{ field: "alertOnlyWhenUnfocused", tab: "notification", itemKey: "settings.alertOnlyWhenUnfocused" },
@@ -179,7 +191,7 @@ function itemIdentity(tab: SettingsUnsavedTabId, itemKey: TranslationKey): strin
  * 把 dirty 字段收成关闭确认要用的一条摘要。
  * visionDirty 不是 AppSettings 字段（写 pi-deck-vision.json），单独挂到视觉桥 tab。
  */
-export function summarizeSettingsUnsavedChanges(input: { dirtyFields: Iterable<string>; visionDirty?: boolean; imageGenDirty?: boolean; acpDirty?: boolean }): SettingsUnsavedSummary | null {
+export function summarizeSettingsUnsavedChanges(input: { dirtyFields: Iterable<string>; visionDirty?: boolean; imageGenDirty?: boolean; videoGenDirty?: boolean; acpDirty?: boolean }): SettingsUnsavedSummary | null {
 	const dirty = new Set(input.dirtyFields);
 	const seen = new Set<string>();
 	const items: Array<{ tab: SettingsUnsavedTabId; itemKey: TranslationKey }> = [];
@@ -210,6 +222,10 @@ export function summarizeSettingsUnsavedChanges(input: { dirtyFields: Iterable<s
 		push("imagegen", "settings.tabs.imagegen");
 	}
 
+	if (input.videoGenDirty) {
+		push("videogen", "settings.tabs.videogen");
+	}
+
 	if (input.acpDirty) {
 		push("acp", "settings.tabs.acp");
 	}
@@ -225,7 +241,7 @@ export function summarizeSettingsUnsavedChanges(input: { dirtyFields: Iterable<s
 }
 
 /** 左侧导航要打黄点的 tab：按字段目录归并，视觉桥草稿单独算 vision。 */
-export function dirtySettingsTabIds(input: { dirtyFields: Iterable<string>; visionDirty?: boolean; imageGenDirty?: boolean; acpDirty?: boolean }): Set<SettingsUnsavedTabId> {
+export function dirtySettingsTabIds(input: { dirtyFields: Iterable<string>; visionDirty?: boolean; imageGenDirty?: boolean; videoGenDirty?: boolean; acpDirty?: boolean }): Set<SettingsUnsavedTabId> {
 	const dirty = new Set(input.dirtyFields);
 	const tabs = new Set<SettingsUnsavedTabId>();
 	for (const entry of FIELD_CATALOG) {
@@ -233,6 +249,7 @@ export function dirtySettingsTabIds(input: { dirtyFields: Iterable<string>; visi
 	}
 	if (input.visionDirty) tabs.add("vision");
 	if (input.imageGenDirty) tabs.add("imagegen");
+	if (input.videoGenDirty) tabs.add("videogen");
 	if (input.acpDirty) tabs.add("acp");
 	return tabs;
 }

@@ -262,6 +262,131 @@ test("保存不发明模型级 api：未写 api 时不补键（继承 provider �
 	assert.equal(written.providers.p.api, "openai-completions");
 });
 
+// ── #458：pi 对 models.json 做整文件 TypeBox schema 校验，任一字段非法 → 整份拒绝，
+// 所有自定义供应商从列表消失。以下锁定保存路径的清洗语义：非法值删键回缺省合法态，
+// 合法值原样保留（不发明、不篡改）。
+
+test("#458 保存清洗内联编辑写出的空串：name/baseUrl/apiKey 删键回缺省", async () => {
+	lastWrittenJson = null;
+	const data = {
+		providers: {
+			// 展开卡片/编辑页清空输入框 = 写空串落盘（不经 addProviderDraft 的 trim/删键路径）
+			empty: { name: "", baseUrl: "", apiKey: "", api: "openai-completions", models: [{ id: "m1" }] },
+			// 纯空白同罪（pi schema minLength 1，trim 后为空写盘即拒）
+			blank: { name: "  ", baseUrl: "\t", apiKey: " ", api: "openai-completions", models: [{ id: "m2" }] },
+		},
+	};
+	const result = await manager.saveModelsConfig(data);
+	assert.equal(result.valid, true);
+	const written = JSON.parse(lastWrittenJson);
+	for (const prov of ["empty", "blank"]) {
+		for (const field of ["name", "baseUrl", "apiKey"]) {
+			assert.equal(Object.hasOwn(written.providers[prov], field), false, `${prov}.${field} 空/空白应删键`);
+		}
+		assert.equal(written.providers[prov].api, "openai-completions", `${prov}.api 非空应保留`);
+	}
+});
+
+test("#458 保存保留合法的 name/baseUrl/apiKey，不受清洗影响", async () => {
+	lastWrittenJson = null;
+	const data = {
+		providers: { keep: { name: "我的中转", baseUrl: " https://example.com/v1 ", apiKey: "sk-live", api: "openai-completions", models: [{ id: "m1" }] } },
+	};
+	const result = await manager.saveModelsConfig(data);
+	assert.equal(result.valid, true);
+	const written = JSON.parse(lastWrittenJson);
+	assert.equal(written.providers.keep.name, "我的中转");
+	// 非空值原样保留（含首尾空格的 baseUrl——不裁剪用户配置，只拦空串）
+	assert.equal(written.providers.keep.baseUrl, " https://example.com/v1 ");
+	assert.equal(written.providers.keep.apiKey, "sk-live");
+});
+
+test("#458 保存清洗非正数容量：contextWindow/maxTokens 删键交 pi 默认", async () => {
+	lastWrittenJson = null;
+	const data = {
+		providers: {
+			p: {
+				api: "openai-completions",
+				models: [
+					{ id: "zero", contextWindow: 0, maxTokens: 0 },
+					{ id: "neg", contextWindow: -100, maxTokens: -1 },
+					{ id: "ok", contextWindow: 128000, maxTokens: 16384 },
+				],
+			},
+		},
+	};
+	const result = await manager.saveModelsConfig(data);
+	assert.equal(result.valid, true);
+	const written = JSON.parse(lastWrittenJson);
+	const models = written.providers.p.models;
+	assert.equal(Object.hasOwn(models[0], "contextWindow"), false, "contextWindow 0 应删键");
+	assert.equal(Object.hasOwn(models[0], "maxTokens"), false, "maxTokens 0 应删键");
+	assert.equal(Object.hasOwn(models[1], "contextWindow"), false, "负数应删键");
+	assert.equal(Object.hasOwn(models[1], "maxTokens"), false, "负数应删键");
+	assert.equal(models[2].contextWindow, 128000, "正数原样保留");
+	assert.equal(models[2].maxTokens, 16384, "正数原样保留");
+});
+
+test("#458 保存补齐部分 cost：四费率缺的补 0，空对象删键，半成品档补 0", async () => {
+	lastWrittenJson = null;
+	const data = {
+		providers: {
+			p: {
+				api: "openai-completions",
+				models: [
+					// 部分 cost（只有 input）→ pi must have required properties output, cacheRead, cacheWrite
+					{ id: "partial", cost: { input: 1.5 } },
+					// 四键全无 → 删键（缺省合法）
+					{ id: "empty", cost: {} },
+					// 四键全备 + tiers 混入半成品档（缺费率）→ 补 0 保留分档意图（对齐计费弹框）
+					{
+						id: "tiers",
+						cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.2, tiers: [{ inputTokensAbove: 100, input: 3, output: 4 }, { inputTokensAbove: 50 }] },
+					},
+				],
+			},
+		},
+	};
+	const result = await manager.saveModelsConfig(data);
+	assert.equal(result.valid, true);
+	const written = JSON.parse(lastWrittenJson);
+	const models = written.providers.p.models;
+	assert.deepEqual(models[0].cost, { input: 1.5, output: 0, cacheRead: 0, cacheWrite: 0 }, "部分 cost 应补齐四费率");
+	assert.equal(Object.hasOwn(models[1], "cost"), false, "空 cost 对象应删键");
+	assert.deepEqual(
+		models[2].cost.tiers,
+		[
+			{ inputTokensAbove: 100, input: 3, output: 4, cacheRead: 0, cacheWrite: 0 },
+			{ inputTokensAbove: 50, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		],
+		"半成品档补 0（保留分档意图）、好档保留",
+	);
+	assert.equal(models[2].cost.input, 1, "四键全备的 cost 原样保留");
+});
+
+test("#458 保存过滤非法 input 枚举：只留 text/image，全过滤后删键", async () => {
+	lastWrittenJson = null;
+	const data = {
+		providers: {
+			p: {
+				api: "openai-completions",
+				models: [
+					{ id: "mixed", input: ["text", "audio", "image"] },
+					{ id: "allbad", input: ["audio", "video"] },
+					{ id: "legal", input: ["text"] },
+				],
+			},
+		},
+	};
+	const result = await manager.saveModelsConfig(data);
+	assert.equal(result.valid, true);
+	const written = JSON.parse(lastWrittenJson);
+	const models = written.providers.p.models;
+	assert.deepEqual(models[0].input, ["text", "image"], "非法项过滤，合法项保留顺序");
+	assert.equal(Object.hasOwn(models[1], "input"), false, "全过滤后删键（缺省 = text-only）");
+	assert.deepEqual(models[2].input, ["text"], "合法数组原样不动");
+});
+
 // ── 网络探测路径仍可兜底 ────────────────────────────────
 // 保存与「拉取模型列表」必须是两条规则：探测遇到未知协议时用最通用的
 // openai-completions 形状试探是合理的，这里锁定该行为不被本修复误伤。

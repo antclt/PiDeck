@@ -16,6 +16,11 @@ import {
 	WEB_REMOTE_CLOUDFLARED_PROTOCOLS,
 	isValidWebTokenShape,
 	sanitizeCloudflaredExtraArgs,
+	sanitizeEasyTierVirtualIp,
+	sanitizeEasyTierCliPath,
+	sanitizeEasyTierNetworkName,
+	sanitizeEasyTierNetworkSecret,
+	sanitizeEasyTierPeers,
 	type AppSettings,
 	type TerminalConfirmCloseMode,
 	type TerminalCursorStyle,
@@ -675,6 +680,15 @@ export class SettingsStore {
 			const parsedProtocol = parsed.webRemoteCloudflaredProtocol;
 			this.settings.webRemoteCloudflaredProtocol = parsedProtocol && (WEB_REMOTE_CLOUDFLARED_PROTOCOLS as readonly string[]).includes(parsedProtocol) ? parsedProtocol : undefined;
 			this.settings.webRemoteCloudflaredExtraArgs = sanitizeCloudflaredExtraArgs(parsed.webRemoteCloudflaredExtraArgs) || undefined;
+			// EasyTier 手动兜底 IP：严格 IPv4，脏值/历史缺字段一律视为未设置。
+			this.settings.webRemoteEasyTierIp = sanitizeEasyTierVirtualIp(parsed.webRemoteEasyTierIp) || undefined;
+			// EasyTier CLI 路径：解压版/非默认目录安装时的显式入口，脏值视为未设置。
+			this.settings.webRemoteEasyTierCliPath = sanitizeEasyTierCliPath(parsed.webRemoteEasyTierCliPath) || undefined;
+			// 托管网络的三个字段：缺任意一项都由 UI/主进程退回只读探测，脏值一并视为未设置。
+			this.settings.webRemoteEasyTierNetworkName = sanitizeEasyTierNetworkName(parsed.webRemoteEasyTierNetworkName) || undefined;
+			this.settings.webRemoteEasyTierNetworkSecret = sanitizeEasyTierNetworkSecret(parsed.webRemoteEasyTierNetworkSecret) || undefined;
+			const parsedPeers = sanitizeEasyTierPeers(parsed.webRemoteEasyTierPeers);
+			this.settings.webRemoteEasyTierPeers = parsedPeers.length > 0 ? parsedPeers : undefined;
 			// 旧设置或脏值不能隐式打开向增强模型发送会话正文的开关。
 			this.settings.enhanceIncludeContext = parsed.enhanceIncludeContext === true;
 			// 输入预测只有显式 false 才关闭：老设置缺字段按默认开启处理。
@@ -1089,6 +1103,37 @@ export class SettingsStore {
 		// 发送后回底开关同规则：只认布尔，脏值不落盘（缺失 = 保持当前值）。
 		if ("scrollToLatestOnSend" in safePatch && typeof safePatch.scrollToLatestOnSend !== "boolean") {
 			delete safePatch.scrollToLatestOnSend;
+		}
+		// EasyTier 手动 IP：空串表示清除（undefined 会随 JSON 序列化消失）；非法值不覆盖既有设置。
+		if ("webRemoteEasyTierIp" in safePatch) {
+			const raw = safePatch.webRemoteEasyTierIp;
+			const sanitized = sanitizeEasyTierVirtualIp(raw);
+			if (sanitized) safePatch.webRemoteEasyTierIp = sanitized;
+			else if (typeof raw === "string" && raw.trim() === "") safePatch.webRemoteEasyTierIp = undefined;
+			else delete safePatch.webRemoteEasyTierIp;
+		}
+		// EasyTier CLI 路径：同一口径——空串清除，非法值不覆盖既有设置。
+		if ("webRemoteEasyTierCliPath" in safePatch) {
+			const raw = safePatch.webRemoteEasyTierCliPath;
+			const sanitized = sanitizeEasyTierCliPath(raw);
+			if (sanitized) safePatch.webRemoteEasyTierCliPath = sanitized;
+			else if (typeof raw === "string" && raw.trim() === "") safePatch.webRemoteEasyTierCliPath = undefined;
+			else delete safePatch.webRemoteEasyTierCliPath;
+		}
+		// 托管网络字段：空串清除，非法值不覆盖既有设置；peers 清洗后为空数组同样视为清除。
+		for (const key of ["webRemoteEasyTierNetworkName", "webRemoteEasyTierNetworkSecret"] as const) {
+			if (!(key in safePatch)) continue;
+			const raw = safePatch[key];
+			const sanitized = key === "webRemoteEasyTierNetworkName" ? sanitizeEasyTierNetworkName(raw) : sanitizeEasyTierNetworkSecret(raw);
+			if (sanitized) safePatch[key] = sanitized;
+			else if (typeof raw === "string" && raw.trim() === "") safePatch[key] = undefined;
+			else delete safePatch[key];
+		}
+		if ("webRemoteEasyTierPeers" in safePatch) {
+			const peers = sanitizeEasyTierPeers(safePatch.webRemoteEasyTierPeers);
+			if (peers.length > 0) safePatch.webRemoteEasyTierPeers = peers;
+			else if (Array.isArray(safePatch.webRemoteEasyTierPeers)) safePatch.webRemoteEasyTierPeers = undefined;
+			else delete safePatch.webRemoteEasyTierPeers;
 		}
 		this.settings = { ...this.settings, ...safePatch };
 		// 生图字段来自渲染层，非法值丢掉，避免下次请求带坏 size/watermark。

@@ -1,11 +1,12 @@
 import { useAtomValue } from "jotai";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Ban, Bot, ChevronDown, ChevronUp, CornerUpRight, ExternalLink, FileText, Loader2, Square, X } from "lucide-react";
-import { sessionRuntimeBySessionIdAtomFamily } from "../../atoms";
+import { sessionRecordByIdAtomFamily, sessionRuntimeBySessionIdAtomFamily } from "../../atoms";
 import { desktopApi } from "../../desktopApi";
 import { t } from "../../i18n";
 import type { PiSubagentEntry } from "../../../../shared/types";
 import { useSessionSubagents } from "../../hooks/useSessionSubagents";
+import { useToolDerivedActivity } from "../../hooks/useToolDerivedActivity";
 import { Button } from "../ui-shadcn/button";
 import { VirtualStack, VIRTUAL_STACK_MIN_ROWS } from "../ui-shadcn/virtual-stack";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
@@ -126,7 +127,9 @@ export const PiSubagentEntryRow = (props: {
 	// 按 block memo 渲染，容器限高滚动。
 	const [fullResult, setFullResult] = useState<string | null>(null);
 	useEffect(() => {
-		if (!resultDialogOpen) return;
+		// 工具调用推导条目（ACP）没有 record 可查：会话文件/归档里不存在对应全文，
+		// 每次打开都发一次必然落空的 IPC 只会白等，直接用卡片自带的结果预览。
+		if (!resultDialogOpen || entry.source === "toolcall") return;
 		let cancelled = false;
 		desktopApi.sessions
 			.listSessionSubagents(props.sessionId)
@@ -399,7 +402,8 @@ export const DshSubagentEntryRow = (props: { agentId: string; entry: DshSubagent
 export type SessionSubagentList = {
 	isDsh: boolean;
 	agentId: string | undefined;
-	piEntries: PiSubagentEntry[];
+	/** 非 DSH 后端（pi / ACP）的行数据：两者共用 PiSubagentEntry 与行组件。 */
+	entries: PiSubagentEntry[];
 	dshEntries: DshSubagentEntry[];
 	total: number;
 	running: number;
@@ -408,23 +412,32 @@ export type SessionSubagentList = {
 	loading: boolean;
 };
 
-/** pi：三源合并；DSH：轮询。两条数据通道只取其一，渲染层不区分后端。 */
+/**
+ * pi：三源合并；DSH：轮询；ACP：工具调用推导（CLI 把子代理当普通工具调用上报，
+ * 协议层没有子代理字段——见 shared/toolActivityDerivation.ts）。
+ * 三条数据通道只取其一，渲染层不区分后端。
+ */
 export function useSessionSubagentList(sessionId: string): SessionSubagentList {
 	const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(sessionId));
+	// 冷会话（历史 ACP）没有 runtime，后端只能从 catalog 记录读
+	const record = useAtomValue(sessionRecordByIdAtomFamily(sessionId));
 	const isDsh = runtime?.backend === "dsh";
+	const isAcp = (runtime?.backend ?? record?.backend) === "acp";
 	const agentId = runtime?.agentId;
 	const piSubs = useSessionSubagents(sessionId);
 	const dshEntries = useDshSubagents(isDsh ? agentId : undefined);
-	const piEntries = isDsh ? [] : piSubs.entries;
+	// ACP 走工具推导；pi 走三源合并；DSH 两者都不用
+	const derived = useToolDerivedActivity(sessionId, isAcp && !isDsh);
+	const entries = isDsh ? [] : isAcp ? derived.subagents : piSubs.entries;
 	return {
 		isDsh,
 		agentId,
-		piEntries,
+		entries,
 		dshEntries,
-		total: isDsh ? dshEntries.length : piEntries.length,
-		running: isDsh ? dshEntries.filter((e) => e.activity === "running").length : piEntries.filter((e) => e.status === "running" || e.status === "queued").length,
-		hasAcpEntries: piEntries.some((e) => e.via === "acp-delegate"),
-		loading: !isDsh && piSubs.loading,
+		total: isDsh ? dshEntries.length : entries.length,
+		running: isDsh ? dshEntries.filter((e) => e.activity === "running").length : entries.filter((e) => e.status === "running" || e.status === "queued").length,
+		hasAcpEntries: entries.some((e) => e.via === "acp-delegate"),
+		loading: !isDsh && !isAcp && piSubs.loading,
 	};
 }
 
@@ -438,7 +451,7 @@ export function SessionSubagentsStrip(props: {
 	onOpenChildSession?: (sessionId: string) => void;
 }) {
 	const { collapsed, toggleCollapsed } = useComposerWidgetCollapsed(`subagents:${props.sessionId}`, true);
-	const { isDsh, agentId, piEntries, dshEntries, total, running, hasAcpEntries } = useSessionSubagentList(props.sessionId);
+	const { isDsh, agentId, entries: piEntries, dshEntries, total, running, hasAcpEntries } = useSessionSubagentList(props.sessionId);
 
 	// 两种后端的行压成同一条扁平行序列：虚拟栈只吃扁平数组，而 isDsh 决定的是「每行画什么」，
 	// 不是「有几行列表」。两个后端互斥，合并后顺序与原 map 一致。

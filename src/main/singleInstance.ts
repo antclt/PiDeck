@@ -2,7 +2,7 @@ import { app } from "electron";
 import { existsSync, readFileSync, unlinkSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { basename } from "node:path";
 import { getAppLogger } from "./logging/sharedLogger";
-import { claimVersionLock, collectStaleLockFiles, ensureLocksDir, focusPathIn, lockPathIn, locksDirIn, markLockReady, readLockPayload, sleepSync, takeOverVersionLock, type ClaimOutcome } from "./instanceLockFile";
+import { claimVersionLock, collectStaleLockFiles, ensureLocksDir, focusPathIn, lockPathIn, locksDirIn, markLockReady, readLockPayload, rebindVersionLock, sleepSync, takeOverVersionLock, type ClaimOutcome } from "./instanceLockFile";
 
 /**
  * 按「应用版本」隔离的单实例锁。
@@ -15,6 +15,13 @@ import { claimVersionLock, collectStaleLockFiles, ensureLocksDir, focusPathIn, l
  *
  * 实现：userData/instance-locks/<version>.lock 记录主实例 pid；
  * 次实例写入 .focus 文件并**等待主实例确认**，主实例 fs.watch 后前置窗口。
+ *
+ * 关闭单实例（设置项 singleInstance=false，允许多开）时锁**不消失**，只是不再互斥：
+ * 锁在多开模式下的唯一职责是「深链激活交给哪个窗口」。点系统通知时 Windows 按
+ * `pideck://` 协议唤起一个新进程，若这次启动再开一个新窗口，用户看到的就是
+ * 「点一下通知多出一个 PiDeck」（2026-10 用户反馈）。因此多开模式下：
+ * - 普通启动照常开窗，并把锁过户到自己名下（路由目标跟着最新窗口）；
+ * - 深链激活先按互斥那套握手，交给已运行的同版本实例后自己退出。
  *
  * 「等待确认」是 0.7.5 Linux 反馈的直接修复：旧实现只要锁文件里 PID 存活就
  * 直接 `app.exit(0)`，遇到残留锁（升级时被 kill）或僵尸主实例时用户看到的是
@@ -99,16 +106,23 @@ function noopDispose(): void {
 	// 次实例/未启用单实例时不持有任何资源
 }
 
+export type VersionSingleInstanceOptions = {
+	/**
+	 * 本次启动是否由「深链激活」触发（点系统通知、资源管理器右键打开项目）。
+	 * 多开模式下普通启动照常开窗，但深链激活必须先尝试交给已运行的同版本实例——
+	 * 否则点一下通知就多出一个 PiDeck（2026-10 用户反馈）。
+	 */
+	routeActivation?: boolean;
+};
+
 /**
  * 尝试成为当前版本的主实例。
- * @param enabled 设置项 singleInstance；false 时允许多开（不写锁）
+ * @param enabled 设置项 singleInstance；false 时允许多开（**不互斥**，但锁仍用于深链路由）
  * @param version app.getVersion()
  * @param onFocusRequest 同版本次实例请求前置窗口时回调（携带次实例的 argv，可解析通知激活参数）
  */
-export function acquireVersionSingleInstance(enabled: boolean, version: string, onFocusRequest: (payload: FocusPayload) => void): VersionSingleInstanceResult {
-	if (!enabled) {
-		return { isPrimary: true, dispose: noopDispose };
-	}
+export function acquireVersionSingleInstance(enabled: boolean, version: string, onFocusRequest: (payload: FocusPayload) => void, options: VersionSingleInstanceOptions = {}): VersionSingleInstanceResult {
+	const routeActivation = options.routeActivation === true;
 
 	const locksDir = locksDirIn(app.getPath("userData"));
 	ensureLocksDir(locksDir);
@@ -136,7 +150,12 @@ export function acquireVersionSingleInstance(enabled: boolean, version: string, 
 	};
 
 	let claim: ClaimOutcome = claimVersionLock(lockPath, version);
-	if (claim.status === "busy") {
+	if (claim.status === "busy" && !enabled && !routeActivation) {
+		// 多开 + 普通启动：既不握手（会白等 1.5s）也不退出，只把锁过户到自己名下。
+		// 失败（极窄竞态）就退回无锁启动——多开模式本来不互斥，不能因为锁不顺就挡住用户。
+		claim = rebindVersionLock(lockPath, version);
+		if (claim.status === "busy") claim = { status: "degraded", reason: "multi-open lock rebind raced" };
+	} else if (claim.status === "busy") {
 		// 锁里有活着的持有者，但「活着」不等于「会响应」：残留锁的 PID 复用、
 		// 僵尸主实例、无响应的主实例都会通过存活探测。所以先握手，再决定去留。
 		const verdict = claim.assessment?.verdict ?? "unknown";
@@ -163,8 +182,11 @@ export function acquireVersionSingleInstance(enabled: boolean, version: string, 
 			}
 		}
 		if (claim.status === "busy") {
-			// 极窄竞态：抢的过程中又被别的进程拿到锁，仍按次实例退出（同版本只能一个主实例）
-			return exitAsSecondary(`lock re-claimed by pid ${claim.payload?.pid ?? 0}`);
+			// 极窄竞态：抢的过程中又被别的进程拿到锁。
+			// 单实例：同版本只能一个主实例，仍按次实例退出；
+			// 多开（深链激活）：退回无锁启动，让用户至少看到窗口，不静默退出。
+			if (enabled) return exitAsSecondary(`lock re-claimed by pid ${claim.payload?.pid ?? 0}`);
+			claim = { status: "degraded", reason: "multi-open activation raced" };
 		}
 	}
 
@@ -191,6 +213,9 @@ export function acquireVersionSingleInstance(enabled: boolean, version: string, 
 
 	const handleFocusSignal = () => {
 		try {
+			// 只有锁的持有者处理深链请求：多开模式下锁会随新窗口过户，
+			// 旧窗口的 watcher 仍在跑，不判所有权就会两个窗口抢着消费同一个请求。
+			if (readLockPayload(lockPath)?.pid !== process.pid) return;
 			if (!existsSync(focusPath)) return;
 			let payload: FocusPayload = { at: Date.now(), fromPid: 0 };
 			try {
@@ -221,6 +246,14 @@ export function acquireVersionSingleInstance(enabled: boolean, version: string, 
 			const name = filename == null ? "" : String(filename);
 			if (!name || name === focusName || name.endsWith(".focus")) {
 				handleFocusSignal();
+			}
+			// 多开模式的路由权跟着「活着的窗口」走：持有者退出（锁文件消失）或崩溃（残留死锁）后，
+			// 剩下的窗口要接回深链目标，否则下一次点通知又会开新窗口。
+			// claimVersionLock 只在「能证明旧主人已死」或「没有锁」时才会写，活着的持有者一律 busy，
+			// 因此不会和单实例模式或过户互相打架。
+			if (!enabled && readLockPayload(lockPath)?.pid !== process.pid) {
+				const adopted = claimVersionLock(lockPath, version);
+				if (adopted.status === "acquired") markLockReady(lockPath, process.pid);
 			}
 		});
 	} catch (error) {

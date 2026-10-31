@@ -72,6 +72,28 @@ test("keeps thinking-only history turns and their entry IDs aligned", () => {
 	assert.equal(messages[1].thinking, "Check the history");
 });
 
+test("strips the reasoning signature block before storing thinking for display", () => {
+	// 供应商把思维签名拼在推理正文最前面（DSH 0.2.1-rc.5 同场景）：时间线只显示正文。
+	const [assistant] = createProjector().convert("agent", [{ role: "assistant", content: [{ type: "thinking", thinking: "<signature>c2lnbmF0dXJl</signature>\nCheck the history" }], timestamp: 2 }], ["entry-assistant"]);
+	assert.equal(assistant.thinking, "Check the history");
+	assert.equal(assistant.text, "");
+});
+
+test("drops a thinking-only turn whose only content is the signature block", () => {
+	const messages = createProjector().convert(
+		"agent",
+		[
+			{ role: "user", content: [{ type: "text", text: "Inspect this" }], timestamp: 1 },
+			{ role: "assistant", content: [{ type: "thinking", thinking: "<signature>c2lnbmF0dXJl" }], timestamp: 2 },
+		],
+		["entry-user", "entry-thinking"],
+	);
+	assert.deepEqual(
+		messages.map((message) => message.role),
+		["user"],
+	);
+});
+
 test("restores image-only history messages with a localized placeholder", () => {
 	const messages = createProjector().convert(
 		"agent",

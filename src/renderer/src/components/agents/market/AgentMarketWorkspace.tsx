@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { ArrowLeft } from "lucide-react";
+import { Bot, ArrowLeft } from "lucide-react";
 import type { AgentProfile } from "../../../../../shared/types/agentProfile";
 import { agentMarketSettingsAtom, agentProfileSnapshotAtom, agentProfilesAtom } from "../../../atoms/agent-atoms";
 import { desktopApi } from "../../../desktopApi";
@@ -16,6 +16,7 @@ import { AgentMarketCategoryChips } from "./AgentMarketCategoryChips";
 import { AgentMarketDetail } from "./AgentMarketDetail";
 import { AgentMarketEditor } from "./AgentMarketEditor";
 import { AgentMarketGrid } from "./AgentMarketGrid";
+import { PageHeader } from "../../common/PageHeader";
 import { AgentMarketHeader } from "./AgentMarketHeader";
 import { useAgentMarketActions } from "./useAgentMarketActions";
 
@@ -225,18 +226,22 @@ export function AgentMarketWorkspace({ initialEditingAgentId, onUseAgent, onClos
 /** 编辑器视图的子头部：返回市场 + 标题（+ 内置徽标）。关闭页面统一交给会话 Tab。 */
 function AgentMarketRouteHeader(props: { title: string; builtin: boolean; onBack: () => void }) {
 	return (
-		<header className="flex shrink-0 items-center justify-between gap-4 border-b border-border/40 px-5 py-3">
-			<div className="flex min-w-0 items-center gap-2">
+		<PageHeader
+			icon={Bot}
+			iconClassName="size-7 rounded-md bg-primary/10 text-primary p-1.5"
+			title={props.title}
+			leading={
 				<Button type="button" variant="ghost" size="icon-sm" className="size-8 shrink-0 text-muted-foreground" title={t("common.back")} aria-label={t("common.back")} onClick={props.onBack}>
 					<ArrowLeft className="size-4" aria-hidden="true" />
 				</Button>
-				<h1 className="truncate text-base font-semibold text-foreground">{props.title}</h1>
-				{props.builtin && (
+			}
+			titleSuffix={
+				props.builtin ? (
 					<Badge variant="neutral" size="sm">
 						{t("agentMarket.builtinBadge")}
 					</Badge>
-				)}
-			</div>
-		</header>
+				) : null
+			}
+		/>
 	);
 }

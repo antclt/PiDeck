@@ -7,6 +7,7 @@ import { desktopApi } from "../../desktopApi";
 import { t } from "../../i18n";
 import { showNotice } from "../../utils/notice";
 import { Badge } from "../ui-shadcn/badge";
+import { AsyncEmptyBlock } from "../common/AsyncState";
 import { Button } from "../ui-shadcn/button";
 import { ConfirmDialog } from "../ui-shadcn/ConfirmDialog";
 import { Switch } from "../ui-shadcn/switch";
@@ -124,14 +125,17 @@ export function AutomationTaskList({ projectId, onEditTask, onCreateTask }: Auto
 
 	if (tasks.length === 0) {
 		return (
-			<div className="flex h-64 flex-col items-center justify-center gap-3 text-center">
-				<div className="text-sm font-medium text-foreground">{projectId ? t("automation.emptyProjectTasks") : t("automation.emptyTasks")}</div>
-				<p className="max-w-md text-xs text-muted-foreground">{t("automation.emptyTasksDesc")}</p>
-				<Button size="sm" onClick={onCreateTask} className="h-8 gap-1.5 text-xs">
-					<Plus className="size-3.5" />
-					{t("automation.createTask")}
-				</Button>
-			</div>
+			<AsyncEmptyBlock
+				className="h-64 gap-3"
+				title={projectId ? t("automation.emptyProjectTasks") : t("automation.emptyTasks")}
+				description={t("automation.emptyTasksDesc")}
+				action={
+					<Button size="sm" onClick={onCreateTask} className="h-8 gap-1.5 text-xs">
+						<Plus className="size-3.5" />
+						{t("automation.createTask")}
+					</Button>
+				}
+			/>
 		);
 	}
 

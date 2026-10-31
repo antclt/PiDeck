@@ -10,7 +10,7 @@ description: PiDeck 每个版本的发布记录：新功能、问题修复与体
 - [中文 CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.zh-CN.md)
 - [English CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.md)
 
-## v0.9.9-beta
+## v0.9.9
 
 发布时间：2026-10-30
 
@@ -24,6 +24,7 @@ description: PiDeck 每个版本的发布记录：新功能、问题修复与体
 - 🚀 **通过 MCP 新建并驱动 ACP 会话**
 - 🚀 **Web 端支持 ACP 会话**
 - 🚀 **ACP 用量面板补齐 token / 时延 / TPS**
+- 🚀 **ACP 会话补齐待办与子代理**
 - ✨ **ACP 模型下拉可搜索**
 - ✨ **ACP 回合中发送排队，忙碌时补独立停止钮**
 - ✨ **ACP 工具表改为折叠行**

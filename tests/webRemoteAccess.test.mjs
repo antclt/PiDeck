@@ -62,6 +62,19 @@ test("buildCloudflaredArgs 支持用户可调协议与额外参数，同名 flag
 	assert.deepEqual(plain(splitCloudflaredExtraArgs(undefined)), []);
 });
 
+test("sanitizeEasyTierVirtualIp 只接受合法 IPv4，拒绝 CIDR/端口/0.0.0.0/广播地址", () => {
+	const { sanitizeEasyTierVirtualIp } = loadModule("src/shared/types/settings.ts");
+	assert.equal(sanitizeEasyTierVirtualIp(" 10.144.144.1 "), "10.144.144.1");
+	assert.equal(sanitizeEasyTierVirtualIp("192.168.001.010"), "192.168.1.10");
+	assert.equal(sanitizeEasyTierVirtualIp("10.144.144.1/24"), "");
+	assert.equal(sanitizeEasyTierVirtualIp("10.144.144.1:8765"), "");
+	assert.equal(sanitizeEasyTierVirtualIp("999.1.1.1"), "");
+	assert.equal(sanitizeEasyTierVirtualIp("0.0.0.0"), "");
+	assert.equal(sanitizeEasyTierVirtualIp("255.255.255.255"), "");
+	assert.equal(sanitizeEasyTierVirtualIp(""), "");
+	assert.equal(sanitizeEasyTierVirtualIp(null), "");
+});
+
 test("sanitizeCloudflaredExtraArgs 允许空格分隔、拒绝控制字符与非 ASCII", () => {
 	const { sanitizeCloudflaredExtraArgs } = loadModule("src/shared/types/settings.ts");
 	assert.equal(sanitizeCloudflaredExtraArgs("--edge-ip-version 6"), "--edge-ip-version 6");
@@ -253,6 +266,177 @@ test("buildTailscaleChildEnv 补缺失 TERM、保留已有值与环境其余部�
 	assert.equal(buildTailscaleChildEnv({ TERM: "" }).TERM, "xterm-256color", "空 TERM 视为未设置");
 });
 
+// ── easytier 纯函数与读取器 ──
+
+test("normalizeEasyTierIpv4 去 CIDR、补全前导零并拒绝非法地址", () => {
+	const { normalizeEasyTierIpv4 } = loadModule("src/main/web/remoteAccess/easytierAccess.ts");
+	assert.equal(normalizeEasyTierIpv4("10.144.144.1/24"), "10.144.144.1");
+	assert.equal(normalizeEasyTierIpv4(" 10.144.144.001 "), "10.144.144.1");
+	assert.equal(normalizeEasyTierIpv4("0.0.0.0"), "");
+	assert.equal(normalizeEasyTierIpv4("255.255.255.255"), "");
+	assert.equal(normalizeEasyTierIpv4("10.144.144"), "");
+	assert.equal(normalizeEasyTierIpv4(""), "");
+});
+
+test("parseEasyTierNodeJson 解析单实例与多实例 NodeInfo", () => {
+	const { parseEasyTierNodeJson } = loadModule("src/main/web/remoteAccess/easytierAccess.ts");
+	const single = JSON.parse(JSON.stringify(parseEasyTierNodeJson(JSON.stringify({ ipv4_addr: "10.144.144.1/24", hostname: "et-node", version: "2.7.0" }))));
+	assert.deepEqual(single, { ip: "10.144.144.1", hostname: "et-node", version: "2.7.0" });
+	const multi = JSON.parse(
+		JSON.stringify(
+			parseEasyTierNodeJson(
+				JSON.stringify([
+					{ instance_id: "a", instance_name: "first", result: { ipv4_addr: "10.144.144.2/24", hostname: "node-a", version: "2.6.0" } },
+					{ instance_id: "b", instance_name: "second", result: { ipv4_addr: "10.144.144.3/24", hostname: "node-b", version: "2.6.0" } },
+				]),
+			),
+		),
+	);
+	assert.deepEqual(multi, { ip: "10.144.144.2", hostname: "node-a", version: "2.6.0" }, "多实例取第一条有虚拟 IP 的节点");
+	assert.deepEqual(JSON.parse(JSON.stringify(parseEasyTierNodeJson("not-json"))), { ip: "", hostname: "", version: "" });
+});
+
+test("parseEasyTierNodeTable 解析旧版 markdown 表格的 Virtual IP", () => {
+	const { parseEasyTierNodeTable } = loadModule("src/main/web/remoteAccess/easytierAccess.ts");
+	const table = ["| Virtual IP | 10.144.144.1/24 |", "| Hostname | et-node |", "| Peer ID | 439804259 |"].join("\n");
+	assert.deepEqual(JSON.parse(JSON.stringify(parseEasyTierNodeTable(table))), { ip: "10.144.144.1", hostname: "et-node", version: "" });
+	assert.deepEqual(JSON.parse(JSON.stringify(parseEasyTierNodeTable("no table"))), { ip: "", hostname: "", version: "" });
+});
+
+test("sanitizeEasyTierCliPath 去引号与空白、拒绝控制字符", () => {
+	const { sanitizeEasyTierCliPath } = loadModule("src/shared/types/settings.ts");
+	assert.equal(sanitizeEasyTierCliPath('  "C:\\Program Files\\EasyTier\\easytier-cli.exe" '), "C:\\Program Files\\EasyTier\\easytier-cli.exe");
+	assert.equal(sanitizeEasyTierCliPath("  /usr/local/bin/easytier-cli  "), "/usr/local/bin/easytier-cli");
+	// 中文目录必须保留（Windows 用户目录常见）
+	assert.equal(sanitizeEasyTierCliPath("D:\\工具\\EasyTier\\easytier-cli.exe"), "D:\\工具\\EasyTier\\easytier-cli.exe");
+	assert.equal(sanitizeEasyTierCliPath(""), "");
+	assert.equal(sanitizeEasyTierCliPath(null), "");
+	assert.equal(sanitizeEasyTierCliPath("a\nb"), "");
+	assert.equal(sanitizeEasyTierCliPath("x".repeat(1025)), "");
+});
+
+test("detectEasyTierBinary 优先返回用户指定路径（文件/目录/带引号都认）", async () => {
+	const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const dir = await mkdtemp(join(tmpdir(), "pideck-et-cli-"));
+	try {
+		const exeName = process.platform === "win32" ? "easytier-cli.exe" : "easytier-cli";
+		const exePath = join(dir, exeName);
+		await writeFile(exePath, "");
+		const { detectEasyTierBinary } = loadModule("src/main/web/remoteAccess/easytierAccess.ts");
+		assert.equal(await detectEasyTierBinary(exePath), exePath, "直接给可执行文件");
+		assert.equal(await detectEasyTierBinary(dir), exePath, "给目录时补 easytier-cli[.exe]");
+		assert.equal(await detectEasyTierBinary(`  "${exePath}"  `), exePath, "容忍引号与空白");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+test("refresh 把用户指定的 easytier-cli 路径传给检测器", async () => {
+	const { logger } = makeLogger();
+	const seen = [];
+	const { RemoteAccessManager } = loadModule("src/main/web/remoteAccess/RemoteAccessManager.ts");
+	const manager = new RemoteAccessManager({
+		logger,
+		getWebServiceStatus: () => ({ running: false, port: 0, token: "", requiresAuth: false }),
+		pushState: () => {},
+		detectCloudflared: () => "",
+		detectTailscale: () => "",
+		detectEasyTier: (preferredPath) => {
+			seen.push(preferredPath);
+			return "C:/fake/easytier-cli.exe";
+		},
+		getEasyTierCliPath: () => "  D:/Tools/EasyTier/easytier-cli.exe  ",
+		getEasyTierManualIp: () => "",
+		easytierReaderFactory: () => ({
+			probe: async () => ({ running: true, ip: "10.144.144.1", hostname: "", version: "", ipSource: "cli", error: "" }),
+		}),
+	});
+	await manager.refresh();
+	assert.deepEqual(seen, ["D:/Tools/EasyTier/easytier-cli.exe"]);
+});
+
+test("指定路径不可用时给出明确错误，而不是静默显示未安装", async () => {
+	const { logger } = makeLogger();
+	const { RemoteAccessManager } = loadModule("src/main/web/remoteAccess/RemoteAccessManager.ts");
+	const manager = new RemoteAccessManager({
+		logger,
+		getWebServiceStatus: () => ({ running: false, port: 0, token: "", requiresAuth: false }),
+		pushState: () => {},
+		detectCloudflared: () => "",
+		detectTailscale: () => "",
+		detectEasyTier: () => "",
+		getEasyTierCliPath: () => "D:/nope/easytier-cli.exe",
+	});
+	const state = await manager.refresh();
+	assert.equal(state.easytier.installed, false);
+	assert.match(state.easytier.error, /指定的 easytier-cli 路径不可用/);
+});
+
+test("EasyTierAccessReader 从 -o json 读取节点信息", async () => {
+	const { EasyTierAccessReader } = loadModule("src/main/web/remoteAccess/easytierAccess.ts");
+	const calls = [];
+	const reader = new EasyTierAccessReader({
+		logger: makeLogger().logger,
+		commandFn: async (args) => {
+			calls.push(args);
+			return { stdout: JSON.stringify({ ipv4_addr: "10.144.144.1/24", hostname: "et-node", version: "2.7.0" }), stderr: "" };
+		},
+	});
+	const probe = await reader.probe();
+	assert.equal(probe.running, true);
+	assert.equal(probe.ip, "10.144.144.1");
+	assert.equal(probe.ipSource, "cli");
+	assert.equal(probe.error, "");
+	assert.deepEqual(JSON.parse(JSON.stringify(calls)), [["-o", "json", "node"]]);
+});
+
+test("EasyTierAccessReader 手动 IP 优先于自动检测结果", async () => {
+	const { EasyTierAccessReader } = loadModule("src/main/web/remoteAccess/easytierAccess.ts");
+	const reader = new EasyTierAccessReader({
+		logger: makeLogger().logger,
+		manualIp: "10.144.144.9",
+		commandFn: async () => ({ stdout: JSON.stringify({ ipv4_addr: "10.144.144.1/24", hostname: "et-node", version: "2.7.0" }), stderr: "" }),
+	});
+	const probe = await reader.probe();
+	assert.equal(probe.ip, "10.144.144.9");
+	assert.equal(probe.ipSource, "manual");
+	assert.equal(probe.running, true);
+	assert.equal(probe.hostname, "et-node");
+});
+
+test("EasyTierAccessReader CLI 不可用时回落到手动 IP，不把探测错误甩给用户", async () => {
+	const { EasyTierAccessReader } = loadModule("src/main/web/remoteAccess/easytierAccess.ts");
+	const reader = new EasyTierAccessReader({
+		logger: makeLogger().logger,
+		manualIp: "10.144.144.9",
+		commandFn: async () => {
+			throw new Error("Command failed: easytier-cli -o json node\nconnection refused");
+		},
+	});
+	const probe = await reader.probe();
+	assert.equal(probe.running, false);
+	assert.equal(probe.ip, "10.144.144.9");
+	assert.equal(probe.ipSource, "manual");
+	assert.equal(probe.error, "");
+});
+
+test("EasyTierAccessReader 无手动 IP 时返回可读错误", async () => {
+	const { EasyTierAccessReader } = loadModule("src/main/web/remoteAccess/easytierAccess.ts");
+	const reader = new EasyTierAccessReader({
+		logger: makeLogger().logger,
+		commandFn: async () => {
+			throw new Error("Command failed: easytier-cli -o json node\n\u001b[31;1mconnection refused\u001b[0m");
+		},
+	});
+	const probe = await reader.probe();
+	assert.equal(probe.ip, "");
+	assert.equal(probe.ipSource, "");
+	assert.ok(probe.error.includes("connection refused"));
+	assert.ok(!probe.error.includes("\u001b"), "错误信息必须去掉 ANSI 颜色码");
+});
+
 // ── RemoteAccessManager 状态机（注入 stub，不碰 PATH 与子进程） ──
 
 const WEB_RUNNING = { running: true, port: 38765, token: "tok123", requiresAuth: true };
@@ -289,7 +473,7 @@ function stubReader(log, status) {
 	};
 }
 
-function makeManager({ webStatus = WEB_RUNNING, tunnel = null, reader = null } = {}) {
+function makeManager({ webStatus = WEB_RUNNING, tunnel = null, reader = null, easyTier = null, easyTierManualIp = () => (easyTier === "manual" ? "10.144.144.9" : "") } = {}) {
 	const { logger } = makeLogger();
 	const pushes = [];
 	const log = [];
@@ -300,6 +484,11 @@ function makeManager({ webStatus = WEB_RUNNING, tunnel = null, reader = null } =
 		pushState: (state) => pushes.push(state),
 		detectCloudflared: () => (tunnel ? "C:/fake/cloudflared.exe" : ""),
 		detectTailscale: () => (reader ? "C:/fake/tailscale.exe" : ""),
+		detectEasyTier: () => (easyTier ? "C:/fake/easytier-cli.exe" : ""),
+		getEasyTierManualIp: easyTierManualIp,
+		easytierReaderFactory: () => ({
+			probe: async () => (easyTier === "manual" ? { running: true, ip: "10.144.144.9", hostname: "", version: "", ipSource: "manual", error: "" } : { running: true, ip: "10.144.144.1", hostname: "et-node", version: "2.7.0", ipSource: "cli", error: "" }),
+		}),
 		tunnelFactory: () => stubTunnel(log),
 		readerFactory: () => stubReader(log, reader),
 	});
@@ -357,6 +546,29 @@ test("refresh 聚合 reader 探测结果到状态", async () => {
 	assert.equal(state.tailscale.loggedIn, true);
 	assert.equal(state.tailscale.ip, "100.1.2.3");
 	assert.equal(state.tailscale.dnsName, "box.tail.ts.net");
+});
+
+test("refresh 聚合 easytier 只读探测结果", async () => {
+	const { manager, pushes } = makeManager({ easyTier: true });
+	const state = await manager.refresh();
+	assert.equal(state.easytier.installed, true);
+	assert.equal(state.easytier.running, true);
+	assert.equal(state.easytier.ip, "10.144.144.1");
+	assert.equal(state.easytier.hostname, "et-node");
+	assert.equal(state.easytier.version, "2.7.0");
+	assert.equal(state.easytier.ipSource, "cli");
+	assert.ok(pushes.some((s) => s.easytier.ip === "10.144.144.1"));
+});
+
+test("syncWebService 在保存设置后刷新 easytier 手动 IP", async () => {
+	let manualIp = "";
+	const { manager } = makeManager({ easyTier: false, easyTierManualIp: () => manualIp });
+	manualIp = "10.144.144.9";
+	await manager.syncWebService();
+	const state = manager.getState();
+	assert.equal(state.easytier.installed, false);
+	assert.equal(state.easytier.ip, "10.144.144.9");
+	assert.equal(state.easytier.ipSource, "manual");
 });
 
 test("getState 反映 web 服务上下文（端口/token/鉴权开关）", () => {

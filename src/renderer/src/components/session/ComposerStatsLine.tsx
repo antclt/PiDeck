@@ -4,6 +4,7 @@ import type { AgentRuntimeState, TpsDisplayMode } from "../../../../shared/types
 import { useAtomValue } from "jotai";
 import { tpsDisplayModeAtom } from "../../atoms/tps-atoms";
 import { buildTpsDisplay } from "../../utils/tpsDisplay";
+import { cn } from "../../lib/utils";
 import { formatDuration } from "./TimelineFormat";
 import { formatTokens } from "./SessionContextMeter";
 
@@ -123,11 +124,25 @@ export const ComposerStatsLine = memo(function ComposerStatsLine(props: { state?
 		return () => observer.disconnect();
 	}, [line]);
 
-	// 首轮尚未产生统计数据时不单独显示圆环，避免输入框下方只剩一个孤立图标。
-	// 有轮次、性能或 token 数据后，再把圆环作为同一条统计栏的交互入口挂入。
-	if (segments.length === 0) return null;
+	// 没有数字时不再把整条卸载：卸载→挂载会让 footer 整块长高（统计行 = 行首 pt-1 4px +
+	// 上下文圆环 size-7 28px = 32px），输入卡随之上移。而「已关闭会话首次输入 → runtime
+	// 预热」必然经过一段「时间线已有轮次、runtime 快照还没到」的空档，高度抖动正好落在
+	// 合成期，会打断 preedit（issue #455 根因 A）。
+	// 有空档可能时就按同样高度预留（visibility:hidden 仍占布局，圆环本来就常驻渲染）：
+	// 数据到达只换内容不换高度。turnCount 来自时间线、与 runtime 无关，是最早的可靠信号。
+	const reserved = segments.length === 0;
+	const placeholder = reserved && (props.turnCount ?? 0) > 0;
+	// 首轮尚未产生统计数据、且没有任何轮次时才整条不渲染：新会话不该凭空多出 32px 空档。
+	if (reserved && !placeholder) return null;
 	return (
-		<div ref={rootRef} className="flex w-full min-w-0 items-center justify-center gap-2 px-1 pb-0 pt-1 text-caption leading-5 text-text-tertiary" title={truncated ? line : undefined} data-testid="composer-stats-line">
+		<div
+			ref={rootRef}
+			className={cn("flex w-full min-w-0 items-center justify-center gap-2 px-1 pb-0 pt-1 text-caption leading-5 text-text-tertiary", placeholder && "invisible")}
+			aria-hidden={placeholder || undefined}
+			title={truncated ? line : undefined}
+			data-testid="composer-stats-line"
+			data-placeholder={placeholder ? "true" : undefined}
+		>
 			<div className="min-w-0 truncate text-center">
 				{segments.map((parts, i) => (
 					<Fragment key={parts.map((part) => part.text).join("|") + i}>

@@ -278,3 +278,34 @@ test("an immediate session switch captures the latest historical scroll anchor",
 	const restoredOffset = await readAnchorOffset(window, TAIL_WINDOW_ANCHOR_TEXT);
 	expect(Math.abs(restoredOffset - beforeOffset)).toBeLessThanOrEqual(28);
 });
+
+test("session switch keeps go-bottom available when the restored tail is tool calls", async ({ app, window }) => {
+	test.setTimeout(180_000);
+	await constrainTimelineViewport(app);
+	await expect(window.locator("#boot-overlay")).toHaveCount(0, { timeout: 20_000 });
+
+	await openChatSession(window);
+	for (const prompt of SOURCE_TURNS) {
+		await sendTurn(window, prompt);
+	}
+
+	const timeline = window.locator(".message-timeline");
+	const anchorRow = timeline.locator("article.user-turn", { hasText: TAIL_WINDOW_ANCHOR_TEXT }).first();
+	await expect(anchorRow).toBeVisible({ timeout: 10_000 });
+	const composer = window.locator(".composer .rich-input");
+	await composer.fill("SLOW TOOLMANY 40 工具尾部恢复");
+	await window.getByRole("button", { name: "发送", exact: true }).click();
+	await expect(timeline.locator(".tool-card").first()).toBeVisible({ timeout: 10_000 });
+
+	const beforeOffset = await placeAnchorInViewport(window, 96, TAIL_WINDOW_ANCHOR_TEXT);
+	await openChatSession(window);
+	const sourceTab = window.locator('.session-tab[aria-selected="false"]').first();
+	await expect(sourceTab).toBeVisible({ timeout: 10_000 });
+	await sourceTab.click();
+	await expect(anchorRow).toBeVisible({ timeout: 15_000 });
+	await waitForAnchorRestore(window, TAIL_WINDOW_ANCHOR_TEXT, beforeOffset);
+
+	await expect(timeline.locator(".tool-card").last()).toBeVisible();
+	await expect.poll(() => timeline.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeGreaterThan(16);
+	await expect(window.locator("[data-scroll-to-bottom]")).toBeVisible();
+});

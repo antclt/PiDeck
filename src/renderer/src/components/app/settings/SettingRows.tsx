@@ -6,6 +6,15 @@ import { Button } from "../../ui-shadcn/button";
 import { Switch } from "../../ui-shadcn/switch";
 import { Textarea } from "../../ui-shadcn/textarea";
 
+/**
+ * 生效方式徽章（Wave 6）：在设置行标题右侧标注「即时生效 / 新会话生效 / 重启后生效」。
+ * 样式对齐 DSH 配置页已验证的徽章（config.dsh.applies*），不新造视觉。
+ */
+export function SettingApplyBadge(props: { mode: "live" | "newSession" | "restart" }) {
+	const key = props.mode === "live" ? "settings.apply.live" : props.mode === "newSession" ? "settings.apply.newSession" : "settings.apply.restart";
+	return <span className="ml-2 shrink-0 rounded-full border border-border-subtle px-2 py-0.5 text-micro text-muted-foreground align-middle">{t(key)}</span>;
+}
+
 /** 已修改但未保存的字段标记：在标签右侧显示一个黄色圆点 */
 export function DirtyMarker(props: { dirty: boolean; label: string }) {
 	if (!props.dirty) return null;

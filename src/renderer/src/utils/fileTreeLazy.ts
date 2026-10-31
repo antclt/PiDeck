@@ -167,17 +167,19 @@ export function findLoadedDirectory(nodes: FileTreeNode[], directoryPath: string
  * 用户重新点开目录时 toggleDirectory 走 findLoadedDirectory 未命中，会再次
  * 发起拉取——相当于一次自然的重试入口，不会永久卡死。
  */
-export function markFileTreeLoadFailed(nodes: FileTreeNode[], directoryPath: string): FileTreeNode[] {
+export function markFileTreeLoadFailed(nodes: FileTreeNode[], directoryPath: string, error?: unknown): FileTreeNode[] {
 	// 快速路径：本层不含目标时返回原数组引用，避免无谓重建导致
 	// FilesPanel 的 useMemo / FileNode 全量重渲染（与 compactMiddlePackages 同约定）。
 	let touched = false;
+	const message = error === undefined ? undefined : error instanceof Error ? error.message : String(error);
 	const marked = nodes.map((node) => {
 		if (node.type === "directory" && fileTreeNodeKey(node) === directoryPath) {
 			touched = true;
-			return { ...node, hasChildren: false };
+			// loadError 让渲染层区分「读取失败」与「空目录」：失败显示错误行 + 重试，空目录静默。
+			return { ...node, hasChildren: false, loadError: message };
 		}
 		if (node.children?.length) {
-			const nextChildren = markFileTreeLoadFailed(node.children, directoryPath);
+			const nextChildren = markFileTreeLoadFailed(node.children, directoryPath, error);
 			if (nextChildren !== node.children) {
 				touched = true;
 				return { ...node, children: nextChildren };

@@ -173,7 +173,8 @@ test("sendSessionPrompt binds runtime after successful prompt send", () => {
 	assert.match(body, /sessionId/);
 	assert.match(body, /agentId:\s*result\.agentId/);
 	assert.match(body, /runtimeGeneration:\s*result\.runtimeGeneration/);
-	assert.match(body, /shouldMarkRuntimeRunningAfterSend\(/);
+	assert.match(body, /shouldMarkRuntimeRunningAfterSend\(\{/);
+	assert.match(body, /accepted:\s*result\.accepted/);
 	assert.match(body, /\?\s*"running"\s*:\s*undefined/);
 });
 

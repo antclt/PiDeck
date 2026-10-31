@@ -9,17 +9,69 @@
  * 这里补一条「当前值」项，让选中/滚动语义成立，同时不改动 agent 给的枚举
  * （再次点选它由调用方按同值忽略，不产生 IPC）。
  */
-import type { AcpSessionConfigOption } from "../../../../shared/types/acp";
+import type { AcpModelRate, AcpSessionConfigOption } from "../../../../shared/types/acp";
 
-export type AcpConfigSelectValue = { value: string; name: string /** 当前值不在枚举里时补的占位项（再点选等价于不变）。 */; current?: boolean };
+export type AcpConfigSelectValue = { value: string; name: string /** agent 给的次级说明（权限档说明等），列表项里以弱化小字展示。 */; description?: string /** magpie 本地倍率（主进程注解，非 ACP wire 字段）。 */; rate?: AcpModelRate /** 当前值不在枚举里时补的占位项（再点选等价于不变）。 */; current?: boolean };
 
 export type AcpConfigSelectModel = { value: string; label: string; values: AcpConfigSelectValue[] };
 
-export function resolveAcpConfigSelect(option: AcpSessionConfigOption, values: ReadonlyArray<{ value: string; name: string }>): AcpConfigSelectModel {
+export type AcpConfigEntry = { option: AcpSessionConfigOption; values: Array<{ value: string; name: string; description?: string; rate?: AcpModelRate }> };
+
+/** 平铺 configOptions 的取值枚举（group 结构展平）。boolean 项保留（values 为空），由渲染层走开关分支。 */
+export function flattenAcpConfigOptions(options: ReadonlyArray<AcpSessionConfigOption>): AcpConfigEntry[] {
+	const result: AcpConfigEntry[] = [];
+	for (const option of options) {
+		const values: Array<{ value: string; name: string; description?: string; rate?: AcpModelRate }> = [];
+		for (const item of option.options ?? []) {
+			if ("group" in item) {
+				// description/rate 属于具体取值（组名只是分类），不要被组名前缀挤掉。
+				for (const inner of item.options) {
+					values.push({
+						value: inner.value,
+						name: item.name ? `${item.name} / ${inner.name}` : inner.name,
+						...(inner.description ? { description: inner.description } : {}),
+						...(inner.rate ? { rate: inner.rate } : {}),
+					});
+				}
+			} else {
+				values.push({ value: item.value, name: item.name, ...(item.description ? { description: item.description } : {}), ...(item.rate ? { rate: item.rate } : {}) });
+			}
+		}
+		result.push({ option, values });
+	}
+	return result;
+}
+
+/**
+ * 是否渲染成底栏控件：boolean 恒显示（开关）；
+ * select 至少两个候选才显示——单值 select（如 CodeBuddy 2.178.1 的 agent=cli）点不动也无处可写，
+ * 留在底栏只是一个必然报错的死 chip。
+ */
+export function isRenderableAcpConfigEntry(entry: AcpConfigEntry): boolean {
+	return entry.option.type === "boolean" || entry.values.length > 1;
+}
+
+export function resolveAcpConfigSelect(option: AcpSessionConfigOption, values: ReadonlyArray<{ value: string; name: string; description?: string; rate?: AcpModelRate }>): AcpConfigSelectModel {
 	const raw = option.currentValue === undefined ? "" : String(option.currentValue);
 	const matched = raw ? values.find((value) => value.value === raw) : undefined;
 	// 无当前值时沿用旧行为：触发器显示选项名（如「Model」），下拉不高亮任何项。
 	const label = matched?.name ?? (raw || option.name);
 	if (!raw || matched) return { value: raw, label, values: values.map((value) => ({ ...value })) };
 	return { value: raw, label, values: [{ value: raw, name: label, current: true }, ...values.map((value) => ({ ...value }))] };
+}
+
+/**
+ * 底栏展示分组：1-2 项全部平铺；3 项以上最多留两个高频控件，其余进「参数」折叠菜单。
+ * 保留顺序：模型/长枚举（可搜索下拉）→ mode（权限/代理模式，切得最勤）→ 第一项。
+ * 参数特别多的 agent（CodeBuddy 一次回传 6-8 项）平铺会把底栏撑满、标签全被压成
+ * 省略号；阈值只在这里定义，组件只负责按分组渲染。
+ */
+export function splitAcpConfigEntries(entries: ReadonlyArray<AcpConfigEntry>): { inline: AcpConfigEntry[]; overflow: AcpConfigEntry[] } {
+	if (entries.length <= 2) return { inline: [...entries], overflow: [] };
+	// id/category 双判：部分 agent 不填 category，但模型项 id 固定为 model。
+	const primary = entries.find((entry) => entry.option.category === "model" || entry.option.id === "model" || entry.values.length > 10) ?? entries[0];
+	// mode 是除模型外最常切的参数（权限/代理模式），留在底栏避免每次都进菜单。
+	const secondary = entries.find((entry) => entry !== primary && (entry.option.category === "mode" || entry.option.id === "mode"));
+	const inline = secondary ? [primary, secondary] : [primary];
+	return { inline, overflow: entries.filter((entry) => !inline.includes(entry)) };
 }

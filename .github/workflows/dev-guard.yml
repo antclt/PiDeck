@@ -1,0 +1,55 @@
+name: Dev Guard
+
+# dev 分支轻量门禁：把 main CI 的「秒级/分钟级检查」前移到 dev push 上。
+#
+# 为什么需要：dev push 此前零检查，Wave 2（6fe435141）、#458（46e1ccee5）等提交
+# 未过 biome 就直推 dev，等 dev→main 合并（或 PR #460 这类 main 修复 PR）时
+# 才在 main CI 爆出 17+14 文件格式漂移，修一轮滚一轮（PR #460 四轮 CI 的根因）。
+# 这里只挂快速检查（全程 <5 分钟），全量测试/typecheck 仍由 main CI 与 PR 承担：
+# - check:format —— biome 格式门禁（防格式漂移直入 dev）；
+# - check:ipc-wiring + check:test-shape —— 两条机械不变式（~1s，不联网）；
+# - typecheck —— tsc --noEmit（~1 分钟）。
+# 刻意不跑 npm test / build：dev 是高频集成分支，45 分钟全量串行测试放在这里
+# 会让每次 push 排队半小时，收益远低于 main CI 的合并前兜底。
+
+on:
+  push:
+    branches:
+      - dev
+  pull_request:
+    branches:
+      - dev
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quick-checks:
+    name: Format, invariants and typecheck
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.13.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check formatting
+        run: npm run check:format
+
+      - name: Check structural invariants
+        run: npm run check:ipc-wiring && npm run check:test-shape
+
+      - name: Type-check
+        run: npm run typecheck

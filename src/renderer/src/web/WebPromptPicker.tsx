@@ -97,7 +97,12 @@ export function WebPromptPicker(props: { disabled?: boolean; onPick: (content: s
 				) : null}
 				<div className="max-h-72 overflow-y-auto p-1.5">
 					{loadError ? (
-						<div className="px-2 py-3 text-center text-caption text-danger">{t("web.promptLoadFailed")}</div>
+						<div role="alert" className="flex flex-col items-center gap-2 px-2 py-3 text-caption text-danger">
+							<span>{t("web.promptLoadFailed")}</span>
+							<Button type="button" variant="outline" size="sm" className="h-auto px-3 py-1 text-caption" onClick={() => void load(debounced, category)}>
+								{t("common.retry")}
+							</Button>
+						</div>
 					) : loading && prompts.length === 0 ? (
 						<div className="flex items-center justify-center gap-2 px-2 py-3 text-caption text-muted-foreground">
 							<Loader2 size={14} className="animate-pideck-spin" aria-hidden="true" />

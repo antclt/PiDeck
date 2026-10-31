@@ -226,13 +226,21 @@ if (app.isPackaged) {
 // payload 携带次实例的 argv，可解析「点击系统通知」激活时携带的跳转目标。
 let focusExistingWindow: ((payload?: FocusPayload) => void) | null = null;
 const singleInstanceEnabled = bootPreferences.singleInstance;
-const versionSingleInstance = acquireVersionSingleInstance(singleInstanceEnabled, app.getVersion(), (payload) => {
-	focusExistingWindow?.(payload);
-});
+// 本次启动是否来自深链激活（点系统通知 / 资源管理器右键打开项目）。即使开了多开也要先交给
+// 已运行的同版本实例：通知点击的语义是「跳回那个会话」，不是「再开一个 PiDeck」（2026-10 用户反馈）。
+const launchIsActivation = extractFocusTargetFromArgv(process.argv) !== undefined;
+const versionSingleInstance = acquireVersionSingleInstance(
+	singleInstanceEnabled,
+	app.getVersion(),
+	(payload) => {
+		focusExistingWindow?.(payload);
+	},
+	{ routeActivation: launchIsActivation },
+);
 const gotSingleInstanceLock = versionSingleInstance.isPrimary;
-if (singleInstanceEnabled && !gotSingleInstanceLock) {
-	// 同版本已有实例：立即退出，由主实例 watch .focus 后唤起窗口。
-	// 用 exit(0) 而不是 quit()：第二进程尚未 ready，quit 更慢。
+if (!gotSingleInstanceLock) {
+	// 同版本已有实例（单实例模式），或深链请求已交给它处理（多开模式）：立即退出，
+	// 由主实例 watch .focus 后唤起窗口。用 exit(0) 而不是 quit()：第二进程尚未 ready，quit 更慢。
 	app.exit(0);
 }
 
@@ -312,6 +320,7 @@ import { isDefaultAgentTitle } from "./pi/agentUtils";
 import { CompositeAgentGateway } from "./agents/CompositeAgentGateway";
 import { AcpAgentManager } from "./acp/AcpAgentManager";
 import { AcpSessionArchive } from "./acp/AcpSessionArchive";
+import { createAcpModelRateAnnotator } from "./acp/acpModelRates";
 import { withAcpConfigDefault } from "./acp/acpToolConfig";
 import { acpMessagePage } from "./acp/acpMessagePage";
 import { findSessionMatches } from "./sessions/sessionFindMatches";
@@ -725,6 +734,8 @@ let dshRuntimeManager: DshRuntimeManager;
 let dshRuntimeInstaller: DshRuntimeInstaller;
 let dshAgentManager: DshAgentManager;
 let acpAgentManager: AcpAgentManager;
+/** ACP 模型倍率注解：读本机 magpie 缓存（缺省空表），查询/下发/推送三个出口共用同一份。 */
+const annotateAcpConfigOptions = createAcpModelRateAnnotator();
 /** 生图 blob 存储的延迟引用：imagegen 初始化在另一装配段，ACP 图片物化经此取实例（未初始化时物化退化为保留 data）。 */
 let acpImageBlobStore: ImageBlobStore | null = null;
 /** 多后端合成网关（pi + dsh + 未来后端）；启动装配后赋值，供发送链路按 agentId 路由。 */
@@ -3610,8 +3621,14 @@ function registerIpc() {
 	registerAcpIpc({
 		settingsStore,
 		// 会话级配置桥惰性取 manager:注册时(此处)尚未实例化(4786 行 opt-in 段),
-		// 与生命周期依赖同一条惰性模式。
-		getSessionManager: () => acpAgentManager,
+		// 与生命周期依赖同一条惰性模式。查询/下发两个出口都补模型倍率注解。
+		getSessionManager: () =>
+			acpAgentManager
+				? {
+						getSessionConfigOptions: (agentId) => annotateAcpConfigOptions(acpAgentManager?.getSessionConfigOptions(agentId)),
+						applyConfigOption: async (agentId, optionId, value) => annotateAcpConfigOptions(await acpAgentManager?.applyConfigOption(agentId, optionId, value)) ?? [],
+					}
+				: undefined,
 		// 生命周期命令编排惰性取 piLocator:注册时(2361 行附近)它尚未实例化(3484 行)。
 		// createInvocation 复用 AcpAgentManager 同一入口(Windows .cmd 垫片),spawn 带 timeout 兜底。
 		getLifecycleDeps: () => ({
@@ -5063,7 +5080,7 @@ function registerIpc() {
 		mainCopy: mainCopy as (key: string, params?: Record<string, string | number>) => string,
 	});
 
-	// 外网访问（web:remote-access-*）：cloudflare 隧道 + tailscale serve 启停/状态
+	// 外网访问（web:remote-access-*）：cloudflare 隧道 / tailscale serve 启停 + EasyTier 只读状态
 	registerWebRemoteAccessIpc({ remoteAccessManager });
 
 	// 配置备份（config-backup:*）：恢复成功后重载 pideck 设置 + 刷新 pi 模型目录。
@@ -5206,7 +5223,7 @@ app
 	.whenReady()
 	.then(async () => {
 		// 未拿到同版本主实例锁时不要继续初始化，避免第二进程短暂闪窗。
-		if (singleInstanceEnabled && !gotSingleInstanceLock) return;
+		if (!gotSingleInstanceLock) return;
 
 		// Windows 的进程环境块是启动快照：用户在 PiDeck 开着的时候装了 CLI（官网脚本只改注册表 PATH，
 		// 如 %USERPROFILE%\.qoder-cn\bin\qoderclicn），已运行的进程里 spawn 出去只会回
@@ -6223,6 +6240,8 @@ app
 				}) ?? (() => {}),
 			// ACP 工具清单（只给 id/name，command/args/env 不外发）：Web 端后端选择器的 ACP 入口。
 			// 未开启 ACP 或没有启用的工具时返回空数组，Web 端就不展示 ACP 选项。
+			// EasyTier 托管配置下载：手机端「导入配置」用；未配置时返回空串（路由 404）
+			getEasyTierConfigToml: () => remoteAccessManager?.buildEasyTierConfigToml() ?? "",
 			listAcpTools: () => {
 				const settings = settingsStore.get();
 				if (settings.acpEnabled !== true) return [];
@@ -6579,6 +6598,26 @@ app
 				const s = settingsStore.get();
 				return { protocol: s.webRemoteCloudflaredProtocol ?? "http2", extraArgs: s.webRemoteCloudflaredExtraArgs };
 			},
+			// EasyTier 自动检测读不到虚拟 IP 时的用户兜底（设置项为空串表示未启用）
+			getEasyTierManualIp: () => settingsStore.get().webRemoteEasyTierIp ?? "",
+			// 解压版 CLI / 非默认目录安装：自动检测找不到时用用户指定的路径
+			getEasyTierCliPath: () => settingsStore.get().webRemoteEasyTierCliPath ?? "",
+			// 托管配置：三个字段齐备才接管 core；缺任意一项返回 null，退回只读探测
+			getEasyTierConfig: () => {
+				const s = settingsStore.get();
+				const networkName = s.webRemoteEasyTierNetworkName?.trim() ?? "";
+				const networkSecret = s.webRemoteEasyTierNetworkSecret?.trim() ?? "";
+				if (!networkName || !networkSecret) return null;
+				return {
+					networkName,
+					networkSecret,
+					peers: s.webRemoteEasyTierPeers ?? [],
+					bindIpv4: s.webRemoteEasyTierIp ?? "",
+					instanceName: networkName,
+				};
+			},
+			// 固定路径：服务安装时 -c 指向它，之后改配置只重写文件、不必重装服务
+			getEasyTierConfigPath: () => join(app.getPath("userData"), "easytier", "network.toml"),
 			pushState: (state) => {
 				const win = mainWindow;
 				if (win && !win.isDestroyed()) win.webContents.send(ipcChannels.webRemoteAccessChanged, state);
@@ -6980,7 +7019,7 @@ app
 			// configOptions 变更推送：set_config_option 响应/config_option_update 通知都走同一事件,
 			// 渲染层按 agentId 隔离(旧 agent 迟到事件写旧 atom,不再被读)。
 			onConfigOptionsChanged: (tab, options) => {
-				if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(ipcChannels.acpSessionConfigChanged, { agentId: tab.id, options });
+				if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(ipcChannels.acpSessionConfigChanged, { agentId: tab.id, options: annotateAcpConfigOptions(options) ?? [] });
 			},
 			// 图片物化落盘：ACP 消息里的 base64 图复用生图 blob 存储（ref 形态回填消息；
 			// imagegen 装配在另一段完成，经模块级 ref 延迟取实例）。

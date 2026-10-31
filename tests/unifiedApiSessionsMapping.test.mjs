@@ -34,7 +34,7 @@ const FACADE_SOURCE = readFileSync("src/shared/api/facadeTypes.ts", "utf8");
 const SESSIONS_METHOD_TOTAL = 117;
 const CONFIG_METHOD_TOTAL = 52;
 const SESSIONS_GROUP_KEYS = ["catalog", "import", "rewind", "runtime"];
-const CONFIG_GROUP_KEYS = ["auth", "maintenance", "mcp", "models", "resources", "settings", "tokendance", "trust", "usageProbes", "vision"];
+const CONFIG_GROUP_KEYS = ["auth", "maintenance", "mcp", "models", "resources", "settings", "support", "tokendance", "trust", "usageProbes", "vision"];
 
 /** 骨架化：注释与字符串整体置空（等长替换，偏移与行号和原文一一对应）。 */
 function skeletonize(source) {
@@ -267,7 +267,7 @@ test("F5-7 DSH 方法归属按 PLAN.md S5 裁定（查询→runtime、importDsh*
 	assert.deepEqual(problems, [], "DSH 归属与 S5 裁定不符——映射数据待返工，证据见消息");
 });
 
-test("F5-8 CONFIG_SUBSTORES 十组并集 ≡ config 命名空间 52 方法全集 + 方法族口径（FIND-4）", () => {
+test("F5-8 CONFIG_SUBSTORES 十一组并集 ≡ config 命名空间 52 方法全集 + 方法族口径（FIND-4）", () => {
 	assert.equal(configNames.length, CONFIG_METHOD_TOTAL, `源码解析得 ${configNames.length} 个方法`);
 	assert.deepEqual(Object.keys(CONFIG).sort(), CONFIG_GROUP_KEYS);
 	assert.deepEqual(validateGroupingStructure(CONFIG, CONFIG_GROUP_KEYS), []);

@@ -100,7 +100,7 @@ export function StatusSubagentsTab(props: { sessionId: string; list: SessionSuba
 	return (
 		<div className="flex flex-col gap-1 px-2 py-2">
 			<ul className="flex flex-col gap-1">
-				{list.isDsh ? list.dshEntries.map((entry) => <DshSubagentEntryRow key={entry.id} agentId={list.agentId ?? ""} entry={entry} />) : list.piEntries.map((entry) => <PiSubagentEntryRow key={entry.id} entry={entry} sessionId={props.sessionId} onOpenChildSession={props.onOpenChildSession} />)}
+				{list.isDsh ? list.dshEntries.map((entry) => <DshSubagentEntryRow key={entry.id} agentId={list.agentId ?? ""} entry={entry} />) : list.entries.map((entry) => <PiSubagentEntryRow key={entry.id} entry={entry} sessionId={props.sessionId} onOpenChildSession={props.onOpenChildSession} />)}
 			</ul>
 			{list.hasAcpEntries && <p className="px-2 text-micro leading-4 text-text-tertiary">{t("sessionSubagents.acpDelegateHint")}</p>}
 		</div>

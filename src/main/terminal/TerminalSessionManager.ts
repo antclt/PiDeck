@@ -133,7 +133,14 @@ export class TerminalSessionManager {
 			id,
 			agentId: target.kind === "agent" ? target.agentId : "",
 			ownerKey,
-			title: `${this.displayShell(spawned.shell)} ${seq}`,
+			// title 带 cwd 目录名（Wave 5）：多 tab 并行时区分「在哪个目录」是第一诉求；
+			// 完整路径放 title 悬浮提示由渲染层拼（buffer 里不该带绝对路径细节）。
+			title: `${this.displayShell(spawned.shell)} ${seq} · ${
+				resolvedCwd
+					.split(/[\\/]+/)
+					.filter(Boolean)
+					.pop() ?? resolvedCwd
+			}`,
 			shell: spawned.shell,
 			createdAt: Date.now(),
 		};

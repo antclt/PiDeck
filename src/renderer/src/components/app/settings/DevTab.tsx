@@ -9,7 +9,7 @@ import { Button } from "../../ui-shadcn/button";
 import { Input } from "../../ui-shadcn/input";
 import { SettingsSection } from "./SettingsStorageTab";
 import { AppUpdateCard } from "./AppUpdateCard";
-import { DirtyMarker, SettingRow, SettingSwitchRow } from "./SettingRows";
+import { DirtyMarker, SettingApplyBadge, SettingRow, SettingSwitchRow } from "./SettingRows";
 import { UpdateSourceSetting } from "./UpdateSourceSetting";
 import { ConfirmDialog } from "../../ui-shadcn/ConfirmDialog";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
@@ -302,7 +302,18 @@ export const DevTab = memo(function DevTab(props: DevTabProps) {
 						}}
 					/>
 				</SettingRow>
-				<SettingSwitchRow anchor="dev-electron-sandbox" title={t("settings.electronSandbox")} description={t("settings.electronSandboxDesc")} checked={draft.electronChromiumSandbox} onChange={(checked) => updateDraft({ electronChromiumSandbox: checked })} />
+				<SettingSwitchRow
+					anchor="dev-electron-sandbox"
+					title={
+						<>
+							{t("settings.electronSandbox")}
+							<SettingApplyBadge mode="restart" />
+						</>
+					}
+					description={t("settings.electronSandboxDesc")}
+					checked={draft.electronChromiumSandbox}
+					onChange={(checked) => updateDraft({ electronChromiumSandbox: checked })}
+				/>
 				{/* id 用于深链：扩展被禁用启动的提示可直达本组启动参数（见 useSettingsFocus） */}
 				<div id="settings-section-dev-pi-rpc" className="px-0.5 pb-1 pt-3">
 					<span className="text-caption font-semibold tracking-[0.06em] text-muted-foreground">{t("settings.piRpcStartup")}</span>

@@ -73,8 +73,11 @@ test("empty state offers a project switcher listing joined projects", () => {
 });
 
 test("empty state keeps the add-project entry only when no project exists", () => {
+	// 无项目入口迁入 SessionStartSurface 的 no-project 模式（NoProjectStart 卡片），
+	// ProjectEmptyState 只负责选模式：虚拟会话引导页 / 无项目起始卡 / 远端面板。
 	assert.match(emptyState, /!props\.activeProject/);
-	assert.match(emptyState, /t\("app\.addProject"\)/);
+	assert.match(emptyState, /mode="no-project"/);
+	assert.match(startSurface, /t\("app\.addProject"\)/);
 	assert.match(app, /onAddProject=\{\(\) => void addProject\(\)\}/);
 });
 

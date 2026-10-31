@@ -1,18 +1,24 @@
 /**
- * 外网访问编排器：聚合 cloudflare quick tunnel 与 tailscale serve 两个渠道的生命周期，
+ * 外网访问编排器：聚合 cloudflare quick tunnel、tailscale serve 与 EasyTier 只读渠道的生命周期，
  * 输出单一 RemoteAccessState 快照（渲染层只认这个形状）。
  *
  * 设计要点：
  * - 状态不持久化：cloudflare 域名每次都变、serve 配置由 tailscaled 自己持久化，
  *   本类只维护「本次会话内用户想要什么」（desired 标记），Web 服务启停/换端口时据此收敛。
  * - 所有方法不向 IPC 抛裸异常：可预期失败以返回值/状态里的 error 字段表达。
- * - 渠道是 Web 服务的附属：Web 服务停止时两个渠道一并收口（隧道杀进程、serve 摘除）。
+ * - cloudflare/tailscale 是 Web 服务的附属：Web 服务停止时一并收口（隧道杀进程、serve 摘除）；
+ *   EasyTier 在托管模式（网络名/密钥齐备）下由 PiDeck 生成配置并经系统服务启停，
+ *   未配置时退回只读探测——不随 Web 服务启停，避免误断用户自己的网络。
  */
 import type { AppLogger } from "../../logging/AppLogger";
-import type { RemoteAccessState, RemoteAccessChannelId, CloudflareTunnelState, TailscaleAccessState } from "../../../shared/types/remoteAccess";
+import type { RemoteAccessState, RemoteAccessChannelId, CloudflareTunnelState, TailscaleAccessState, EasyTierAccessState } from "../../../shared/types/remoteAccess";
 import type { WebServiceStatusInfo } from "../../../shared/types/settings";
 import { CloudflaredTunnelProcess, detectCloudflaredBinary, type CloudflaredTunnelOptions } from "./cloudflaredTunnel";
 import { TailscaleAccessReader, buildTailscaleServeUrl, detectTailscaleBinary } from "./tailscaleAccess";
+import { EasyTierAccessReader, detectEasyTierBinary, detectEasyTierCore, normalizeEasyTierIpv4 } from "./easytierAccess";
+import { EasyTierServiceHost, buildEasyTierToml, isEasyTierConfigReady, type EasyTierManagedConfig, type EasyTierServiceInfo } from "./easytierService";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 
 export type RemoteAccessManagerDeps = {
 	logger: AppLogger;
@@ -22,12 +28,24 @@ export type RemoteAccessManagerDeps = {
 	pushState: (state: RemoteAccessState) => void;
 	/** 读取用户设置的隧道启动选项（协议/额外参数）；每次 start 时取最新，改设置后重启隧道生效。 */
 	getTunnelOptions?: () => CloudflaredTunnelOptions;
+	/** 读取 EasyTier 手动兜底虚拟 IP（自动检测失败时使用）；每次探测取最新。 */
+	getEasyTierManualIp?: () => string;
+	/** 读取用户指定的 easytier-cli 路径（解压版/非默认目录安装）；每次探测取最新。 */
+	getEasyTierCliPath?: () => string;
 	/** 测试注入点：替换真实子进程/命令执行。 */
 	tunnelFactory?: (deps: { logger: AppLogger; onEnded: (error: string) => void }) => CloudflaredTunnelProcess;
 	readerFactory?: (deps: { logger: AppLogger; binary?: string }) => TailscaleAccessReader;
+	easytierReaderFactory?: (deps: { logger: AppLogger; binary?: string; manualIp?: string }) => EasyTierAccessReader;
+	/** 读取托管配置（网络名/密钥/节点/绑定 IP）；返回 null = 未配置，退回只读探测。 */
+	getEasyTierConfig?: () => EasyTierManagedConfig | null;
+	/** 托管配置落地路径（服务安装时 `-c` 指向它，路径一旦确定就不再变化）。 */
+	getEasyTierConfigPath?: () => string;
+	/** 测试注入点：替换系统服务控制。 */
+	serviceHostFactory?: (deps: { logger: AppLogger; cliPath: string; corePath?: string }) => EasyTierServiceHost;
 	/** 测试注入点：替换 PATH 探测，避免单测依赖本机安装。 */
 	detectCloudflared?: () => string;
 	detectTailscale?: () => string;
+	detectEasyTier?: (preferredPath?: string) => string | Promise<string>;
 };
 
 export class RemoteAccessManager {
@@ -49,6 +67,25 @@ export class RemoteAccessManager {
 	/** 用户/启动探测认定的 serve 意图（Web 服务换端口后据此重指）。 */
 	private serveDesired = false;
 
+	// ── easytier 渠道（托管或只读，取决于是否配置了网络名/密钥）──
+	private easytier: EasyTierAccessState = {
+		installed: false,
+		binaryPath: "",
+		coreAvailable: false,
+		configPresent: false,
+		serviceInstalled: false,
+		serviceRunning: false,
+		running: false,
+		ip: "",
+		hostname: "",
+		version: "",
+		ipSource: "",
+		error: "",
+	};
+	private easytierReader: EasyTierAccessReader | null = null;
+	/** 服务控制句柄：CLI 找到后才创建，配置路径由装配层注入。 */
+	private serviceHost: EasyTierServiceHost | null = null;
+
 	private disposed = false;
 
 	constructor(deps: RemoteAccessManagerDeps) {
@@ -60,14 +97,28 @@ export class RemoteAccessManager {
 		this.readerFactory = deps.readerFactory ?? ((d) => new TailscaleAccessReader(d));
 		this.detectCloudflared = deps.detectCloudflared ?? detectCloudflaredBinary;
 		this.detectTailscale = deps.detectTailscale ?? detectTailscaleBinary;
+		this.detectEasyTier = deps.detectEasyTier ?? detectEasyTierBinary;
+		this.easytierReaderFactory = deps.easytierReaderFactory ?? ((d) => new EasyTierAccessReader(d));
 		this.getTunnelOptions = deps.getTunnelOptions ?? (() => ({}));
+		this.getEasyTierManualIp = deps.getEasyTierManualIp ?? (() => "");
+		this.getEasyTierCliPath = deps.getEasyTierCliPath ?? (() => "");
+		this.getEasyTierConfig = deps.getEasyTierConfig ?? (() => null);
+		this.getEasyTierConfigPath = deps.getEasyTierConfigPath ?? (() => "");
+		this.serviceHostFactory = deps.serviceHostFactory ?? ((d) => new EasyTierServiceHost(d));
 	}
 
 	private readonly tunnelFactory: (deps: { logger: AppLogger; onEnded: (error: string) => void }) => CloudflaredTunnelProcess;
 	private readonly readerFactory: (deps: { logger: AppLogger; binary?: string }) => TailscaleAccessReader;
+	private readonly easytierReaderFactory: (deps: { logger: AppLogger; binary?: string; manualIp?: string }) => EasyTierAccessReader;
 	private readonly detectCloudflared: () => string;
 	private readonly detectTailscale: () => string;
+	private readonly detectEasyTier: (preferredPath?: string) => string | Promise<string>;
 	private readonly getTunnelOptions: () => CloudflaredTunnelOptions;
+	private readonly getEasyTierManualIp: () => string;
+	private readonly getEasyTierCliPath: () => string;
+	private readonly getEasyTierConfig: () => EasyTierManagedConfig | null;
+	private readonly getEasyTierConfigPath: () => string;
+	private readonly serviceHostFactory: (deps: { logger: AppLogger; cliPath: string; corePath?: string }) => EasyTierServiceHost;
 
 	/** 当前聚合状态（纯读，不改内部状态）。 */
 	getState(): RemoteAccessState {
@@ -79,6 +130,7 @@ export class RemoteAccessManager {
 			webRequiresAuth: web.requiresAuth,
 			cloudflare: { ...this.cloudflare },
 			tailscale: { ...this.tailscale },
+			easytier: { ...this.easytier },
 		};
 	}
 
@@ -125,20 +177,136 @@ export class RemoteAccessManager {
 			this.tailscale.serveUrl = "";
 			this.tailscale.error = "";
 		}
+		await this.refreshEasyTier();
 		this.emit();
 		return this.getState();
 	}
 
+	/**
+	 * EasyTier 只读探测：定位 CLI、读取运行中节点的虚拟 IP；CLI 读不到时回落到手动 IP。
+	 * 不启动/停止 EasyTier 进程——网络生命周期由用户自己的客户端或系统服务管理。
+	 */
+	private async refreshEasyTier(): Promise<void> {
+		try {
+			// 用户指定的路径优先：解压版 CLI 不在 PATH、也没有卸载信息可查。
+			const cliPath = this.getEasyTierCliPath().trim();
+			const binaryPath = await this.detectEasyTier(cliPath);
+			const manualIp = normalizeEasyTierIpv4(this.getEasyTierManualIp());
+			this.easytier.binaryPath = binaryPath;
+			this.easytier.installed = Boolean(binaryPath);
+			// 托管相关状态：core 是否可启、配置是否齐备、系统服务是否已装/在跑。
+			const corePath = binaryPath ? detectEasyTierCore(binaryPath) : "";
+			this.easytier.coreAvailable = Boolean(corePath);
+			this.easytier.configPresent = isEasyTierConfigReady(this.getEasyTierConfig());
+			this.serviceHost = binaryPath ? this.serviceHostFactory({ logger: this.logger, cliPath: binaryPath, corePath }) : null;
+			const serviceInfo: EasyTierServiceInfo = this.serviceHost ? await this.serviceHost.status() : { installed: false, running: false };
+			this.easytier.serviceInstalled = serviceInfo.installed;
+			this.easytier.serviceRunning = serviceInfo.running;
+			if (!binaryPath) {
+				this.easytierReader = null;
+				this.easytier.running = false;
+				this.easytier.ip = manualIp;
+				this.easytier.hostname = "";
+				this.easytier.version = "";
+				this.easytier.ipSource = manualIp ? "manual" : "";
+				// 指定了路径却仍找不到：多半是路径写错/文件被移动，直接说清楚，别让用户以为重检没生效。
+				this.easytier.error = cliPath ? "指定的 easytier-cli 路径不可用，请检查路径或清空后重新检测" : "";
+				return;
+			}
+			this.easytierReader = this.easytierReaderFactory({ logger: this.logger, binary: binaryPath, manualIp });
+			const probe = await this.easytierReader.probe();
+			this.easytier.running = probe.running;
+			this.easytier.ip = probe.ip;
+			this.easytier.hostname = probe.hostname;
+			this.easytier.version = probe.version;
+			this.easytier.ipSource = probe.ipSource;
+			this.easytier.error = probe.error;
+		} catch (error) {
+			// 只读渠道的探测异常绝不能影响 Web 服务设置提交/启停；落 error 字段即可。
+			this.easytier.running = false;
+			this.easytier.error = error instanceof Error ? error.message : String(error);
+			this.logger.warn("web-remote", "easytier refresh failed", { error: this.easytier.error });
+		}
+	}
+
 	/** 启动指定渠道；失败时把用户可读原因写进该渠道的 error 并推送。 */
-	async start(channel: RemoteAccessChannelId): Promise<RemoteAccessState> {
+	/**
+	 * 启动指定渠道。
+	 * @param override 仅 easytier：渲染层传入的「当前草稿」配置。设置弹框里改完还没保存就点启动时，
+	 * 用它覆盖已落盘的设置，避免「必须点保存才能启动」。
+	 */
+	async start(channel: RemoteAccessChannelId, override?: EasyTierManagedConfig | null): Promise<RemoteAccessState> {
 		if (channel === "cloudflare") return this.startCloudflare();
+		if (channel === "easytier") return this.startEasyTier(override);
 		return this.startTailscaleServe();
 	}
 
 	/** 停用指定渠道；幂等。 */
 	async stop(channel: RemoteAccessChannelId): Promise<RemoteAccessState> {
 		if (channel === "cloudflare") return this.stopCloudflare();
+		if (channel === "easytier") return this.stopEasyTier();
 		return this.stopTailscaleServe();
+	}
+
+	/** 托管配置的 TOML 文本；未配置或路径未就绪时返回空串（Web 下载路由据此 404）。 */
+	buildEasyTierConfigToml(): string {
+		const config = this.getEasyTierConfig();
+		if (!isEasyTierConfigReady(config)) return "";
+		return buildEasyTierToml(config as EasyTierManagedConfig);
+	}
+
+	/**
+	 * 启动托管网络：先落盘配置，再（必要时）安装系统服务并启动。
+	 * 安装/启动需要管理员权限，会弹 UAC；配置文件路径固定，后续改配置只需重启服务。
+	 */
+	private async startEasyTier(override?: EasyTierManagedConfig | null): Promise<RemoteAccessState> {
+		this.easytier.error = "";
+		const config = override ?? this.getEasyTierConfig();
+		if (!isEasyTierConfigReady(config)) {
+			this.easytier.error = "请先填写网络名称与网络密钥";
+			this.emit();
+			return this.getState();
+		}
+		if (!this.easytier.installed || !this.easytier.coreAvailable) {
+			this.easytier.error = this.easytier.installed ? "未找到 easytier-core，请检查 EasyTier 安装目录或指定 CLI 路径" : "未找到 easytier-cli，请先安装 EasyTier";
+			this.emit();
+			return this.getState();
+		}
+		const configPath = this.getEasyTierConfigPath();
+		if (!configPath || !this.serviceHost) {
+			this.easytier.error = "托管配置路径未初始化";
+			this.emit();
+			return this.getState();
+		}
+		try {
+			await mkdir(dirname(configPath), { recursive: true });
+			await writeFile(configPath, buildEasyTierToml(config as EasyTierManagedConfig), "utf8");
+			if (!this.easytier.serviceInstalled) await this.serviceHost.install(configPath);
+			await this.serviceHost.start();
+			this.logger.info("web-remote", "easytier service started", { configPath });
+		} catch (error) {
+			this.easytier.error = error instanceof Error ? error.message : String(error);
+			this.logger.warn("web-remote", "easytier start failed", { error: this.easytier.error });
+		}
+		await this.refreshEasyTier();
+		this.emit();
+		return this.getState();
+	}
+
+	/** 停止托管网络（需要管理员权限，会弹 UAC）；服务未安装时是空操作。 */
+	private async stopEasyTier(): Promise<RemoteAccessState> {
+		this.easytier.error = "";
+		if (this.serviceHost && this.easytier.serviceInstalled) {
+			try {
+				await this.serviceHost.stop();
+			} catch (error) {
+				this.easytier.error = error instanceof Error ? error.message : String(error);
+				this.logger.warn("web-remote", "easytier stop failed", { error: this.easytier.error });
+			}
+		}
+		await this.refreshEasyTier();
+		this.emit();
+		return this.getState();
 	}
 
 	private async startCloudflare(): Promise<RemoteAccessState> {
@@ -286,6 +454,8 @@ export class RemoteAccessManager {
 	 */
 	async syncWebService(): Promise<void> {
 		if (this.disposed) return;
+		// 设置保存后（含 EasyTier 手动 IP 变更）顺带刷新只读渠道，UI 无需再点一次「重新检测」。
+		await this.refreshEasyTier();
 		const web = this.getWebServiceStatus();
 		if (!web.running) {
 			if (this.cloudflareDesired || this.cloudflare.running || this.cloudflare.starting) await this.stopCloudflare();

@@ -1190,6 +1190,8 @@ export function GitPanel(props: GitPanelProps) {
 		showCommitGenProgressToast(composerScopeKey);
 	}, [commitGenLoading, composerScopeKey]);
 	const [branchOpen, setBranchOpen] = useState(false);
+	// 脏工作区切分支的待确认目标（Wave 5）：非空时弹 ConfirmDialog。
+	const [pendingBranchSwitch, setPendingBranchSwitch] = useState<string | null>(null);
 	const [branchCreating, setBranchCreating] = useState(false);
 	const [newBranchName, setNewBranchName] = useState("");
 	const [branchDropdownStyle, setBranchDropdownStyle] = useState<React.CSSProperties>({});
@@ -1210,7 +1212,8 @@ export function GitPanel(props: GitPanelProps) {
 			bottom: placement.bottom,
 			width: placement.width,
 			maxHeight: placement.maxHeight,
-			zIndex: 9999,
+			// z 层级走语义 token（foundation.css）：下拉是 popover 语义，不再写死 9999 旁路（Wave 2 §5）。
+			zIndex: "var(--z-popover)",
 		});
 	}, []);
 
@@ -1375,8 +1378,15 @@ export function GitPanel(props: GitPanelProps) {
 											className={`h-auto flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs hover:bg-accent${branch === props.currentBranch ? " bg-accent font-semibold text-[color:var(--color-accent)]" : ""}`}
 											title={branch}
 											onClick={() => {
-												if (branch !== props.currentBranch) props.onSwitchBranch?.(branch);
 												setBranchOpen(false);
+												// 脏工作区切分支确认（Wave 5）：git checkout 默认把未提交改动
+												// 携带到目标分支（carry），用户通常不预期这个行为。干净区直接切。
+												if (branch === props.currentBranch) return;
+												if (total > 0) {
+													setPendingBranchSwitch(branch);
+													return;
+												}
+												props.onSwitchBranch?.(branch);
 											}}
 										>
 											{branch === props.currentBranch && <Check size={14} className="shrink-0 text-[color:var(--color-accent)]" />}
@@ -1518,7 +1528,16 @@ export function GitPanel(props: GitPanelProps) {
 									</div>
 								)}
 
-								{error && <div className="flex min-h-[22px] shrink-0 items-center gap-1 px-2.5 text-control text-[var(--git-conflict)]">{error}</div>}
+								{error && (
+									/* 错误态带 alert 语义（Wave 5，对齐 RemoteGitPanel 的 role=alert 基准）：
+									    读屏能播报，且与下方「干净态」视觉分流——错误不再只是一行变色小字。 */
+									<div role="alert" className="flex min-h-[22px] shrink-0 items-center gap-1 px-2.5 text-control text-[var(--git-conflict)]">
+										<TriangleAlert size={13} aria-hidden="true" className="shrink-0" />
+										<span className="min-w-0 flex-1 truncate" title={error}>
+											{error}
+										</span>
+									</div>
+								)}
 								{!loading && total === 0 && !error && (
 									/* 工作区干净的完成态：勾图标 + 文案，替代裸一行灰字（用户需要一眼确认「没有待处理」而不是「加载失败」） */
 									<div className="git-status-msg flex min-h-[22px] shrink-0 items-center gap-1.5 px-2.5 text-control text-[var(--git-desc-fg)]">
@@ -1702,6 +1721,26 @@ export function GitPanel(props: GitPanelProps) {
 						confirmLabel={t("common.delete")}
 						onConfirm={confirmDelete}
 						onCancel={() => setDeleteTarget(null)}
+					/>,
+					document.body,
+				)}
+
+			{pendingBranchSwitch !== null &&
+				createPortal(
+					<ConfirmDialog
+						title={t("git.branchSwitchConfirmTitle")}
+						message={t("git.branchSwitchConfirmMessage", {
+							branch: pendingBranchSwitch,
+							count: total,
+						})}
+						danger
+						confirmLabel={t("git.branchSwitchConfirmLabel")}
+						onConfirm={() => {
+							const branch = pendingBranchSwitch;
+							setPendingBranchSwitch(null);
+							if (branch) props.onSwitchBranch?.(branch);
+						}}
+						onCancel={() => setPendingBranchSwitch(null)}
 					/>,
 					document.body,
 				)}

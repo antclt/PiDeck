@@ -142,7 +142,11 @@ test("composer area mounts the stats strip under the input card", () => {
 	// footer 固定保留 8px 底部留白；ComposerMeasuredExtras 会把它计入总高度，
 	// StatsLine 自身仍只在有数字时渲染。
 	assert.match(area, /className="composer[^\"]*px-0 pb-2"/);
-	assert.match(stats, /if \(segments\.length === 0\) return null/);
+	// #455：空数据不再无条件整条卸载 —— 已有轮次（时间线已产生统计）时按同高预留，
+	// 否则 runtime 快照晚到时底栏会突增 32px（pt-1 4px + 圆环 size-7 28px）把输入卡顶上去。
+	assert.match(stats, /const placeholder = reserved && \(props\.turnCount \?\? 0\) > 0;/);
+	assert.match(stats, /if \(reserved && !placeholder\) return null;/);
+	assert.match(stats, /placeholder && "invisible"/);
 	assert.match(stats, /px-1 pb-0 pt-1/);
 	assert.match(stats, /min-w-0 truncate text-center/);
 });

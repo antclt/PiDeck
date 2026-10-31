@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { atom, useAtomValue, useSetAtom, useStore } from "jotai";
-import { toast } from "sonner";
+import { showNotice } from "../utils/notice";
 import { latestUserMessageId, SendScrollPositioner } from "./timeline/sendScroll";
 import { ROOT_ROW_SELECTOR, useVisibleTimelineRows, type VisibleTimelineRow } from "./timeline/useVisibleTimelineRows";
 import { selectAtom } from "jotai/utils";
@@ -1295,9 +1295,9 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		if (positionedSendMessageRef.current === sendMessageId) return;
 		const pending = pendingSendScrollRef.current;
 		const pendingMatches = Boolean(pending && pending.ownerKey === ownerKey && pending.messageId === sendMessageId);
-		// 面板挂载时乐观气泡已在缓存（引导页首发 / 切页回来）：此前的 id 变化没人观察到，
+		// 无历史锚点的面板挂载时乐观气泡已在缓存（如引导页首发）：此前的 id 变化没人观察到，
 		// 但发送态仍 in-flight 且 requestId 就是这条 user 消息，恢复完成后补一次定位。
-		const submissionMatches = sendingRequestId === sendMessageId && !changed;
+		const submissionMatches = !restoreAnchor && sendingRequestId === sendMessageId && !changed;
 		if (!changed && !pendingMatches && !submissionMatches) {
 			if (pending?.ownerKey === ownerKey) pendingSendScrollRef.current = undefined;
 			return;
@@ -1334,7 +1334,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 		// 短会话 / 行未挂载 / 距离为 0 时 pin 可能一次都不动画就返回（不触发 onStart）：
 		// 同步结算标记，避免残留 true。
 		if (!sendScrollRef.current.isAnimating) setSendPinAnimating(false);
-	}, [clearProgrammaticTimelineScroll, invalidateHistoryBrowsing, markProgrammaticScroll, options.sessionId, ownerKey, restorePhase, sendMessageId, store, setSendPinAnimating]);
+	}, [clearProgrammaticTimelineScroll, invalidateHistoryBrowsing, markProgrammaticScroll, options.sessionId, ownerKey, restoreAnchor, restorePhase, sendMessageId, store, setSendPinAnimating]);
 	useEffect(
 		() => () => {
 			pendingSendScrollRef.current = undefined;
@@ -1930,7 +1930,7 @@ export function useSessionTimelineController(options: { sessionId?: string; mess
 			}
 			// 静默放弃会被当成「点了没反应」（本次 bug 的原始反馈）：补页/扩窗都到上限时
 			// 必须给一句反馈，要么历史太远加载不到，要么这条已被 context_edit 移出展示。
-			toast(t("sessionFind.jumpFailed"));
+			showNotice(t("sessionFind.jumpFailed"));
 			return;
 		}
 		if (action.kind === "wait") return;

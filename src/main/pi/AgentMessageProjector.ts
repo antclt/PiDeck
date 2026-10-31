@@ -12,6 +12,7 @@ import {
 } from "../../shared/formatToolDetail";
 import { extractMessageText } from "./messageContent";
 import { stripAnsiCsi as stripAnsi } from "../../shared/ansiText";
+import { reasoningText } from "../../shared/reasoningText";
 import { chatUsageFromPiUsage } from "./messageUsage";
 import { asRecord } from "./agentUtils";
 import { isRoleMessageRole, takeActiveEntryId } from "./sessionEntryIds";
@@ -417,7 +418,7 @@ export class AgentMessageProjector {
 		});
 	}
 
-	/** 从历史消息 content 数组中提取 thinking 内容块的文本，清理 ANSI 转义码 */
+	/** 从历史消息 content 数组中提取 thinking 内容块的文本，清理 ANSI 转义码，并剥离开头的思维签名块 */
 	extractThinking(content: unknown): string {
 		if (!Array.isArray(content)) return "";
 		const raw = content
@@ -429,6 +430,6 @@ export class AgentMessageProjector {
 			})
 			.filter(Boolean)
 			.join("\n");
-		return stripAnsi(raw);
+		return reasoningText(stripAnsi(raw));
 	}
 }

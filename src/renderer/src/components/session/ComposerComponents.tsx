@@ -2,18 +2,18 @@ import { useState, useRef, useEffect, useCallback, type ReactNode } from "react"
 import { AnimatePresence } from "motion/react";
 import { useAtomValue } from "jotai";
 import { dshModuleHiddenAtom, imageGenModuleHiddenAtom, videoGenModuleHiddenAtom, acpEnabledAtom, acpToolsAtom, sessionIsRemoteAtomFamily, sessionRemoteExtensionsAtomFamily } from "../../atoms";
-import { AlertCircle, BrainCircuit, Check, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, CornerDownLeft, Eye, EyeOff, FileText, GitBranch, ImageIcon, LayoutGrid, ListChecks, Loader2, Paperclip, RefreshCw, Settings2, Sparkles, Star, Target, X, Zap } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, ChevronLeft, ChevronRight, Clapperboard, CornerDownLeft, Eye, EyeOff, FileText, GitBranch, ImageIcon, LayoutGrid, ListChecks, Loader2, Paperclip, RefreshCw, SlidersHorizontal, Sparkles, Star, Target, X, Zap } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
 import type { PromptEnhanceView } from "../../hooks/usePromptEnhance";
 import { PromptEnhanceControls } from "./PromptEnhanceControls";
 import { Button } from "../ui-shadcn/button";
 import { Collapsible, CollapsibleContent } from "../ui-shadcn/collapsible";
-import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "../ui-shadcn/command";
+import { CommandItem } from "../ui-shadcn/command";
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
 import { cn } from "../../lib/utils";
 import { showNotice } from "../../utils/notice";
 import { ModelThinkingChip } from "./ModelThinkingChip";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
 import { ConfirmDialog } from "../app/AppParts";
 import { ComposerImageGenOptions } from "./ComposerImageGenOptions";
 import { ComposerVideoGenOptions } from "./ComposerVideoGenOptions";
@@ -24,14 +24,16 @@ import { ProviderUsageInline } from "../app/ProviderUsageInline";
 import { useProviderUsageBatchRefresh } from "../../hooks/useProviderUsage";
 import { AcpToolLogo, DshLogo, PiLogo } from "./SessionSourceBadge";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger } from "../ui-shadcn/select";
-import { computeModelDisplay, formatModelRef, resolveComposerLiveModel, resolveGuideDisplayModel, type ModelPending } from "../../utils/modelPendingDisplay";
+import { computeModelDisplay, formatModelName, formatModelRef, resolveComposerLiveModel, resolveGuideDisplayModel, type ModelPending } from "../../utils/modelPendingDisplay";
 import { backendLockCopyKeys } from "../../utils/remoteCapabilityLimits";
 import { WELCOME_DSH_MODEL_KEY, WELCOME_MODEL_KEY, isWelcomeModelLost, readWelcomeDshModelPreference, readWelcomeModelPreference, shouldClearWelcomePreference } from "../../utils/chatSessionBootstrap";
 import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
 import { CommandPickerGroup, CommandPickerPanel, type CommandPickerFilter } from "../ui-shadcn/command-picker";
 import { computeModelPickerDefaultExpanded, groupModelsByProvider, modelPickerSearchFilter, modelRowLabel, modelRowName, orderProviderGroups, resolveModelPickerBody } from "./sessionPickerOptions";
 import { ComposerModeChip } from "./composer/ComposerModeChip";
-import { resolveAcpConfigSelect } from "./acpConfigSelect";
+import { resolveAcpConfigSelect, flattenAcpConfigOptions, isRenderableAcpConfigEntry, splitAcpConfigEntries, type AcpConfigEntry } from "./acpConfigSelect";
+import { AcpConfigGlyph } from "./AcpConfigGlyph";
+import { AcpModelRateBadge } from "./AcpModelRateBadge";
 import { AcpConfigSearchSelect } from "./AcpConfigSearchSelect";
 import type { AgentBackend, AgentRuntimeState, AvailableModel, ComposerAgentMode, GitBranchInfo, ModelListFailReason, ModelListReport, SessionRecord, SessionRuntimeTarget, UsageProbeBackend } from "../../../../shared/types";
 
@@ -175,72 +177,167 @@ export function ExtensionWidgetCard(props: {
  * 否则 Select 的当前值在列表里没有对应项，用户也无法看清自己选了什么。 */
 /**
  * ACP 会话配置选择器组：按 category 渲染 agent 回传的 configOptions——
- * model → 模型下拉、thought_level → 思考下拉、mode/其他 → 通用下拉。
- * 只处理 select 型且带枚举的 option(boolean 型需 client 通告,主流 agent 未用);
+ * model → 模型下拉、thought_level → 思考下拉、mode/其他 → 通用下拉、boolean → 开关 chip。
+ * select 型至少要两个候选（单值项在 agent 侧不可写，留着只是点不动的死 chip）；
  * 分组值(options[].group)平铺渲染。值变化经 onSet 下发,整表由事件/响应回填。
  * 模型列表（以及任何超长枚举）用可搜索下拉，短枚举保持普通 Select。
+ *
+ * 参数很多时（CodeBuddy 一次回传 6-8 项）只把模型与 mode 留在底栏，其余收进
+ * 「参数」菜单：平铺会让底栏被 chip 撑满、每项标签都被压成省略号，反而看不清当前配置。
  */
 function AcpConfigControls(props: { options: import("../../../../shared/types/acp").AcpSessionConfigOption[]; disabled?: boolean; onSet: (optionId: string, value: string | boolean) => void }) {
-	const entries = flattenConfigOptions(props.options).filter((entry) => entry.values.length > 0);
+	const entries = flattenAcpConfigOptions(props.options).filter(isRenderableAcpConfigEntry);
 	if (entries.length === 0) return null;
+	const { inline, overflow } = splitAcpConfigEntries(entries);
 	return (
 		<>
-			{entries.map((entry) => {
-				// currentValue 可能不在 agent 的枚举里（完整模型 id vs 别名）：补一条当前项，保证高亮/滚动指向真实值。
-				const select = resolveAcpConfigSelect(entry.option, entry.values);
-				// 模型列表按 agent 不同可达几十项：换可搜索下拉，避免平铺滚动找模型。
-				// 模式/思考档等短枚举仍用 Select（选项少时搜索框只是噪音）。
-				if (entry.option.category === "model" || entry.values.length > 10) {
-					return <AcpConfigSearchSelect key={entry.option.id} optionName={entry.option.name} description={entry.option.description} category={entry.option.category} select={select} disabled={props.disabled} onPick={(value) => props.onSet(entry.option.id, value)} />;
-				}
-				return (
-					// 再点选当前项等价于「保持不变」，不发 IPC。
-					<Select key={entry.option.id} value={select.value} disabled={props.disabled} onValueChange={(value) => (value === select.value ? undefined : props.onSet(entry.option.id, value))}>
-						<SelectTrigger
-							size="sm"
-							className="composer-bar-btn backend h-7 gap-1 rounded-md border-transparent bg-transparent px-1.5 text-control font-semibold text-foreground hover:bg-muted/60 focus-visible:border-transparent focus-visible:ring-0 data-[state=open]:border-transparent data-[state=open]:bg-muted/60 data-[state=open]:ring-0 max-w-56 [&_[data-slot='select-icon']]:hidden"
-							// 悬停必须能看到实际生效值：只给选项名+描述时，长模型名被截断后无从确认。
-							title={`${entry.option.name}: ${select.label}${entry.option.description ? ` — ${entry.option.description}` : ""}`}
-						>
-							{entry.option.category === "model" ? (
-								<Sparkles className="size-[15px] shrink-0 text-muted-foreground" aria-hidden="true" />
-							) : entry.option.category === "thought_level" ? (
-								<BrainCircuit className="size-[15px] shrink-0 text-muted-foreground" />
-							) : (
-								<Settings2 className="size-[15px] shrink-0 text-muted-foreground" />
-							)}
-							<span className="truncate text-xs">{select.label}</span>
-						</SelectTrigger>
-						<SelectContent align="start" className="max-h-72">
-							{select.values.map((value) => (
-								<SelectItem key={value.value} value={value.value}>
-									<span className="truncate">{value.name}</span>
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
-				);
-			})}
+			{inline.map((entry) => (
+				<AcpConfigControl key={entry.option.id} entry={entry} disabled={props.disabled} onSet={props.onSet} />
+			))}
+			{overflow.length > 0 ? <AcpConfigOverflowMenu entries={overflow} disabled={props.disabled} onSet={props.onSet} /> : null}
 		</>
 	);
 }
 
-/** 平铺 configOptions 的取值枚举(group 结构展平),过滤空枚举。 */
-function flattenConfigOptions(options: import("../../../../shared/types/acp").AcpSessionConfigOption[]): Array<{ option: import("../../../../shared/types/acp").AcpSessionConfigOption; values: Array<{ value: string; name: string }> }> {
-	const result = [];
-	for (const option of options) {
-		if (option.type === "boolean") continue;
-		const values: Array<{ value: string; name: string }> = [];
-		for (const item of option.options ?? []) {
-			if ("group" in item) {
-				for (const inner of item.options) values.push({ value: inner.value, name: item.name ? `${item.name} / ${inner.name}` : inner.name });
-			} else {
-				values.push({ value: item.value, name: item.name });
-			}
-		}
-		result.push({ option, values });
+/** 单个 ACP 配置项控件：boolean → 开关 chip；长枚举 → 可搜索下拉；短枚举 → Select。 */
+function AcpConfigControl(props: { entry: AcpConfigEntry; disabled?: boolean; onSet: (optionId: string, value: string | boolean) => void }) {
+	const entry = props.entry;
+	// boolean 项（multitask / delegate 等）没有枚举值，走独立开关分支；
+	// 写入必须带 type，否则 agent 按 string 分支校验会回 -32602。
+	if (entry.option.type === "boolean") {
+		const on = entry.option.currentValue === true;
+		return (
+			<button
+				type="button"
+				aria-pressed={on}
+				disabled={props.disabled}
+				onClick={() => props.onSet(entry.option.id, !on)}
+				title={`${entry.option.name}: ${on ? t("common.enabled") : t("common.disabled")}${entry.option.description ? ` — ${entry.option.description}` : ""}`}
+				className={cn("composer-bar-btn backend inline-flex h-7 max-w-56 min-w-0 items-center gap-1 rounded-md border-transparent px-1.5 text-control font-semibold transition-colors hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-50", on ? "bg-muted/60 text-foreground" : "text-muted-foreground")}
+			>
+				<AcpConfigGlyph option={entry.option} />
+				<span className="truncate text-xs">{entry.option.name}</span>
+			</button>
+		);
 	}
-	return result;
+	// currentValue 可能不在 agent 的枚举里（完整模型 id vs 别名）：补一条当前项，保证高亮/滚动指向真实值。
+	const select = resolveAcpConfigSelect(entry.option, entry.values);
+	// 当前项的 description 也进悬停提示：列表里的倍率/说明在收起态也要能查到。
+	const currentValue = select.values.find((value) => value.value === select.value);
+	// 模型列表按 agent 不同可达几十项：换可搜索下拉，避免平铺滚动找模型。
+	// 模式/思考档等短枚举仍用 Select（选项少时搜索框只是噪音）。
+	if (entry.option.category === "model" || entry.values.length > 10) {
+		return <AcpConfigSearchSelect option={entry.option} select={select} disabled={props.disabled} onPick={(value) => props.onSet(entry.option.id, value)} />;
+	}
+	return (
+		// 再点选当前项等价于「保持不变」，不发 IPC。
+		<Select value={select.value} disabled={props.disabled} onValueChange={(value) => (value === select.value ? undefined : props.onSet(entry.option.id, value))}>
+			<SelectTrigger
+				size="sm"
+				className="composer-bar-btn backend h-7 gap-1 rounded-md border-transparent bg-transparent px-1.5 text-control font-semibold text-foreground hover:bg-muted/60 focus-visible:border-transparent focus-visible:ring-0 data-[state=open]:border-transparent data-[state=open]:bg-muted/60 data-[state=open]:ring-0 max-w-56 [&_[data-slot='select-icon']]:hidden"
+				// 悬停必须能看到实际生效值：只给选项名+描述时，长模型名被截断后无从确认。
+				title={`${entry.option.name}: ${select.label}${currentValue?.description ? ` — ${currentValue.description}` : ""}${entry.option.description ? ` — ${entry.option.description}` : ""}`}
+			>
+				<AcpConfigGlyph option={entry.option} />
+				<span className="truncate text-xs">{select.label}</span>
+			</SelectTrigger>
+			<SelectContent align="start" className="max-h-72">
+				{select.values.map((value) => (
+					<SelectItem key={value.value} value={value.value}>
+						<span className="flex min-w-0 flex-1 items-center gap-2">
+							<span className="flex min-w-0 flex-1 flex-col gap-0.5 py-0.5">
+								<span className="truncate">{value.name}</span>
+								{value.description ? <span className="truncate text-micro text-muted-foreground">{value.description}</span> : null}
+							</span>
+							<AcpModelRateBadge rate={value.rate} />
+						</span>
+					</SelectItem>
+				))}
+			</SelectContent>
+		</Select>
+	);
+}
+
+/**
+ * ACP 参数折叠菜单：底栏只留模型与 mode（没有模型则留第一项），其余收进「参数」下拉。
+ * 用 DropdownMenu 的 Sub 而不是把 Select 塞进 Popover：Radix Select 的 portal
+ * 内容会被 Popover 当成 outside 点击，一选就关；Sub 与主菜单同属一棵菜单树，稳定。
+ */
+function AcpConfigOverflowMenu(props: { entries: AcpConfigEntry[]; disabled?: boolean; onSet: (optionId: string, value: string | boolean) => void }) {
+	if (props.entries.length === 0) return null;
+	const title = t("app.acpConfigMoreTitle");
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger asChild>
+				<button
+					type="button"
+					disabled={props.disabled}
+					aria-label={`${title} (${props.entries.length})`}
+					title={`${title} (${props.entries.length})`}
+					className="composer-bar-btn backend inline-flex h-7 shrink-0 items-center gap-1 rounded-md border-transparent px-1.5 text-control font-semibold text-muted-foreground transition-colors hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:bg-muted/60 data-[state=open]:text-foreground"
+				>
+					<SlidersHorizontal size={15} strokeWidth={1.8} className="shrink-0" aria-hidden="true" />
+					<span className="text-xs">{t("app.acpConfigMore")}</span>
+					<span className="rounded-sm bg-muted px-1 text-micro tabular-nums leading-4 text-muted-foreground">{props.entries.length}</span>
+				</button>
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="start" side="top" sideOffset={6} className="min-w-56 max-w-[min(320px,calc(100vw-24px))]">
+				<DropdownMenuLabel>{title}</DropdownMenuLabel>
+				{props.entries.map((entry) => {
+					if (entry.option.type === "boolean") {
+						const on = entry.option.currentValue === true;
+						return (
+							<DropdownMenuCheckboxItem
+								key={entry.option.id}
+								checked={on}
+								disabled={props.disabled}
+								onCheckedChange={() => props.onSet(entry.option.id, !on)}
+								// 开关类参数常需要连续调多个：选中后别把菜单关掉。
+								onSelect={(event) => event.preventDefault()}
+								title={entry.option.description}
+							>
+								<AcpConfigGlyph option={entry.option} className="size-4 shrink-0 text-muted-foreground" />
+								<span className="min-w-0 flex-1 truncate">{entry.option.name}</span>
+								<span className="shrink-0 text-micro text-muted-foreground">{on ? t("common.enabled") : t("common.disabled")}</span>
+							</DropdownMenuCheckboxItem>
+						);
+					}
+					const select = resolveAcpConfigSelect(entry.option, entry.values);
+					const currentValue = select.values.find((value) => value.value === select.value);
+					return (
+						<DropdownMenuSub key={entry.option.id}>
+							<DropdownMenuSubTrigger disabled={props.disabled} title={`${entry.option.name}: ${select.label}${currentValue?.description ? ` — ${currentValue.description}` : ""}${entry.option.description ? ` — ${entry.option.description}` : ""}`}>
+								<AcpConfigGlyph option={entry.option} className="size-4 shrink-0 text-muted-foreground" />
+								<span className="min-w-0 flex-1 truncate">{entry.option.name}</span>
+								<span className="max-w-[8rem] shrink-0 truncate text-micro font-normal text-muted-foreground">{select.label}</span>
+							</DropdownMenuSubTrigger>
+							<DropdownMenuSubContent className="min-w-56">
+								{/* scroll-ok: transient —— 下拉子菜单短列表（配置项有限），max-h-72 封顶，菜单关闭即销毁，无需虚拟化 */}
+								<div className="max-h-72 overflow-y-auto">
+									<DropdownMenuRadioGroup
+										value={select.value}
+										onValueChange={(value) => {
+											if (value !== select.value) props.onSet(entry.option.id, value);
+										}}
+									>
+										{select.values.map((value) => (
+											<DropdownMenuRadioItem key={value.value} value={value.value} title={value.description}>
+												<span className="flex min-w-0 flex-1 flex-col">
+													<span className="truncate">{value.name}</span>
+													{value.description ? <span className="truncate text-micro text-muted-foreground">{value.description}</span> : null}
+												</span>
+												<AcpModelRateBadge rate={value.rate} />
+											</DropdownMenuRadioItem>
+										))}
+									</DropdownMenuRadioGroup>
+								</div>
+							</DropdownMenuSubContent>
+						</DropdownMenuSub>
+					);
+				})}
+			</DropdownMenuContent>
+		</DropdownMenu>
+	);
 }
 
 /**
@@ -265,6 +362,7 @@ export function ComposerBackendPicker(props: { backend: AgentBackend; acpToolId?
 	// 还是 Codex」）——logo 区分品牌，悬停/读屏再给具体名称。
 	const currentTool = props.backend === "acp" ? acpTools.find((tool) => tool.id === props.acpToolId) : undefined;
 	const triggerLabel = currentTool?.name ?? t("sessionBackend.acp");
+	const displayLabel = props.backend === "acp" ? triggerLabel : props.backend === "dsh" ? t("sessionBackend.dsh") : props.backend === "imagegen" ? t("sessionBackend.imagegen") : props.backend === "videogen" ? t("sessionBackend.videogen") : t("sessionSource.pi");
 	const showDsh = !dshHidden || props.backend === "dsh";
 	const showImageGen = !imageGenHidden || props.backend === "imagegen";
 	const showVideoGen = !videoGenHidden || props.backend === "videogen";
@@ -289,10 +387,11 @@ export function ComposerBackendPicker(props: { backend: AgentBackend; acpToolId?
 				size="sm"
 				/* size-7 + p-0 + justify-center = 与底栏其它图标按钮同一个 28×28 盒子；
 				   data-[size=sm]:h-7 必需——SelectTrigger 基底高度是 data 变体，
-				   base h-7 既压不过它，也不会被 tailwind-merge 合成一条。 */
+				   base h-7 既压不过它，也不会被 tailwind-merge 合成一条。
+				   后端选择只显示品牌图标，不叠加文字或 chevron。 */
 				className="composer-bar-btn backend size-7 justify-center rounded-md border-transparent bg-transparent p-0 text-control font-semibold text-foreground hover:bg-muted/60 focus-visible:border-transparent focus-visible:ring-0 data-[size=sm]:h-7 data-[state=open]:border-transparent data-[state=open]:bg-muted/60 data-[state=open]:ring-0 [&_[data-slot='select-icon']]:hidden"
-				title={`${triggerLabel} · ${t("session.backendPickerHint")}`}
-				aria-label={triggerLabel}
+				title={`${displayLabel} · ${t("session.backendPickerHint")}`}
+				aria-label={displayLabel}
 			>
 				{/* 不渲染 SelectValue：按当前后端手动渲染 logo，输入框只显示图标不带文字。
 				    隐藏 shadcn SelectTrigger 自带的 chevron（[data-slot='select-icon']），
@@ -374,7 +473,6 @@ function ComposerBranchSwitcher(props: { gitInfo: GitBranchInfo; disabled?: bool
 					>
 						<GitBranch size={15} strokeWidth={1.8} aria-hidden="true" />
 						<span className="composer-bar-branch-name min-w-0 truncate">{props.gitInfo.current}</span>
-						<ChevronDown size={12} strokeWidth={2} aria-hidden="true" className="shrink-0 text-muted-foreground" />
 					</Button>
 				</DropdownMenuTrigger>
 				<DropdownMenuContent align="end" sideOffset={4} className="min-w-56">
@@ -429,6 +527,8 @@ export function ComposerBottomBar(props: {
 	modelPending?: ModelPending;
 	composerAgentMode: ComposerAgentMode;
 	gitInfo?: GitBranchInfo;
+	/** 本栏项目 Git 拉取失败（非仓库/磁盘不可读）：显示「Git 不可用」chip 而非静默消失（Wave 4 §5）。 */
+	gitUnavailable?: boolean;
 	/** 切换分支（右侧分支下拉）：经栏级 usePaneGitInfo 的 switchBranch 执行，
 	 *  成功后回写本栏 gitInfo 并通知 App（仅当本栏为聚焦项目时采纳），右侧 Git 面板与底栏保持同步。 */
 	onSwitchBranch?: (branch: string) => void;
@@ -444,6 +544,8 @@ export function ComposerBottomBar(props: {
 	enhance?: { view: PromptEnhanceView; start: () => void; cancel: () => void };
 	/** 切换后端：UI 层面先停 runtime 再写 catalog；acp 可带工具 id（picker 两页式弹层内选定）。 */
 	onChangeBackend?: (backend: AgentBackend, acpToolId?: string) => void;
+	/** 起始页模型信息退为次级文本，不与输入正文争权重。 */
+	startSurface?: boolean;
 	/** ACP 工具二级选择（仅 acp 后端渲染；激活后不传 onChange 即只读）。 */
 	acpTool?: { toolId?: string; onChange?: (toolId: string) => void };
 	/** ACP 会话配置选择器（configOptions 整表 + 下发回调；undefined=agent 未提供,隐藏）。 */
@@ -584,7 +686,12 @@ export function ComposerBottomBar(props: {
 	const modelFrom = modelDisplay.from;
 	const modelTo = modelDisplay.to;
 	const modelName = modelFrom?.modelName || modelFrom?.modelId;
-	const modelLabel = modelName ? formatModelRef(modelFrom ?? { provider: "", modelId: "" }) : `${t("app.model")}: -`;
+	// 底栏只显示模型名；供应商放进悬停 title（长名字会截断，不能把底栏撑开）。
+	// Wave 4 §5：引导页曾选中的模型已从目录消失（welcomeModelLost）时，chip 从裸「模型: -」
+	// 升级为「模型不可用」+ title 原因——用户能分辨「还没选」与「选过的模型被删了」。
+	const modelUnavailable = Boolean(needsWelcomeCatalog && welcomeModelLost && !modelName);
+	const modelLabel = modelName ? formatModelName(modelFrom ?? { provider: "", modelId: "" }) : modelUnavailable ? t("app.modelUnavailable") : `${t("app.model")}: -`;
+	const modelTitle = modelFrom ? formatModelRef(modelFrom) : modelUnavailable ? t("app.modelUnavailableTitle", { model: welcomeModel?.modelName || welcomeModel?.modelId || "" }) : undefined;
 	// 锁定态只读后端标识：ACP 会话把工具名拼进 title/aria-label（与下拉触发器同一套品牌 logo）。
 	// hook 必须无条件调用：写成 `props.backend === "acp" ? useAtomValue(...) : undefined` 会让
 	// 「切到 ACP 后端」这次渲染比上一次多一个 hook，直接抛 React #310（渲染的 hook 数多于上次）。
@@ -755,7 +862,16 @@ export function ComposerBottomBar(props: {
 					    ACP 同理：模型/思考由 agent CLI 自持（session/config options 或各自 /model 命令），
 					    PiDeck 维护的 models.json 对 agent CLI 无意义，隐藏 chip 防止两套语义混用。 */}
 					{isMediaComposer || props.backend === "acp" ? null : (
-						<ModelThinkingChip modelLabel={modelLabel} modelPendingTo={modelDisplay.pending && modelTo ? modelTo.modelName || modelTo.modelId : undefined} modelPendingTitle={modelPendingTitle} disabled={props.modelDisabled ?? props.disabled} onPickModel={props.onPickModel} thinkingControl={props.thinkingControl} />
+						<ModelThinkingChip
+							modelLabel={modelLabel}
+							modelTitle={modelTitle}
+							startSurface={props.startSurface}
+							modelPendingTo={modelDisplay.pending && modelTo ? modelTo.modelName || modelTo.modelId : undefined}
+							modelPendingTitle={modelPendingTitle}
+							disabled={props.modelDisabled ?? props.disabled}
+							onPickModel={props.onPickModel}
+							thinkingControl={props.thinkingControl}
+						/>
 					)}
 					{/* ACP：模型/思考档/模式选择器,枚举来自 agent 回传的 configOptions
 					    （本尊清单,不手写防漂移）;agent 未提供时不渲染。
@@ -789,6 +905,13 @@ export function ComposerBottomBar(props: {
 						>
 							<GitBranch size={15} strokeWidth={1.8} aria-hidden="true" />
 							<span className="composer-bar-branch-name truncate">{props.gitInfo.current}</span>
+						</span>
+					) : props.gitUnavailable ? (
+						// Wave 4 §5：本地项目但 Git 信息拉不到（非仓库/磁盘不可用）——
+						// 此前控件静默消失，用户无从分辨「还没加载」与「这个项目没有 Git」。
+						<span className="inline-flex items-center gap-1.5 px-1.5 text-control text-muted-foreground/70" title={t("app.branchUnavailable")}>
+							<GitBranch size={15} strokeWidth={1.8} aria-hidden="true" />
+							<span className="truncate">{t("app.branchUnavailable")}</span>
 						</span>
 					) : null}
 					{props.enhance ? <PromptEnhanceControls disabled={props.disabled} view={props.enhance.view} modelLabel={props.enhance.view.modelLabel} onStart={props.enhance.start} onCancel={props.enhance.cancel} /> : null}
@@ -827,7 +950,7 @@ export function PickerDialog(props: { title: string; hint?: string; onClose: () 
 }
 
 /** Dialog wrapper for the shared Command panel; the panel owns header, search, groups, and footer. */
-function CommandPickerDialog(props: {
+export function CommandPickerDialog(props: {
 	title: string;
 	hint?: string;
 	onClose: () => void;
@@ -1193,64 +1316,59 @@ export function PromptTemplatePicker(props: {
 	return (
 		/* 与技能/模型选择器对齐（#115 之后的双行卡片式条目）：
 		   首行图标 + 斜杠命令名 + 参数提示徽标，次行截断的描述；
-		   预览按钮保留（查看模板正文）。旧 picker-palette-* 单行挤排版弃用。 */
-		<PickerDialog title={t("app.promptTemplatePickerTitle")} hint={t("app.pickerInsertSendHint")} onClose={props.onClose} className="prompt-template-picker">
-			<Command>
-				<CommandInput placeholder={t("app.promptTemplateSearchPlaceholder")} autoFocus />
-				<CommandList className="max-h-[min(420px,55vh)]">
-					<CommandEmpty>{t("app.promptTemplateSearchEmpty")}</CommandEmpty>
-					{props.templates.length === 0 && <div className="px-6 py-10 text-center text-caption text-muted-foreground">{t("app.promptTemplateEmpty")}</div>}
-					{props.templates.map((template) => (
-						// key 用 name+path：包带模板（来源 B）没有可编辑路径，path 恒为空，单用 path 会撞 key
-						<CommandItem key={`${template.name}:${template.path}`} value={`/${template.name}`} keywords={[template.name, template.description, template.argumentHint ?? ""]} onSelect={() => props.onPick(template)} className="group min-h-10 items-center gap-2.5 rounded-md px-3 py-2">
-							<span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted/70 text-muted-foreground">
-								<FileText size={14} strokeWidth={1.8} aria-hidden="true" />
+		   预览按钮保留（查看模板正文）。旧 picker-palette-* 单行挤排版弃用。
+		   列表态走共享 CommandPickerPanel 壳（Wave 2 §5.3）：统一搜索、空态与键盘语义。 */
+		<CommandPickerDialog title={t("app.promptTemplatePickerTitle")} hint={t("app.pickerInsertSendHint")} onClose={props.onClose} className="prompt-template-picker" searchPlaceholder={t("app.promptTemplateSearchPlaceholder")} emptyLabel={t("app.promptTemplateSearchEmpty")}>
+			{props.templates.length === 0 && <div className="px-6 py-10 text-center text-caption text-muted-foreground">{t("app.promptTemplateEmpty")}</div>}
+			{props.templates.map((template) => (
+				// key 用 name+path：包带模板（来源 B）没有可编辑路径，path 恒为空，单用 path 会撞 key
+				<CommandItem key={`${template.name}:${template.path}`} value={`/${template.name}`} keywords={[template.name, template.description, template.argumentHint ?? ""]} onSelect={() => props.onPick(template)} className="group min-h-10 items-center gap-2.5 rounded-md px-3 py-2">
+					<span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted/70 text-muted-foreground">
+						<FileText size={14} strokeWidth={1.8} aria-hidden="true" />
+					</span>
+					<span className="min-w-0 flex-1">
+						<span className="flex items-center gap-1.5">
+							<span className="font-mono text-control font-semibold text-foreground" title={`/${template.name}`}>
+								/{template.name}
 							</span>
-							<span className="min-w-0 flex-1">
-								<span className="flex items-center gap-1.5">
-									<span className="font-mono text-control font-semibold text-foreground" title={`/${template.name}`}>
-										/{template.name}
-									</span>
-									{template.argumentHint && <code className="rounded bg-accent/10 px-1.5 py-0.5 font-mono text-micro text-accent-foreground">{template.argumentHint}</code>}
-								</span>
-								{template.description && (
-									<span className="mt-0.5 block truncate text-caption text-muted-foreground" title={template.description}>
-										{template.description}
-									</span>
-								)}
+							{template.argumentHint && <code className="rounded bg-accent/10 px-1.5 py-0.5 font-mono text-micro text-accent-foreground">{template.argumentHint}</code>}
+						</span>
+						{template.description && (
+							<span className="mt-0.5 block truncate text-caption text-muted-foreground" title={template.description}>
+								{template.description}
 							</span>
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon-sm"
-								title={t("common.preview")}
-								onClick={(e) => {
-									e.stopPropagation();
-									setPreviewTemplate(template);
-								}}
-							>
-								<Eye size={14} strokeWidth={1.8} aria-hidden="true" />
-							</Button>
-							{/* 一键插入全文：把模板内容整段塞进输入框（不生成斜线命令），
-							    与 onPick（插入 /名称 命令）是并列入口，两者由用户视需要选择。 */}
-							{props.onInsertContent && (
-								<Button
-									type="button"
-									variant="ghost"
-									size="icon-sm"
-									title={t("app.pickerInsertContent")}
-									onClick={(e) => {
-										e.stopPropagation();
-										props.onInsertContent?.(template);
-									}}
-								>
-									<CornerDownLeft size={14} strokeWidth={1.8} aria-hidden="true" />
-								</Button>
-							)}
-						</CommandItem>
-					))}
-				</CommandList>
-			</Command>
-		</PickerDialog>
+						)}
+					</span>
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-sm"
+						title={t("common.preview")}
+						onClick={(e) => {
+							e.stopPropagation();
+							setPreviewTemplate(template);
+						}}
+					>
+						<Eye size={14} strokeWidth={1.8} aria-hidden="true" />
+					</Button>
+					{/* 一键插入全文：把模板内容整段塞进输入框（不生成斜线命令），
+						    与 onPick（插入 /名称 命令）是并列入口，两者由用户视需要选择。 */}
+					{props.onInsertContent && (
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-sm"
+							title={t("app.pickerInsertContent")}
+							onClick={(e) => {
+								e.stopPropagation();
+								props.onInsertContent?.(template);
+							}}
+						>
+							<CornerDownLeft size={14} strokeWidth={1.8} aria-hidden="true" />
+						</Button>
+					)}
+				</CommandItem>
+			))}
+		</CommandPickerDialog>
 	);
 }

@@ -66,7 +66,8 @@ test("session rows yield to hover actions on narrow sidebar", () => {
 	const matches = src.match(/conversation-body min-w-0 flex-1 transition-\[padding-right\] group-hover\/row:pr-7 group-focus-within\/row:pr-7/g);
 	assert.ok(matches && matches.length === 4, `expected 4 row bodies, got ${matches?.length ?? 0}`);
 	// 浮层模式不变
-	assert.match(src, /row-more-actions pointer-events-none absolute top-1\/2 right-1/);
+	const rowStyles = read("src/renderer/src/components/sidebar/sidebarRowStyles.ts");
+	assert.match(rowStyles, /row-more-actions pointer-events-none absolute top-1\/2 right-1/);
 	assert.doesNotMatch(src, /conversation-body[^\n]*opacity-0/);
 });
 

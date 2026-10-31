@@ -134,6 +134,7 @@ import type { ProjectTrustChoice } from "./projectTrustGate";
 
 export type { ProjectTrustChoice };
 import { isContextOverflowError } from "../../shared/contextOverflow";
+import { reasoningText } from "../../shared/reasoningText";
 
 /** 从 RPC 返回的未知 ask 记录中安全读取字段，避免批量答案转换扩散 any 强转。 */
 function readAskField(input: unknown, key: string): unknown {
@@ -6084,7 +6085,7 @@ export class AgentManager {
 		const segment = this.liveStream.getSegment(agentId);
 		const fromStream = this.liveStream.getThinking(agentId) ?? "";
 		const fromMessage = partialMessage && typeof partialMessage === "object" ? this.messageProjector.extractThinking(asRecord(partialMessage)?.content) : "";
-		const nextThinking = stripAnsi(fromStream || fromMessage || "");
+		const nextThinking = reasoningText(stripAnsi(fromStream || fromMessage || ""));
 		if (!nextThinking.trim()) return;
 
 		this.beginAssistantMessage(agentId);

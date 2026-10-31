@@ -74,7 +74,7 @@ export interface PiDeckApiRegistryErrorData {
 export type SessionSubdomainId = "catalog" | "runtime" | "import" | "rewind";
 
 /** config 域十子库（ConfigManager 单类无子 Store，按方法语义分组收口，数据在 consolidations.ts）。 */
-export type ConfigSubstoreId = "models" | "auth" | "settings" | "mcp" | "trust" | "tokendance" | "usageProbes" | "resources" | "vision" | "maintenance";
+export type ConfigSubstoreId = "models" | "auth" | "settings" | "mcp" | "trust" | "tokendance" | "support" | "usageProbes" | "resources" | "vision" | "maintenance";
 
 /**
  * 域门面句柄：注册进统一接口的 preload 命名空间对象本身（如 source.sessions）。

@@ -1419,10 +1419,11 @@ const api = {
 		webServiceStatus: () => ipcRenderer.invoke(ipcChannels.webServiceStatus) as Promise<WebServiceStatusInfo>,
 		rotateWebToken: () => ipcRenderer.invoke(ipcChannels.webServiceRotateToken) as Promise<WebServiceStatusInfo>,
 		setWebToken: (input: { token?: string; expiresIn?: number }) => ipcRenderer.invoke(ipcChannels.webServiceSetToken, input) as Promise<WebServiceStatusInfo>,
-		/** 外网访问：聚合状态（cloudflare 隧道 + tailscale） */
+		/** 外网访问：聚合状态（cloudflare 隧道 + tailscale + EasyTier 只读渠道） */
 		webRemoteAccessState: () => ipcRenderer.invoke(ipcChannels.webRemoteAccessState) as Promise<import("../shared/types/remoteAccess").RemoteAccessState>,
-		/** 启动外网访问渠道（cloudflare | tailscale） */
-		webRemoteAccessStart: (channel: import("../shared/types/remoteAccess").RemoteAccessChannelId) => ipcRenderer.invoke(ipcChannels.webRemoteAccessStart, channel) as Promise<{ ok: true; state: import("../shared/types/remoteAccess").RemoteAccessState } | { ok: false; error: string }>,
+		/** 启动外网访问渠道；EasyTier 可附带「当前草稿配置」以便未保存也能直接启动 */
+		webRemoteAccessStart: (channel: import("../shared/types/remoteAccess").RemoteAccessChannelId, easyTierConfig?: { networkName: string; networkSecret: string; peers: string[]; bindIpv4: string }) =>
+			ipcRenderer.invoke(ipcChannels.webRemoteAccessStart, channel, easyTierConfig) as Promise<{ ok: true; state: import("../shared/types/remoteAccess").RemoteAccessState } | { ok: false; error: string }>,
 		/** 停用外网访问渠道 */
 		webRemoteAccessStop: (channel: import("../shared/types/remoteAccess").RemoteAccessChannelId) => ipcRenderer.invoke(ipcChannels.webRemoteAccessStop, channel) as Promise<{ ok: true; state: import("../shared/types/remoteAccess").RemoteAccessState } | { ok: false; error: string }>,
 		/** 重新探测外网访问环境（二进制/登录态/serve 指向） */

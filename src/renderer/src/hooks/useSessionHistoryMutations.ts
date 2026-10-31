@@ -240,9 +240,9 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
 					runtimeGeneration: activated.runtimeGeneration,
 				};
 			}
-			// 覆盖层文案按动作称呼（编辑中/重发中），“fork”是内部实现术语不暴露给用户；
-			// 显式 fork 动作（forkFromUserMessage）仍用 forking 文案。
-			showOverlay(sessionId, kind === "edit" ? "editing" : "resending");
+			// 热会话的 fork 约 0.3s，全程不停进程、不改原文件——再挂一层全屏遮罩只会让
+			// 「编辑一条消息」看起来像重启应用。这里不再显示 editing/resending 遮罩；
+			// 冷会话的 activating 遮罩保留（那段是真在拉起进程，需要反馈）。
 			const entryId = await resolveForkEntryId(message, target);
 			if (!entryId) {
 				latest.showToast(t("app.forkMissingEntryId"), 4000);
@@ -297,30 +297,21 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
 				latest.showToast(t("message.anonymousEditUnsupported"), 4000);
 				return;
 			}
-			// fork 化编辑（pi）：确认停掉运行中的 turn 后 fork 到该消息 + 立即以新文本重发
+			// fork 化编辑（pi）：fork 到该消息 + 立即以新文本重发。pi 的 fork 全程在同一进程内
+			// 完成——teardownCurrent 先 abort 当前 turn 并落盘，再 createBranchedSession 换会话
+			// 文件，不停进程、不改原文件，与 CLI 双击 Esc 选树是同一条路径。运行中由 pi 自己
+			// 中断当前 turn，因此这里不再需要「停止后编辑」确认弹窗。
 			if (path.path === "fork-mutation") {
-				confirmStopIfRunning(
-					sessionId,
-					{
-						title: t("message.historyStopToEditTitle"),
-						// 状态相关文案：running（含流式/工具执行）才说「会话正在运行」；
-						// starting/idle（如刚重启完的空闲进程）只说操作本身，避免用户误以为还在处理中。
-						message: latest.isAgentCurrentlyBusy() ? t("message.historyStopToEditBody") : t("message.historyStopToEditBodyIdle"),
-						confirmLabel: t("app.stop"),
-					},
-					async () => {
-						try {
-							await runForkMutation(sessionId, "edit", message, newText);
-						} catch (error) {
-							failToast(t("message.editFailed"), error);
-						} finally {
-							// 与 resend 的 fork 分支对称：runForkMutation 内部 showOverlay 后有多个早退路径
-							// （激活失败/entryId 缺失/cancelled/成功切会话），finally 里必须清 overlay，
-							// 否则全遮罩永久挂死（overlay atom 无自动清除机制）。
-							hideOverlay(sessionId);
-						}
-					},
-				);
+				try {
+					await runForkMutation(sessionId, "edit", message, newText);
+				} catch (error) {
+					failToast(t("message.editFailed"), error);
+				} finally {
+					// 与 resend 的 fork 分支对称：runForkMutation 内部 showOverlay 后有多个早退路径
+					// （激活失败/entryId 缺失/cancelled/成功切会话），finally 里必须清 overlay，
+					// 否则全遮罩永久挂死（overlay atom 无自动清除机制）。
+					hideOverlay(sessionId);
+				}
 				return;
 			}
 			// legacy 文件路径（DSH 兜底，策略上仅 DSH 会落到这里）：行为与迁移前一致
@@ -342,7 +333,7 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
 				},
 			);
 		},
-		[confirmStopIfRunning, failToast, runFileMutation, runForkMutation],
+		[confirmStopIfRunning, failToast, hideOverlay, runFileMutation, runForkMutation],
 	);
 
 	const deleteMessage = useCallback(
@@ -428,8 +419,8 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
 				}
 				return;
 			}
-			// fork 化重发（pi）：确认停掉运行中的 turn 后 fork 到该消息 + 立即以原文重发。
-			// 旧分支完整留在原文件，无需 prepare/truncate，发送失败也不丢历史。
+			// fork 化重发（pi）：fork 到该消息 + 立即以原文重发。旧分支完整留在原文件，
+			// 无需 prepare/truncate，发送失败也不丢历史。
 			if (path.path === "fork-mutation") {
 				const run = async () => {
 					resendingIdsRef.current.add(message.id);
@@ -443,16 +434,8 @@ export function useSessionHistoryMutations(deps: SessionHistoryMutationsDeps) {
 						hideOverlay(sessionId);
 					}
 				};
-				confirmStopIfRunning(
-					sessionId,
-					{
-						title: t("message.historyStopToResendTitle"),
-						// 同上：仅 running 才报「会话正在运行」，空闲进程用无状态陈述。
-						message: latest.isAgentCurrentlyBusy() ? t("message.historyStopToResendBody") : t("message.historyStopToResendBodyIdle"),
-						confirmLabel: t("app.stop"),
-					},
-					run,
-				);
+				// 与编辑同源：pi 的 fork 自己 abort 当前 turn 并在同进程换会话文件，无需确认弹窗。
+				void run();
 				return;
 			}
 			// legacy catalog 路径（DSH 兜底；UI 已对 DSH 隐藏重发入口，正常不会到达）：

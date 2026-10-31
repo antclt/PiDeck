@@ -9,6 +9,7 @@ import { t } from "../../i18n";
 import { displayProjectDirectoryName } from "../../rendererUtils";
 import { isRemoteProject } from "../../../../shared/projectLocation";
 import { supportsSessionFind } from "../../utils/sessionFindSupport";
+import { sessionFindTriggerTitle, useSessionFindShortcutHint } from "./sessionFindShortcutHint";
 import { Button } from "../ui-shadcn/button";
 import { DshAgentPresetControl } from "./DshAgentPresetControl";
 import { DshAgentToolsPanel } from "./DshAgentToolsPanel";
@@ -84,6 +85,7 @@ export function SessionHeader(props: SessionHeaderProps) {
 	// 点击只往会话级请求计数里加一次，真正打开/聚焦由 ChatSessionPane 的浮层处理。
 	const canFindInSession = supportsSessionFind(session);
 	const requestSessionFind = useSetAtom(requestSessionFindAtom);
+	const { kbd: findKbd, aria: findAria } = useSessionFindShortcutHint();
 
 	const actions = (
 		<div ref={props.embedded ? props.headerRef : undefined} className={`chat-header-actions flex min-w-0 items-center justify-end gap-1.5${props.embedded ? " h-7 w-auto shrink-0" : ""}${isStarting ? " loading" : ""}`}>
@@ -97,7 +99,16 @@ export function SessionHeader(props: SessionHeaderProps) {
 			{/* 放大镜入口常驻头部工具条（与运行控制/「⋯」同列），不再浮在消息正文上：
 			    后者既压住正文、在自定义标题栏下还会落到窗口控件行（用户反馈）。 */}
 			{canFindInSession && (
-				<Button type="button" variant="ghost" size="icon-sm" className="h-7 w-7 min-w-0 rounded-md border-0 bg-transparent px-0 text-muted-foreground hover:bg-accent hover:text-foreground" title={t("sessionFind.open")} aria-label={t("sessionFind.open")} onClick={() => requestSessionFind(sessionId)}>
+				<Button
+					type="button"
+					variant="ghost"
+					size="icon-sm"
+					className="h-7 w-7 min-w-0 rounded-md border-0 bg-transparent px-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+					title={sessionFindTriggerTitle(findKbd)}
+					aria-label={t("sessionFind.open")}
+					aria-keyshortcuts={findAria}
+					onClick={() => requestSessionFind(sessionId)}
+				>
 					<Search className="size-3.5" aria-hidden="true" />
 				</Button>
 			)}

@@ -258,7 +258,7 @@ export function MorphPopoverContent({ children, side = "bottom", align = "end", 
 						visibility: layout ? "visible" : "hidden",
 						transformOrigin: originFor(side, align),
 					}}
-					className="fixed z-[9999] [filter:drop-shadow(0_10px_18px_rgba(0,0,0,0.14))]"
+					className="fixed z-[var(--z-drawer)] [filter:drop-shadow(0_10px_18px_rgba(0,0,0,0.14))]"
 				>
 					<motion.div ref={ctx.contentRef} id={ctx.contentId} role="dialog" aria-labelledby={ctx.triggerId} variants={clip} style={{ borderRadius: radius }} className={cn("overflow-hidden border border-border bg-background", className)}>
 						{children}

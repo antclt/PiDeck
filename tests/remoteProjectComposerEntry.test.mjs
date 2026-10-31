@@ -24,7 +24,8 @@ test("remote empty state is the composer first, files second", () => {
 
 test("start surface and file panel expose the two-way switch", () => {
 	assert.match(startSurface, /secondaryAction\?: ReactNode/);
-	assert.match(startSurface, /\{props\.projectSwitcher\}\s*\{props\.secondaryAction\}/);
+	assert.match(startSurface, /props\.projectSwitcher/);
+	assert.match(startSurface, /props\.secondaryAction !== undefined[\s\S]{0,120}props\.secondaryAction\}/);
 	assert.match(panel, /onBack\?: \(\) => void/);
 	assert.match(panel, /data-testid="remote-project-back"/);
 });

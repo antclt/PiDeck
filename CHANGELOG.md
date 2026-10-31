@@ -1,4 +1,4 @@
-## v0.9.9-beta (2026-10-30)
+## v0.9.9 (2026-10-30)
 
 This release takes ACP from "it connects" to "it works every day": per-tool config memory replayed on new sessions, queued sends and a dedicated stop button mid-turn, usage metrics and diffs aligned with pi/DSH, and both the Web client and MCP can drive ACP sessions. Appearance is rebuilt as two independent dimensions (style × palette) with the pi TUI terminal skin ported wholesale, session groups become a host-level capability, and the long-list virtualization and long-reply expansion freezes are closed out.
 
@@ -13,6 +13,7 @@ This release takes ACP from "it connects" to "it works every day": per-tool conf
 - **Create and drive ACP sessions over MCP** — A new independent write switch `allowAcpInvoke` (off by default) exposes acp_tools_list / sessions_create / sessions_send / sessions_wait / sessions_messages / sessions_stop; they only accept an acpToolId registered in settings and never take commands, args or env vars.
 - **ACP sessions in the Web client** — ACP real-time streams reach the Web client, the backend picker gains an "ACP → specific CLI" group and can create ACP sessions; the Web client also switches Pi session safety levels.
 - **ACP usage panel gains token / latency / TPS metrics** — The experimental usage returned by session/prompt is parsed and accumulated across turns to show TTFT, total time, TPS and cache hit rate; fields the agent doesn't report are left out instead of shown as zero.
+- **ACP sessions now show todos and subagents** — ACP only carries todos when the agent volunteers a plan frame and has no subagent field at all, while CodeBuddy / Qoder / Claude / Codex report both as ordinary tool calls, so both strips stayed empty. Tool cards are now turned into todos and subagents from the tool name plus argument shape (TaskCreate / TaskUpdate are todos, TaskOutput / TaskStop are background shell tasks), a plan frame still wins when present, and archived ACP sessions rebuild the same way.
 
 ### ✨ Improvements
 - **Searchable model dropdown in ACP** — The model enum now opens a searchable popover that matches display names and model ids, focuses the input on open and scrolls the current model into view, so dozens of models no longer have to be scrolled through; hovering shows the full name and the current item stays highlighted.
@@ -27,6 +28,9 @@ This release takes ACP from "it connects" to "it works every day": per-tool conf
 - **Desktop pet and notifications cover ACP / DSH** — They fire only when a turn really settles successfully (user stops and failed turns don't count), and a disabled Ask notification switch no longer consumes the per-turn dedupe slot.
 - **A "buy the author a coffee" entry** — The support entry is wired in.
 - **Screen-reader and keyboard reachability** — Running/waiting indicators, MCP connection dots and shortcut hints are now exposed to screen readers and keyboard users.
+- **Thinking-level slider responds to the wheel** — Scrolling over the slider or its tick labels steps the level one notch per wheel line and resets after 150ms of idle; Ctrl/Cmd + wheel is left to the system zoom.
+- **Session tabs drop by display order (#453)** — Gaps in the tab strip, the empty space at the end and the "+" button all accept a drop, positions resolve from screen rectangles, and a cross-project insert the order cannot express no longer updates the array behind an unchanged picture.
+- **No jitter or lost draft sync while composing (#455)** — The editor keeps stable references for extensions and initial content instead of re-applying options on every render, a composition broken by blur or a lost composing flag resumes draft sync, and the footer reserves its height instead of jumping.
 
 ### 🐛 Fixes
 - **Hand-edited settings.json is no longer overwritten (#433)** — External edits made while the app runs are merged key-by-key with internal updates instead of the whole old snapshot being written back.
@@ -49,6 +53,10 @@ This release takes ACP from "it connects" to "it works every day": per-tool conf
 - **Transient-retry rules diverged from the desktop gate** — Overload is classified as rate limit, empty responses 400/413 downgrade to 4xx, and Cloudflare 530/52x/1033 count as transient.
 - **Disabled group plugins still listed grouped sessions, and clicking a group from the automation page did nothing** — Entries and the session list respect the enabled state, and group clicks leave the current page before navigating.
 - **Text looked blurry in macOS dark mode, plus contrast and line-height regressions** — Grayscale antialiasing is no longer forced; custom-theme directory path and empty-state contrast and settings description line height are fixed.
+- **The side-task session column was clipped at the bottom** — The panel's session container is a flex column now, so the group only takes the height left under the session header; the ask card's submit button, folded cards and the stats line under the composer are no longer cut off.
+- **Packet-capture MCP tools are no longer called screenshots** — A bare `capture` no longer maps to screenshot; only screenshot / screen_capture / capture_screen / cua_capture do, and everything else falls back to the raw tool name.
+- **CodeBuddy 2.178.1 config options work (#451)** — Boolean options render as switch chips and are written with their declared type (otherwise the agent answers -32602), single-value selects are no longer dead chips, bypass matching prefers fullAccess, and a rejected write rolls the local snapshot back so a chip never claims a switch that did not happen.
+- **Clicking a system notification in multi-instance mode opens no extra window** — Multi-instance no longer means no lock: the lock becomes the routing target for deep-link activation, a notification click is handed to a running instance and only opens a window when nobody answers, and routing moves to a surviving window when the holder exits.
 
 ### 🙏 Thanks
 

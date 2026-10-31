@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
-const { summarizeSettingsUnsavedChanges, formatSettingsUnsavedMessage } = loadTsCommonJs("src/renderer/src/components/app/settings/unsavedChangesSummary.ts");
+const { summarizeSettingsUnsavedChanges, formatSettingsUnsavedMessage, dirtySettingsTabIds } = loadTsCommonJs("src/renderer/src/components/app/settings/unsavedChangesSummary.ts");
 const i18n = loadTsCommonJs("src/renderer/src/i18n.ts");
 const settingsModal = readFileSync("src/renderer/src/components/app/SettingsModal.tsx", "utf8");
 
@@ -57,7 +57,20 @@ test("未建目录的内部字段合成「其他选项」，不按 Set 插入顺
 });
 
 test("无任何脏来源时返回 null（关闭时不弹确认）", () => {
-	assert.equal(summarizeSettingsUnsavedChanges({ dirtyFields: [], visionDirty: false, imageGenDirty: false }), null);
+	assert.equal(summarizeSettingsUnsavedChanges({ dirtyFields: [], visionDirty: false, imageGenDirty: false, videoGenDirty: false, acpDirty: false }), null);
+});
+
+test("生视频/ACP 脏标记纳入关闭确认摘要与 tab 黄点（不再静默丢失）", () => {
+	// 回归：此前 videoGenDirty/acpDirty 漏算，改完生视频供应商或 ACP 工具表直接关弹窗不弹确认
+	const summary = summarizeSettingsUnsavedChanges({ dirtyFields: [], imageGenDirty: false, videoGenDirty: true, acpDirty: true });
+	assert.equal(summary.totalCount, 2);
+	assert.deepEqual(JSON.parse(JSON.stringify(summary.items.map((i) => [i.tabKey, i.itemKey]))), [
+		["settings.tabs.videogen", "settings.tabs.videogen"],
+		["settings.tabs.acp", "settings.tabs.acp"],
+	]);
+	// 关闭/安装前检查的脏源合并判定在 SettingsModal 里，验证四个独立草稿全部接入
+	assert.match(settingsModal, /hasIndependentDraftsDirty = visionDraft\.dirty \|\| imageGenDirty \|\| videoGenDirty \|\| acpDirty/);
+	assert.match(settingsModal, /dirtySettingsTabIds\(\{ dirtyFields, visionDirty: visionDraft\.dirty, imageGenDirty, videoGenDirty, acpDirty \}\)/);
 });
 
 test("中文关闭文案带 tab 和项名；多项只展开第一条并带总数（单行兜底文案）", () => {
@@ -67,6 +80,19 @@ test("中文关闭文案带 tab 和项名；多项只展开第一条并带总数
 
 	const more = formatSettingsUnsavedMessage(summarizeSettingsUnsavedChanges({ dirtyFields: ["theme", "language"] }), i18n.t);
 	assert.equal(more, "「常用设置」的「语言」等共 2 项尚未保存，是否在关闭前保存？");
+});
+
+test("终端字段纳入关闭确认摘要与侧栏黄点（Wave 6）", () => {
+	const summary = summarizeSettingsUnsavedChanges({ dirtyFields: ["terminalTheme", "terminalStartupCommand"] });
+	assert.ok(summary, "terminal dirty 必须生成摘要");
+	assert.equal(summary.totalCount, 2);
+	// TranslationKey 是 TS 私有 brand 的字面量联合（结构相等但引用不等），与既有用例一致走 JSON 序列化比较
+	assert.deepEqual(JSON.parse(JSON.stringify(summary.items.map((i) => [i.tabKey, i.itemKey]))), [
+		["settings.tabs.terminal", "settings.terminal.theme"],
+		["settings.tabs.terminal", "settings.terminal.startupCommand"],
+	]);
+	const tabs = dirtySettingsTabIds({ dirtyFields: ["terminalCursorStyle"] });
+	assert.ok(tabs.has("terminal"), "terminal 必须出现在黄点集合");
 });
 
 test("SettingsModal 关闭确认渲染完整变更列表（intro + 两区分区 items 合并）", () => {

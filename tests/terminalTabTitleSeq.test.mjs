@@ -54,13 +54,13 @@ test("标题序号单调递增：关闭一个 tab 后新建不与存活 tab 撞�
 	const manager = newManager();
 	const a = manager.create(projectTarget, "pwsh");
 	const b = manager.create(projectTarget, "pwsh");
-	assert.equal(a.title, "pwsh 1");
-	assert.equal(b.title, "pwsh 2");
+	assert.equal(a.title, "pwsh 1 · p1");
+	assert.equal(b.title, "pwsh 2 · p1");
 
 	// 关闭 A 后桶内只剩 B（size=1）：旧实现会把新 tab 命名为「pwsh 2」与 B 撞名
 	manager.close(a.id);
 	const c = manager.create(projectTarget, "pwsh");
-	assert.equal(c.title, "pwsh 3", "序号必须单调递增，不复用已关闭 tab 的编号");
+	assert.equal(c.title, "pwsh 3 · p1", "序号必须单调递增，不复用已关闭 tab 的编号");
 });
 
 test("桶内全部关闭后序号归零：重新开始编号（ownerSeq 随桶清理）", () => {
@@ -71,28 +71,28 @@ test("桶内全部关闭后序号归零：重新开始编号（ownerSeq 随桶�
 	manager.close(b.id);
 
 	const c = manager.create(projectTarget, "pwsh");
-	assert.equal(c.title, "pwsh 1", "桶删除后 ownerSeq 必须同步清理，新会话从 1 开始");
+	assert.equal(c.title, "pwsh 1 · p1", "桶删除后 ownerSeq 必须同步清理，新会话从 1 开始");
 });
 
 test("closeAgent 清理 agent 桶序号：agent 重启后终端从 1 重新编号", () => {
 	const manager = newManager();
 	const agentTarget = { kind: "agent", sessionId: "s1", agentId: "a1", runtimeGeneration: 1 };
 	const a = manager.create(agentTarget, "pwsh");
-	assert.equal(a.title, "pwsh 1");
+	assert.equal(a.title, "pwsh 1 · proj");
 
 	manager.closeAgent("a1");
 	const b = manager.create(agentTarget, "pwsh");
-	assert.equal(b.title, "pwsh 1", "agent 重启（closeAgent）后新桶从 1 开始");
+	assert.equal(b.title, "pwsh 1 · proj", "agent 重启（closeAgent）后新桶从 1 开始");
 });
 
 test("不同归属键的序号互不影响", () => {
 	const manager = newManager();
 	const projA = manager.create({ kind: "project", projectId: "p1" }, "pwsh");
 	const projB = manager.create({ kind: "project", projectId: "p2" }, "pwsh");
-	assert.equal(projA.title, "pwsh 1");
-	assert.equal(projB.title, "pwsh 1", "每个归属键独立计数");
+	assert.equal(projA.title, "pwsh 1 · p1");
+	assert.equal(projB.title, "pwsh 1 · p2", "每个归属键独立计数");
 
 	// 归属键是 projectId（dev 契约：ownerKey = project:${projectId}），同一项目重复创建仍共享同一计数
 	const projA2 = manager.create({ kind: "project", projectId: "p1" }, "pwsh");
-	assert.equal(projA2.title, "pwsh 2", "同项目共享同一序号计数");
+	assert.equal(projA2.title, "pwsh 2 · p1", "同项目共享同一序号计数");
 });
