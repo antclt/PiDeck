@@ -432,7 +432,7 @@ test("prompt snapshots survive the process-event cap", () => {
 	assert.equal(events[0].prompt.text, "sys");
 });
 
-// ── S1 红测基线（计划 docs/trajectory-session-consumer-plan.md §8.3）────────────
+// ── S1 红测基线（计划 docs/archive/plans/trajectory-session-consumer-plan.md §8.3）────────────
 // 与 pi 同一套提示词预算：≤96,000 码元且 ≤256KiB（262,144 字节）。
 
 const DSH_PROMPT_BYTE_LIMIT = 262_144;

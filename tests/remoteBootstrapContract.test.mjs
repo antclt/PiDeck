@@ -1185,7 +1185,7 @@ test("an undeclared file left in staging blocks the commit instead of riding int
 });
 
 /* --------------------------------------------------------------------------------------------------
- * F3 reuse check (docs/remote-functional-optimization-plan.md §3 F3): a second attempt may re-prove the
+ * F3 reuse check (docs/archive/remote/remote-functional-optimization-plan.md §3 F3): a second attempt may re-prove the
  * already active content-addressed directory instead of transferring the same bytes again. The verdict is
  * produced by this frozen entry, never by the bundle it is checking.
  * ------------------------------------------------------------------------------------------------ */

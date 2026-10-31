@@ -1,6 +1,9 @@
 # PiDeck 统一接口（unified API）
 
-PiDeck 桌面能力面统一门面 `piDeckApi` 的契约文档。三层结构：`src/shared/api/`（纯契约目录与组合函数）、`src/main/api/`（主进程域注册表装配）、`src/renderer/src/unifiedApi.ts`（渲染层门面入口）。叠加不替换：606→743 条既有 IPC 通道与 preload 暴露面一行不改，`piDeckApi` 是消费侧统一视图。
+> **Status: Current（2026-10-31 核对；以代码与测试为准）**
+
+
+PiDeck 桌面能力面统一门面 `piDeckApi` 的契约文档。三层结构：`src/shared/api/`（纯契约目录与组合函数）、`src/main/api/`（主进程域注册表装配）、`src/renderer/src/unifiedApi.ts`（渲染层门面入口）。叠加不替换：795 条既有 IPC 通道（`check:ipc-wiring` 2026-10-31）与 preload 暴露面一行不改，`piDeckApi` 是消费侧统一视图。
 
 ## API 总览
 

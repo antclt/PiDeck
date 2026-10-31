@@ -1,5 +1,5 @@
 /**
- * 远端内置扩展快照部署（P4.4 扩展面，`docs/remote-extension-injection-plan.md` D1）。
+ * 远端内置扩展快照部署（P4.4 扩展面，`docs/archive/remote/remote-extension-injection-plan.md` D1）。
  *
  * 为什么单独一个模块、而不是塞进 `RemoteBootstrapDeployment`：两者**共用**同一套已审计的
  * staging/锁/逐文件 sha256/强制 mode/原子 rename 提交逻辑（那个入口现在带一个 target），

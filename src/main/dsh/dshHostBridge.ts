@@ -1,7 +1,7 @@
 /**
  * DSH v2 传输桥协议（纯函数，可单测）。
  *
- * 形态（docs/dsh-agent-backend-plan.md §3.2 形态 b）：utilityProcess 承载 DSH host，
+ * 形态（docs/archive/plans/dsh-agent-backend-plan.md §3.2 形态 b）：utilityProcess 承载 DSH host，
  * 主进程侧客户端把请求经 MessagePort（utilityProcess.postMessage / parentPort）桥接。
  *
  * Typert Remote 契约（docs/dsh-remote-contract.md）：旧 dsh-host-apiproxy 已废，

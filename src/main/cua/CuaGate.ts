@@ -25,7 +25,7 @@ export type CuaActionType =
 	| "list_windows"
 	| "get_state"
 	// 内置浏览器 Agent（browser_*）：与 CUA 共用同一套 fail-closed 审批语义，
-	// 但由独立 gate 实例与独立开关控制（见 docs/browser-agent-plan.md §7）。
+	// 但由独立 gate 实例与独立开关控制（见 docs/archive/plans/browser-agent-plan.md §7）。
 	| "browser_click"
 	| "browser_type"
 	| "browser_press_key"

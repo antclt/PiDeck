@@ -1,5 +1,5 @@
 /**
- * 远端 pi 的定位与版本兼容矩阵（`docs/remote-phase4-plan.md` §7 P4.1，只读探测）。
+ * 远端 pi 的定位与版本兼容矩阵（`docs/archive/remote/remote-phase4-plan.md` §7 P4.1，只读探测）。
  *
  * 为什么需要这个模块：Phase 4 的远端会话必须由**用户自己装的那个 pi** 来跑（计划的核心边界
  * ——pi 负责 Agent 行为，PiDeck 不复刻）。而远端 pi 只存在于用户的登录 shell 里：真机 `serve`

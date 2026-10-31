@@ -10,7 +10,7 @@
  * ≤64 KiB），配置缺失/读不到/畸形都退回默认根（与历史行为逐字一致），配置里的 `sessionDir` 不可用则给稳定码
  * 拒绝（理由见 resolveConfiguredSessionDir）。**边界**：`PI_CODING_AGENT_DIR` / `PI_CODING_AGENT_SESSION_DIR`
  * 是远端进程环境（helper 1.6.0 没有读 env 的操作），project 级 `.pi/settings.json` 取决于会话自己的 cwd
- * （读内容前不可知）——两者都只做默认根扫描，详见 docs/remote-development-handoff.md 第六批。
+ * （读内容前不可知）——两者都只做默认根扫描，详见 docs/archive/remote/remote-development-handoff.md 第六批。
  *
  * 边界与不变量（全部 fail-closed）：
  * - 远端路径**绝不进本地 fs**：本模块不 import node:fs。远端访问面收敛成一个

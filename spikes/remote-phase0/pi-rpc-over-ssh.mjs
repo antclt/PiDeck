@@ -1,7 +1,7 @@
 /**
  * Phase 0 spike：system ssh 启动远端 `pi --mode rpc`，完成 get_state → prompt → abort 完整 RPC turn。
  *
- * 对应 docs/remote-development-plan.md §12 Phase 0 门禁：
+ * 对应 docs/archive/remote/remote-development-plan.md §12 Phase 0 门禁：
  *   1. 无 orphan Pi —— 断开本地 ssh 后，远端 pi 在有限时间内退出（--check-orphan 用第二条连接验证）；
  *   2. stdout 无额外 banner —— 逐行 JSON.parse，任何非 JSON 行都判 FAIL；
  *   3. 网络断开能在有限时间内触发 exit —— kill 本地 ssh 进程，测量流关闭耗时；

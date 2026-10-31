@@ -307,7 +307,7 @@ Gitmoji 对应关系：
 	standbyRuntimeEnabled: true,
 
 	// session-store 条目表默认开：Wave 2b 把条目表落盘后，重启后首次打开大会话 14–20ms
-	// （TS 冷建表 99–188ms），见 docs/session-data-plane-plan.md §8.11；置 false 可回退纯 TS 解析。
+	// （TS 冷建表 99–188ms），见 docs/archive/plans/session-data-plane-plan.md §8.11；置 false 可回退纯 TS 解析。
 	sessionStoreEnabled: true,
 
 	// CUA 默认关闭：关闭时不监听本地端点、不改动 pi 的 mcp.json，与现状完全一致

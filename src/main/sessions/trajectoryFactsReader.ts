@@ -10,7 +10,7 @@ import { MAX_EVENTS, createSessionProcessCollector, retainProcessEvents } from "
  * 每次 token flush（~20 次/秒）都可能重扫一遍（实测 38.8MB 会话单次 117ms）。
  * 这里改为「索引选候选 → 小批读正文 → 重放」，文件没变时正文读取为 0。
  *
- * 边界（计划 docs/trajectory-session-consumer-plan.md §3.2）：
+ * 边界（计划 docs/archive/plans/trajectory-session-consumer-plan.md §3.2）：
  * - 候选 ≤512、正文合计 ≤8MiB、单行 ≤1MiB；
  * - 超限只标记 coverage，不在主进程循环追数据，也不回退成全文件扫描；
  * - 提示词快照是固定项，不被事件保留上限裁掉。

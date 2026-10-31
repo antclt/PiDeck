@@ -3,7 +3,7 @@ import { frozenHelperBundleManifest } from "../src/main/remote/RemoteBootstrapDe
 import { REMOTE_ACCEPTANCE_ENV, readRemoteAcceptanceCredentials, readRemoteAcceptanceTimeouts, runRemoteCommand, test } from "./remote-fixtures";
 
 /**
- * 远端功能优化（F1–F4）的真机验收：docs/remote-functional-optimization-plan.md §4 F5。
+ * 远端功能优化（F1–F4）的真机验收：docs/archive/remote/remote-functional-optimization-plan.md §4 F5。
  *
  * 驱动方式：主机生命周期走**产品自身的 preload IPC**（`piDesktop.remoteHosts.add/connect/disconnect`、
  * `piDesktop.remoteSessions.scan`）——这正是设置页与侧栏背后的同一条主进程路径，`out/renderer` 里的界面

@@ -4,7 +4,7 @@
  * ── 为什么要迁移、迁移了什么 ─────────────────────────────────────────
  * P4.4a 的版本断言「远端 plan/launcher 源码里不得出现 `--approve/--no-approve/trustOverride`」——
  * 那是「PiDeck 不得替用户决定远端项目 `.pi` 资源是否执行」的**临时**门禁，前提是这件事**尚未授权**。
- * `docs/remote-trust-plan.md` §3 已给出授权（决策 1：传 flag；决策 2：未决策默认 = 不传任何 flag），
+ * `docs/archive/remote/remote-trust-plan.md` §3 已给出授权（决策 1：传 flag；决策 2：未决策默认 = 不传任何 flag），
  * 所以门禁按授权等价迁移，而不是删除或放宽：
  *
  * 1. flag 字面量只允许出现在**已登记的解析点**（下面 `APPROVED_FLAG_SITES`，每一处都要写明理由）；

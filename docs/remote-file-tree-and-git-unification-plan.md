@@ -2,11 +2,11 @@
 
 > 状态：**计划已复核；按 §10 的任务卡顺序实施，现存缺陷尚未修复。** 审核发现与行为对照见 §4.2，当前进度见 §4.1。此前“薄适配器直接换面板”的方案不作为实施依据。
 >
-> **交接基线：`dev / c26dbb85d`。** 本次交接只修改本文；`src/`、`tests/` 与该基线无差异。任务卡列出的新回归文件均待执行者创建，不能假定修复已经存在。开始执行前核对实际 HEAD 与工作区，保留其他人的改动。
+> **交接基线：`dev / c26dbb85d`（计划编写时）；当前 `dev` 已到 `f6f4eeaf6`。** 注意：`project-panel-service-seam-adr.md` 的 Phase A（契约 + 本地/远端 provider + 行为测试）已落地；本计划的 T1 起任务卡仍未执行。开工前核对实际 HEAD 与工作区，保留其他人的改动。
 >
 > **执行者先读 §10.1，再执行 T1；每卡通过门禁后继续下一卡。** 不需要重做全仓审计，也不需要逐卡重新请求技术方案确认。§1 是最初问题归纳，不能代替 §4.1 的当前事实。
 >
-> 相关：[架构](architecture.md)、[位置模型 ADR](project-location-architecture.md)、[远端 Git 计划](remote-git-plan.md)、[远端文件管理计划](remote-file-management-plan.md)、[远端协作交接](remote-development-handoff.md)、[工程标准](engineering-standards.md)。
+> 相关：[架构](architecture.md)、[位置模型 ADR](project-location-architecture.md)、[远端 Git 计划](./archive/remote/remote-git-plan.md)、[远端文件管理计划](./archive/remote/remote-file-management-plan.md)、[远端协作交接](./archive/remote/remote-development-handoff.md)、[工程标准](engineering-standards.md)。
 >
 > **本文只治理统一层。** helper 线协议、bootstrap/pin/trust、令牌语义、远端终端与会话运行链路保持原边界。原始能力账本仍以 `remote-git-plan.md`（G1–G6c）与 `remote-file-management-plan.md` 为准。
 

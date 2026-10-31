@@ -1,5 +1,8 @@
 # PiDeck 数据迁移登记
 
+> **Status: Current（2026-10-31 核对；以代码与测试为准）**
+
+
 本文是持久数据迁移的统一索引，供升级验收、故障回顾和兼容代码退役使用。登记基线为命名统一提交 `6e67c8c56` 之后的 `dev` 工作区；条目按现有代码核对。**代码存在、状态文件存在、真实用户升级成功是三个不同结论**，各条目的验收状态要分别记录。
 
 这里登记 PiDeck 自己的数据转换、用户主动导入，以及上游拥有的格式迁移。纯 UI/模块重构不属于本台账。各领域继续维护自己的执行器与状态文件，本文提供统一入口。
@@ -71,7 +74,7 @@
 | ID | 对象与 owner | PiDeck 责任及验收 |
 | --- | --- | --- |
 | UP-001 | DSH 0.1.5-rc.1 → 0.2.0-rc.2；会话 V3 → V4 由 DSH runtime 负责 | PiDeck 做 RPC/配置/投影适配及真实 runtime 隔离验收。只读时内存转换，写租约后发布独立 V4、保留 V3；不能只降 npm 版本回退，V4 新消息不会回填 V3。owner、验证证据与各平台未验收项统一见 [DSH 0.2.0 升级对照](dsh-0.2.0-migration.md) |
-| UP-002 | DSH 0.2.0-rc.2 → 0.2.1-rc.2（经 0.2.1-rc.1）；会话格式不变，仍由 DSH runtime 负责 V3/V4 | PiDeck 适配依赖布局、PeerScope 必填、wire 描述符与预设变化，并显式声明过去靠 hoist 出现在顶层的 profile 插件包；rc.1 → rc.2 为补丁级（新增 web-deepseek-api provider 行、`WebRuntimeConfig` 字段改 Volatile），不改会话/RPC 契约，回退边界同 UP-001。验证证据与未验收项见 [DSH 0.2.1 升级对照](dsh-0.2.1-migration.md) |
+| UP-002 | DSH 0.2.0-rc.2 → 0.2.1-rc.2（经 0.2.1-rc.1）；会话格式不变，仍由 DSH runtime 负责 V3/V4 | PiDeck 适配依赖布局、PeerScope 必填、wire 描述符与预设变化，并显式声明过去靠 hoist 出现在顶层的 profile 插件包；rc.1 → rc.2 为补丁级（新增 web-deepseek-api provider 行、`WebRuntimeConfig` 字段改 Volatile），不改会话/RPC 契约，回退边界同 UP-001。验证证据与未验收项见 [DSH 0.2.1 升级对照](./archive/plans/dsh-0.2.1-migration.md) |
 | UP-003 | pi 自身会话格式、认证存储及 MCP 凭据迁移由 pi 负责 | PiDeck 保持 stdio RPC/既有认证边界；升级 pi 时验证会话恢复、读写及已有凭据可用，不另外实现 pi 存储迁移器 |
 
 ## 用户主动导入与复制

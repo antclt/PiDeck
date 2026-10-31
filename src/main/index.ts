@@ -2273,12 +2273,12 @@ function setupTray() {
 
 	// Linux/GNOME 托盘注册诊断（见 tray/trayRegistrationVerify.ts）：旧版 appindicator 扩展
 	// (< v66) 读不到 SNI 属性会永久放弃图标且不再重试（closeToTray 默认开启时，
-	// 用户点 X 隐藏后就再无唤回入口）。根因与修复见 docs/linux-tray-icon.md。
+	// 用户点 X 隐藏后就再无唤回入口）。根因与修复见 docs/archive/plans/linux-tray-icon.md。
 	// 这里只验收并记日志，不做重建 —— 重建换名并不能改变扩展的读法，实测无效。
 	if (process.platform === "linux") {
 		trayRegistrationVerify = startTrayRegistrationVerify({
 			onUnregistered: (detail) => {
-				void appLogger?.warn("app", "tray verify: unregistered (likely appindicator extension < v66), see docs/linux-tray-icon.md", detail);
+				void appLogger?.warn("app", "tray verify: unregistered (likely appindicator extension < v66), see docs/archive/plans/linux-tray-icon.md", detail);
 			},
 			onLog: (message, detail) => void appLogger?.info("app", message, detail),
 		});
@@ -5584,7 +5584,7 @@ app
 			sessionStoreService?.dispose();
 			sessionStoreService = null;
 		});
-		// Wave 2 读取路径默认关（收益门禁未过，见 docs/session-data-plane-plan.md §8.10）。
+		// Wave 2 读取路径默认关（收益门禁未过，见 docs/archive/plans/session-data-plane-plan.md §8.10）。
 		// 开关打开时才预热：读者侧只在 sidecar 已就绪时问，不预热的话这条路径永远不会生效；
 		// 预热本身只拉进程 + 载入快照（毫秒级），真正的条目解析由 get-index 触发。
 		if (settingsStore.get().sessionStoreEnabled) sessionStoreService.warmup();
@@ -6658,7 +6658,7 @@ app
 			syncTaskbarShortcutIcon({ style: settingsStore.get().logoStyle, customLogoDataUrl: settingsStore.get().logoCustomImage });
 		});
 		piModelCapabilityCache = new PiModelCapabilityCache({
-			// 模型能力水合分两档（详见 docs/pi-model-capability-plan.md）：
+			// 模型能力水合分两档（详见 docs/archive/plans/pi-model-capability-plan.md）：
 			// - 快速档（默认，loadExtensions=false）：--no-extensions。实测 418 模型下
 			//   冷启动从 ~2.4s 降到 ~0.37s（扩展加载就是 hydration 的绝对大头）。
 			// - 慢速档（loadExtensions=true）：仅模型选择器的手动刷新按钮触发，付扩展
@@ -7609,7 +7609,7 @@ app
 		// 真实输入注入另有「每次操作审批门 + 全局/会话杀开关」双重兜底（见 cua/CuaGate.ts）。
 		// 浏览器 Agent：主进程 CDP 驱动内置 webview 的 browser_* 工具。
 		// 与 CUA 共用同一个 MCP host 与 mcp.json 条目，但开关、审批门、autoApprove 独立；
-		// 默认关闭，页面内容按不可信数据处理（docs/browser-agent-plan.md）。
+		// 默认关闭，页面内容按不可信数据处理（docs/archive/plans/browser-agent-plan.md）。
 		browserAgentService = new BrowserAgentService({
 			listAllWebContents: () => webContents.getAllWebContents(),
 			isBrowserPanelGuest: (guest) => guest.session === session.fromPartition(BROWSER_PANEL_PARTITION),

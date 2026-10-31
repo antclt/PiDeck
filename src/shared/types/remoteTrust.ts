@@ -1,7 +1,7 @@
 /**
  * 远端项目 trust 的共享契约（P4.4b）。
  *
- * 语义边界（见 `docs/remote-trust-plan.md` §2 / §3.0）：trust 的判定对象是
+ * 语义边界（见 `docs/archive/remote/remote-trust-plan.md` §2 / §3.0）：trust 的判定对象是
  * `(hostId, endpoint 身份摘要, 规范项目根)`，三样材料里**只有 hostId 与规范项目根**能出现在渲染层——
  * endpoint 身份来自 pin 的密码学事实（`SshHostPinStore`），**不得**以任何形式（指纹、known_hosts 摘要、
  * 甚至派生摘要）回传渲染层。所以这里刻意分成两类：

@@ -7,7 +7,7 @@ import test from "node:test";
 /**
  * P4.2 真机运行时验收脚本的**断言守卫**（`scripts/verify-remote-runtime.mjs`）。
  *
- * 背景：`docs/remote-phase4-plan.md` §7 的 P4.2 门禁是「真机上一个会话完成 prompt → 至少一个 assistant
+ * 背景：`docs/archive/remote/remote-phase4-plan.md` §7 的 P4.2 门禁是「真机上一个会话完成 prompt → 至少一个 assistant
  * 事件 → abort → restart 后历史仍在；runner 回收后 `ps` 无残留 pi 进程组」。这条门禁**只能**在真机上跑，
  * 因此脚本本身就是唯一证据来源——而「唯一证据来源」的典型坏结局是把断言放宽到能过：残留进程组改成只打日志、
  * 会话文件删不掉改成提示、assistant 事件退化成「任一 RPC 事件」。

@@ -8,7 +8,7 @@ import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 /**
- * INV-5 红例（K1 设计 docs/remote-cross-store-consistency-plan.md §6.3）。
+ * INV-5 红例（K1 设计 docs/archive/remote/remote-cross-store-consistency-plan.md §6.3）。
  *
  * 这些用例是**预期的红**：它们断言的是 INV-5 要求的写侧保证，而该保证今天还不成立。为了不让
  * 「预期的红」以普通失败形态污染每次集成，本文件默认**全部 skip**（带原因）；只有显式设置

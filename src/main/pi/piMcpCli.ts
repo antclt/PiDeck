@@ -1,7 +1,7 @@
 /**
  * `pi mcp` CLI 封装：连接状态检测与 OAuth 登录/登出。
  *
- * 决策（docs/pi-0.99-mcp-codemode-plan.md M2/M3）：
+ * 决策（docs/archive/plans/pi-0.99-mcp-codemode-plan.md M2/M3）：
  * - PiDeck 统一 spawn `pi mcp`，不依赖某个 agent 是否在跑，也不走 RPC。
  * - `list/login/logout` **不接受** `-l`：作用域由 cwd + agentDir + 已保存的项目信任决定。
  *   全局：用不构成项目的可写工作目录；项目：所选项目 runtime 路径（须已信任）。

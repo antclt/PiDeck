@@ -16,7 +16,7 @@ import { BUN_MIN_VERSION_FOR_RELEASE_AGE_FLAG, bunCommandCandidates, bunGlobalIn
  * pi 自更新的**执行**链路：检查（pi.dev 版本接口）→ 通道分派 → 包管理器代跑 → 结果核验 → 失败提示。
  *
  * 为什么独立成模块：这段逻辑（约 280 行）与「扩展目录/安装」是两件事，混在 ExtensionManager 里既超文件红
- * 线、也让「更新失败提示与代跑参数」这类同源约束难以守住；拆分计划与门禁见 docs/pi-self-update-split-plan.md。
+ * 线、也让「更新失败提示与代跑参数」这类同源约束难以守住；拆分计划与门禁见 docs/archive/plans/pi-self-update-split-plan.md。
  *
  * 边界：纯判定与命令构造在 `piSelfUpdateChannel.ts`（零依赖纯函数），本模块只做 IO/子进程/错误改写；
  * 依赖全部经构造注入，**不反向 import ExtensionManager**——`runPi`（--no-approve 判定与 PATH/代理环境装配）、
@@ -237,7 +237,7 @@ export class PiSelfUpdateRunner {
 		const spec = `${check.packageName ?? PI_PACKAGE_NAME}@${check.latestVersion ?? ""}`;
 		// 这里刻意不做 sanitizeCommandOutput 的 home 掩码：提示里的命令要能直接粘贴执行，掩码后的 `<user>` 在
 		// shell/CMD 里都不是路径（channelLabel 那个 `<pi-runtime>` 只是展示标签）。路径属于 PiDeck 自己的
-		// userData/pi-runtime 目录，回显给同一用户无外泄；与「失败输出脱敏」的差别记入 docs/pi-install-detection.md。
+		// userData/pi-runtime 目录，回显给同一用户无外泄；与「失败输出脱敏」的差别记入 docs/archive/plans/pi-install-detection.md。
 		// 前缀通道代跑用的是用户配置的 npmCommand（可能是绝对路径/包装命令），提示必须同源，否则粘了跑不通；
 		// bun 通道用自带本体（绝对路径优先）即可。
 		const command = channel.kind === "bun-global" ? `bun ${bunGlobalInstallArgs(spec, { registry: true }).join(" ")}` : channel.kind === "portable-prefix" ? `${this.configuredNpmCommand().join(" ")} ${npmGlobalInstallArgs(spec, { prefixDir: `"${channel.prefixDir}"`, registry: true }).join(" ")}` : "";

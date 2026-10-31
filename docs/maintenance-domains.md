@@ -1,5 +1,8 @@
 # 领域维护手册（改到哪读哪）
 
+> **Status: Current（2026-10-31 核对；以代码与测试为准）**
+
+
 > 领域运维的权威细节都在这份文件与它指向的专题文档里；根 `AGENTS.md` 只保留铁律与路由表。
 > 动手改某个域之前，先在下面速查表找到对应小节，读完再改。
 
@@ -21,7 +24,7 @@
 | 内置扩展热更新 | 判据是逐文件 sha256 不是版本号；覆盖层必须完整快照 + vendored 依赖；磁盘根统一走 `resolveBuiltInExtensionRoots()` | 本文「内置扩展热更新」 |
 | 生图存储 | **base64 不进 JSONL**（只存 ref）；读取永远有字节上界；`<img src>` 只走 `imageContentSrc()` | 本文「生图会话存储」 |
 | 智能体 / 划词工具 | 配置只落 `<userData>/agent-profiles.json`（内置 `builtin-translate` / `builtin-pideck-helper` / `builtin-pideck-diagnostic` / `builtin-pideck-plugin-dev` 只补种不覆盖用户编辑）；一次性调用 `agent-profiles:invoke` 的 systemPrompt 只能由主进程按 agentId 解析（渲染层禁传），侧车必须**独立实例**（单飞语义，共用会打断输入框增强）；「使用」= 会话绑定（`sessionAgentBindings`），每次发送由主进程注入隐藏 `agentMessage`（DSH 退化为可见前缀），时间线只显示用户输入；「智能体」与「定时任务」都是**会话 Tab 栏里的页面式 Tab**（不是弹窗、不是会话 Tab：切会话只失活、关闭才卸载），标题固定走 i18n；系统级划词目前隐藏且默认关闭（`SYSTEM_SELECTION_TOOL_ENABLED=false`、默认设置 false；复制监听、原生捕获、快捷键全部不启动） | 本文「智能体与划词工具」+ `docs/host-boundaries.md` §例外四 |
-| 内置浏览器 Agent | 只经 `pideck-cua` MCP host 暴露 `browser_*`；页面文本不可信、写动作默认自动放行（可关闭改为逐次审批）；guest 不缓存（抽屉/全屏会重建）；CDP 被 DevTools/内存探针占用时降级并标 degraded；不注入 preload、不改 webview 安全档位 | `docs/browser-agent-plan.md` §7/§9/§12 |
+| 内置浏览器 Agent | 只经 `pideck-cua` MCP host 暴露 `browser_*`；页面文本不可信、写动作默认自动放行（可关闭改为逐次审批）；guest 不缓存（抽屉/全屏会重建）；CDP 被 DevTools/内存探针占用时降级并标 degraded；不注入 preload、不改 webview 安全档位 | `docs/archive/plans/browser-agent-plan.md` §7/§9/§12 |
 | ACP 会话链路（backend=acp） | 协议字段收口 `src/main/acp/acpProtocol.ts`；投影切段：工具卡隔断后新开 assistant 段，切段收口 `toolUse`（**只有 settleAcpTurn 能出 `stop/aborted/error`**，写 `stop` 会把一轮拆成多个 agent-run），**一回合多条 assistant 气泡是正常形态**；stall 看门狗豁免「挂起审批 + 在途工具调用」（省略 status 的 `tool_call_update` 是流式补丁帧，不得清豁免），阈值走 settings 读口；历史归档 `userData/acp-sessions/<sha1>.json`（只在回合结算/stop 写、**空快照不写**、base64 只留 ref、读写失败只记日志）；会话内查找与 pi/DSH 共用 `sessions/sessionFindMatches.ts`，入口要 `acpSessionId` | 本文「ACP 会话链路」 |
 | 会话消息编辑/删除/重发 | 编辑/删除写 pi 原生 `context_edit`（原文不改写、费用不回退；被移出的条目界面直接不显示，原始文件仍保留）；重发仍用 `deleted` 墓碑截断分支；追加条目的 parentId 必须取当前 leaf，pi 活着禁改会话文件，三道闸不许放宽 | 本文「会话消息编辑/删除/重发」 |
 | Markdown 渲染 | 唯一引擎 MarkdownStream，禁止再引 marked/react-markdown；流式与 settle 是两条路径，**复现要看最终态**；HTML 一律过 `markdownSanitize.ts`（raw→摘毒→sanitize，不开 harden），模型回复里的 `<style>` 会污染整页图标（#397） | 本文「会话 Markdown 渲染管线」 |
@@ -91,11 +94,11 @@
 
 ## 会话数据面 sidecar（session-store，Wave 1 骨架 + Wave 2/2b 条目表默认开）
 
-- **定位**：同一份 pi 会话 JSONL 现在被四套 TS 各自解析（`SessionScanner`/`SessionCatalog`/`SessionHistoryReader`/`usageStats`），这是 `docs/session-data-plane-plan.md` 要收口的对象。Wave 1 交付骨架（Go 侧快照 + 行边界增量扫描、宿主客户端、构建/CI/装配登记），Wave 2 补上 `get-index`（行级条目表）并接到 `SessionHistoryReader`，Wave 2b 把条目表落盘后**收益门禁通过 → `settings.sessionStoreEnabled` 默认开**（置 false 即回退纯 TS 逐行解析；见计划 §8.11：重启后首次打开 19–31MiB 会话 14–20ms，TS 冷建表 99–188ms）。
+- **定位**：同一份 pi 会话 JSONL 现在被四套 TS 各自解析（`SessionScanner`/`SessionCatalog`/`SessionHistoryReader`/`usageStats`），这是 `docs/archive/plans/session-data-plane-plan.md` 要收口的对象。Wave 1 交付骨架（Go 侧快照 + 行边界增量扫描、宿主客户端、构建/CI/装配登记），Wave 2 补上 `get-index`（行级条目表）并接到 `SessionHistoryReader`，Wave 2b 把条目表落盘后**收益门禁通过 → `settings.sessionStoreEnabled` 默认开**（置 false 即回退纯 TS 逐行解析；见计划 §8.11：重启后首次打开 19–31MiB 会话 14–20ms，TS 冷建表 99–188ms）。
 - **条目表落盘（Wave 2b，改格式必须升 `tableFileVersion`）**：`<userData>/session-store/tables/<sha1(小写 slash 路径)>.table`；首行 header JSON `{version,path,size,mtimeMs,endsWithNewline,lastEntryId,oversizedLines,entryCount}`，其后每行一个 `displayEntry` JSON。复用条件与内存缓存同口径（`size`+`mtimeMs` 都相等）；只变长且上次停在换行边界 → 读旧条目 + `scanTableFrom(start)` 只解析尾部；否则单文件重扫。目录上限 256 文件 / 512MiB（按 mtime 淘汰，永不删当前写入的那个），单表 32MB 超限不落盘；写盘 `.tmp` + rename，失败只 log（加速器，失败不影响可用性）。**两种复用命中前都必须过 `verifyTableBoundary`（`tablepersist.go`，`tableFileVersion = 2`）**：按 `offset/byteLength` 回读首/末条目字节比 `id`（超长行只读 64KiB 前缀），不符即丢弃命中、全量重扫覆盖落盘——版本键看不出「文件被整份重写后恰好更长」，那会让尾部增量从旧 `size` 处错位、`parentId` 链在断点截断，表现就是「只剩最后几轮、没有『加载更多』」且重启不自愈（issue #392）。残留取舍：同长改写且首/末条未变的中段改写仍可能误命中（与 TS 侧 `appendIndexFromTail` 首/末探针一致）。
 - **快照口径（改这里必须同步改两侧测试）**：`<userData>/session-store/state.bin`（JSON，`formatVersion = 1`，单文件多条记录，先写 `state.bin.tmp` 再 rename 原子替换，与 `snapshotFormatVersion` 常量同源）。每文件记录 `{path,size,mtimeMs,entryCount,hasCompaction,endsWithNewline}`：`size` **只会推进到最后一个完整行**（末尾残行不入账），`entryCount` 是带 `id` 的完整行数（**行口径**，未做身份去重），`hasCompaction` 是文件里出现过 `compaction` 行（**文件口径**）。Wave 2 接真实时条目表时需升 `formatVersion` 并补去重。
 - **增量前提（性能核心）**：只有「`size` 变大 **且** 上次记录以换行结尾（`endsWithNewline`）」才从 `prev.size` 开始尾扫；其余（变小/mtime 变但 size 同/上次残行结尾/无记录）一律全量重建。**换行结尾的判断不能省**（打开前尾部就是半行时接着扫会把半行当整行固化）。
-- **扫描口径**：只收 `*.jsonl`（大小写不敏感），跳过 `.pideck-archive` 与 `subagent-artifacts` 目录（成品归档/子代理产物不是可读会话，与 TS 侧一致），深度≤ 32，同路径去重；单行 ≥ 64MiB 时只用一个 64KiB 前缀探 `id`/`compaction`（与 `src/main/pi/jsonlLineStream.ts` 的 `MAX_JSONL_LINE_BYTES` 同口径），不会 OOM。
+- **扫描口径**：只收 `*.jsonl`（大小写不敏感），跳过 `.pideck-archive` 与 `subagent-artifacts` 目录（成品归档/子代理产物不是可读会话，与 TS 侧一致），深度≤ 32，同路径去重；单行 ≥ 64MiB 时只用一个 64KiB 前缀探 `id`/`compaction`（与 `src/main/sessions/jsonlLineStream.ts` 的 `MAX_JSONL_LINE_BYTES` 同口径），不会 OOM。
 - **与三个兄弟 sidecar 的差异（勿盲改）**：roots **不进 spawn 参数**（`spawnFn(binaryPath, args)`，`args = [statePath]` 或 `[statePath, tablesDir]`），而是 `list-files {roots}` / `refresh {roots}` 的逐请求字段——快照按绝对路径分键，换 roots 不重启进程也不丢未变更文件的复用记录（解决了计划 §8.8 Q1）。
 - **fail-open**：二进制缺失/启动失败/boot 超时/协议版本不符/请求超时全部返回 `{ ok: false, reason }`，调用方回退 TS 解析；sidecar 永不抛异常。装配在 `src/main/index.ts`（`new SessionStoreService({...})` + `quitCleanup.register("session-store")`）；`settings.sessionStoreEnabled`（**默认 true**、无 UI，置 false 即回退）= 读取路径总闸；装配处据此决定是否预热 sidecar（不预热则「只在已就绪时问」的读者路径不会生效）。二进制已进 `extraResources`（`resources/session-store/bin` → `session-store`）。
 - **构建链**：`npm run build:session-store`（fail-open，Go 缺失/构建失败只告警 exit 0），产物 `resources/session-store/bin/session-store(.exe)`（`.gitignore` 忽略，只留 `.gitkeep`）；`scripts/dev.js` 自动构建；三平台 workflow 的 `SESSION_STORE_OS/ARCH` env + `go -C native/session-store test ./...`。
@@ -204,7 +207,7 @@
 
 ## 用户消息 chip 与自包含块（引用 / 会话 / 技能 / 提示词模板 / 文件）
 
-- **完整账本**：谁在展开（pi / DSH / PiDeck 的所有权矩阵）、与上游的对齐清单与「有意不同」的理由、已知缺口台账，见 `docs/chip-rendering-refactor-plan.md` §10–§12。本节只放每次改代码前必须知道的硬约束。
+- **完整账本**：谁在展开（pi / DSH / PiDeck 的所有权矩阵）、与上游的对齐清单与「有意不同」的理由、已知缺口台账，见 `docs/archive/plans/chip-rendering-refactor-plan.md` §10–§12。本节只放每次改代码前必须知道的硬约束。
 - **一条契约**：需要折叠成 chip 的东西，**落盘文本必须自带展示身份**（`<quoted_context label message_id>` / `<referenced_session name>` / `<skill name>` / `<prompt_template name>`）。展示侧只认块（`src/shared/expandedRefBlocks.ts`）与裸 token（`composer/chips.ts`）两种形态，不做「按正文反查名称」；旧消息没有块就显示全文，这是有意的兼容策略。
 - **保护区规则（2026-10 实测 bug 的结论）**：发送侧有三个展开器（引用 → 会话引用 → 提示词模板）。后一个不得改写前一个已生成的块，否则「引用里提到 `/commit`」会被替换成整份提交模板——落盘的引用原文被篡改，模型读到的历史与真实不符。判据集中在 `src/renderer/src/utils/protectedText.ts`（`computeProtectedRanges` / `replaceOutsideProtected`）。
 - **会话引用的正文有两条硬约束**（2026-11 现场：引用一个大对话把上游顶到 600K token）：① `readMessages` 取文走 `extractReferenceMessageText`（`src/shared/sessionReferenceContext.ts`），**只取 `type:"text"` 块，thinking 一律不进**——实测一个 558K 字符会话里 471K（84%）是 thinking，标题推断那边（`sessionNameLine.extractTextFromContent`）仍保留 thinking，两条口径刻意分开；② 拼块正文走 `buildSessionReferenceContext`，按 `REFERENCE_CONTEXT_TOKEN_BUDGET`（默认 30K 估算 token）**保留最近的消息**并回报 `dropped`，渲染层据此弹提示 + 在块内加一行省略说明。这段正文会落进用户消息、之后每轮都随历史重传，所以必须一次封顶；`SessionScanner.REFERENCE_MESSAGE_LIMIT/CONTENT_BYTES` 只保护 IPC 负载，不是上下文护栏。回归：`tests/sessionReferenceContext.test.mjs`。

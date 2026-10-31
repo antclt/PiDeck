@@ -1,6 +1,6 @@
 /**
  * Durable journal + crash-convergence entry point for the cross-store host rebind transaction
- * (`docs/remote-host-cross-store-design.md` §4.3, §5.1, §5.4).
+ * (`docs/archive/remote/remote-host-cross-store-design.md` §4.3, §5.1, §5.4).
  *
  * The journal is a write-ahead hint, not the source of truth: the authoritative progress signal is
  * the per-record `beforeLocator` / `afterLocator` comparison against what the stores actually hold,

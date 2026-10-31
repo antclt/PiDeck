@@ -1,5 +1,8 @@
 # 架构与跨层契约
 
+> **Status: Current（2026-10-31 核对；以代码与测试为准）**
+
+
 > 改 `src/main/index.ts`、`src/main/ipc/`、`src/shared/`、新增领域模块或调整后端适配层前读本文。
 > 铁律与路由见根 `AGENTS.md`；Electron 运行时细节见 `docs/electron-playbook.md`。
 

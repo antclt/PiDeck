@@ -2,7 +2,7 @@ package main
 
 // 条目表的磁盘持久化（Wave 2b）。
 //
-// 为什么必须落盘：实测（docs/session-data-plane-plan.md §8.10）Go 冷解析比 TS 慢 2–3×
+// 为什么必须落盘：实测（docs/archive/plans/session-data-plane-plan.md §8.10）Go 冷解析比 TS 慢 2–3×
 // （31.1MiB 会话：Go 343ms vs TS 116ms，`encoding/json` 逐行解码输给 V8），sidecar 唯一
 // 赢的是「条目已在内存」的 0ms；而内存缓存随进程退出丢失，`state.bin` 又只存文件级记账。
 // 于是重启后首次打开大会话仍然要重扫——收益门禁因此未过，Wave 2 只能默认关。

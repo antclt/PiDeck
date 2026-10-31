@@ -2444,7 +2444,7 @@ export class SessionRuntimeCoordinator {
 	/**
 	 * ssh 记录的 catalog 级改写：整条链走远端文件写面，本机一个路径解析都不做。
 	 *
-	 * 冲突规则（docs/remote-write-plan.md §3，硬性）：会话有运行实例 / 正在激活 ⇒ **先判后发**，一个远端
+	 * 冲突规则（docs/archive/remote/remote-write-plan.md §3，硬性）：会话有运行实例 / 正在激活 ⇒ **先判后发**，一个远端
 	 * 命令都不发，抛与本机链路同一个拒绝（`SESSION_RUNTIME_BUSY`，渲染层已有「先停止 Agent」文案）；
 	 * 装配没提供写端口（实验开关关闭）时给稳定码，绝不落回本机路径分支。不确定是否在写 ⇒ fail-closed：
 	 * 宁可拒绝，也不排队等待或与远端 pi 并发写。

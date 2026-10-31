@@ -7,7 +7,7 @@ name: Post-release sidecars
 # 构建 job 跑在 arm64 runner 上、Windows 没有 arm64 构建 job，这两个平台天然缺口，
 # 且原生 prebuild 不能交叉打包）。runtime 打包改为 lock 驱动的交叉解析后（
 # scripts/pack-dsh-runtime 脚本的 --target-os/--target-arch 模式，WSL 真机 boot 验证见
-# docs/dsh-runtime-cross-pack.md），release.yml 内的交叉打包 job 在一个
+# docs/archive/plans/dsh-runtime-cross-pack.md），release.yml 内的交叉打包 job 在一个
 # ubuntu runner 上即可产出全部 6 份归档，本 workflow 的补发职责移除，只保留
 # sync-atomgit 触发兜底。
 #

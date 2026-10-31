@@ -52,7 +52,7 @@ export function historyMessages(document: string, role: "user" | "assistant"): H
 /**
  * 按 pi 原生 context_edit 投影后的**有效历史**（模型下次会看到的），而不是文件里的原始行。
  *
- * 合并后的远端写面契约（docs/remote-integration-notes.md §6）：编辑/删除只追加 context_edit，
+ * 合并后的远端写面契约（docs/archive/remote/remote-integration-notes.md §6）：编辑/删除只追加 context_edit，
  * 原文行保留（可追溯/可撤销）。因此「编辑后的正文」「删掉的消息」必须从投影结果断言；
  * 直接读原始 message 行会永远看到编辑前/删除前的旧内容。
  */

@@ -13,7 +13,7 @@ export type BrowserCdpSessionOptions = {
  * CDP 会话租约：webContents.debugger 是**独占**的（PoC 实测二次 attach 抛 Debugger is already attached），
  * 而仓库里 MemoryMonitor 也会在 PIDECK_MEMORY_PROFILE=1 时 attach 所有 webContents。
  *
- * 策略（docs/browser-agent-plan.md §8）：
+ * 策略（docs/archive/plans/browser-agent-plan.md §8）：
  * - 每次动作 attach → 执行 → detach，把冲突窗口压到最小；
  * - 只 detach 自己 attach 的（租约表），别人的 attach 一律不抢，回 cdp_busy；
  * - attach 失败不重试，调用方可降级 executeJavaScript 并把 degraded 标记回给模型。

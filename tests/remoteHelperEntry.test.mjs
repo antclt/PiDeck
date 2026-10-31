@@ -1580,7 +1580,7 @@ helperTest("hello reports the canonical root, resolving a symlinked root to its 
 });
 
 /*
- * F4: `fs.statMany` is the batched form of `fs.stat` (docs/remote-functional-optimization-plan.md §3 F4).
+ * F4: `fs.statMany` is the batched form of `fs.stat` (docs/archive/remote/remote-functional-optimization-plan.md §3 F4).
  * Per-path rules are the single call's own rules; the batch adds nothing but framing.
  */
 

@@ -17,7 +17,7 @@ import test from "node:test";
  * 抓了会逼人写一堆例外，判据迟早被人关掉。
  */
 
-const DOCS = ["docs/timeline-process-display-research.md", "docs/process-group-implementation-contract.md", "docs/virtualization-audit.md", "docs/web-mobile-viewport-height-plan.md", "tests/fixtures/ask-click-fixture.html"];
+const DOCS = ["docs/archive/plans/timeline-process-display-research.md", "docs/process-group-implementation-contract.md", "docs/virtualization-audit.md", "docs/archive/plans/web-mobile-viewport-height-plan.md", "tests/fixtures/ask-click-fixture.html"];
 
 const LINE_REF = /[A-Za-z0-9_./-]+\.(?:tsx?|css|mjs|html)\s*[:,]?\s+?\d[\d,-]*|[A-Za-z0-9_./-]+\.(?:tsx?|css|mjs|html):\d[\d,-]*/g;
 /** 从一段文本里挑出真引用（冒号形或「文件名 + 空格 + 数字」形）。 */

@@ -9,7 +9,7 @@ import { Button } from "../ui-shadcn/button";
 /**
  * 远端会话的 trust 决策条（Phase 4：P4.2 如实告知 → P4.4b 可决策 + 可撤销）。
  *
- * 语义（`docs/remote-trust-plan.md` §2 / §3）：
+ * 语义（`docs/archive/remote/remote-trust-plan.md` §2 / §3）：
  * - 判定对象是「**这台主机的这个远端项目根**」的 `.pi` 资源（扩展/技能/提示词/项目设置）是否被加载，
  *   key 是 `hostId + endpoint 身份摘要 + 规范项目根`。本组件只按 `(hostId, 项目根)` 操作：
  *   endpoint 材料（指纹 / known_hosts 摘要 / trust key）**不出主进程**，界面上也永远不出现。

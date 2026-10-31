@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 轨迹事实读取探针（计划 docs/trajectory-session-consumer-plan.md §8.2）。
+ * 轨迹事实读取探针（计划 docs/archive/plans/trajectory-session-consumer-plan.md §8.2）。
  *
  * 用法：node scripts/probeTrajectoryRead.mjs <会话文件.jsonl>
  *

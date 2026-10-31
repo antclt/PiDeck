@@ -539,7 +539,7 @@ export type AppSettings = {
 	 *  Wave 2（只做进程内缓存）时收益门禁未过：sidecar 冷解析 251–343ms，比 TS 冷建表 99–188ms 慢；
 	 *  Wave 2b 把条目表落盘后，重启后首次打开 19–31MiB 会话只需 14–20ms（含进程 boot），
 	 *  比 TS 冷建表快 5–12×，因此默认开启（无 UI，可在 settings.json 置 false 回退纯 TS 解析）。
-	 *  详见 docs/session-data-plane-plan.md §8.11。 */
+	 *  详见 docs/archive/plans/session-data-plane-plan.md §8.11。 */
 	sessionStoreEnabled?: boolean;
 
 	// ── CUA（Computer Use Agent）：让 Agent 观察屏幕并注入鼠标/键盘输入 ──
@@ -919,7 +919,7 @@ export type AppSettings = {
 	 * 为什么放 settings.json：随配置备份一起走，与远端 pin（`ssh-host-keys/`）分开——pin 是密码学事实，
 	 * 决策是用户意图，两者生命周期不同（主机退役时决策随主机清理，见 `RemoteProjectTrustService.forgetHost`）。
 	 * key 用 `RemoteTrustKey.remoteTrustKey()` 的产物，三样材料（hostId / endpoint 身份 / 规范项目根）
-	 * 任一变化都会换 key，所以旧决策不会被自动继承（fail-closed，见 `docs/remote-trust-plan.md` §2）。
+	 * 任一变化都会换 key，所以旧决策不会被自动继承（fail-closed，见 `docs/archive/remote/remote-trust-plan.md` §2）。
 	 *
 	 * 缺省/旧文件缺这一段 = 空表（自然兼容）；非数组或字段畸形的条目在读取时被丢弃。
 	 * **写入只走远端 trust 域**（`remote:trust-set` / `remote:trust-clear` → `SettingsStore.replaceRemoteProjectTrust`），
@@ -1251,7 +1251,7 @@ export function createDefaultAppSettings(): AppSettings {
 		idleAgentKeepCount: 5,
 		idleAgentTimeoutMin: 60,
 		standbyRuntimeEnabled: true,
-		// session-store 读取路径默认开启（条目表落盘后收益已证明，见 docs/session-data-plane-plan.md §8.11）：
+		// session-store 读取路径默认开启（条目表落盘后收益已证明，见 docs/archive/plans/session-data-plane-plan.md §8.11）：
 		// 渲染层不展示这个开关，但默认值必须与 main SettingsStore 一致，避免读到 undefined 而误判为关闭。
 		sessionStoreEnabled: true,
 		cuaEnabled: false,

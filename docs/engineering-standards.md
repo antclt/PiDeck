@@ -1,5 +1,8 @@
 # 工程标准（代码 / 测试 / 安全 / 兼容）
 
+> **Status: Current（2026-10-31 核对；以代码与测试为准）**
+
+
 > 写代码、写测试、改 IPC 边界或处理用户数据前读本文。
 > 命令与门禁速查见根 `AGENTS.md`；域运维细节见 `docs/maintenance-domains.md`。
 
@@ -7,7 +10,7 @@
 
 来源 <https://github.com/unclebob/ub-mode>：Bob 大叔给自家 agent 的改动纪律（脱胎于 `poteto-mode` / `pstack`），配 crapper / dryer / mutator 三个确定性门禁工具。
 原作者未声明 LICENSE；维护者明确「复制都没事，思想不要断」，因此这里**按原文结构逐条对译、全量保留**，不为了精简删条——包括已经被本仓库其他规则覆盖或与之冲突的条目，只在末尾「落地注记」里标出以哪个为准。
-原文逐字副本：`docs/ub-mode.SKILL.original.md`（3958 字节，sha256 `4120873d…`）；译文与它 20 个小节一一对应，上游发新版时拿它做 diff，再补译新增条目。
+原文逐字副本：`docs/archive/research/ub-mode.SKILL.original.md`（3958 字节，sha256 `4120873d…`）；译文与它 20 个小节一一对应，上游发新版时拿它做 diff，再补译新增条目。
 
 三个阶段顺序固定：**First Make it Work → Then Make it Right → Practice**。
 

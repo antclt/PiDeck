@@ -2,7 +2,7 @@
 /**
  * DSH 深融合 PoC 探针（不用 `dsh web`）
  *
- * 验证目标（对应 docs/dsh-agent-backend-plan.md §8 阶段 0）：
+ * 验证目标（对应 docs/archive/plans/dsh-agent-backend-plan.md §8 阶段 0）：
  *   1. 进程内 `boot()` 引导完整 DSH host（dsh-base 组合，无 HTTP/无浏览器）
  *   2. `InProcessApiClient(toFetchHandler(ctx.apiProxy))` 零网络直连
  *   3. session.create → session.prompt → mux 流式事件

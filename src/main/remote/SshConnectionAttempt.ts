@@ -126,7 +126,7 @@ export type SshAttemptHost = {
 
 /**
  * A control session must outlive any one-shot budget, so an attempt states the `session` lifetime instead of
- * a deadline: the launcher arms no wall-clock timer at all (docs/remote-phase4-plan.md §3.6). Its real bounds
+ * a deadline: the launcher arms no wall-clock timer at all (docs/archive/remote/remote-phase4-plan.md §3.6). Its real bounds
  * are the output budget below, the handshake's own local deadline, the ssh keepalive, and this attempt's
  * paired release path - a session is never left for nobody to own.
  */

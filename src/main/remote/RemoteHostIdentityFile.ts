@@ -6,7 +6,7 @@
  * 由 `SshCommandBuilder` 以数组形式下发，不经过 shell），`~` 永远不会被展开。旧实现因此让最常见的
  * 配置形态以不透明的 `REMOTE_HOST_STORE_INVALID` 失败（审查探针已验证）。
  *
- * 语义边界（与 `docs/remote-development-plan.md` §5.2 line 261 一致）：
+ * 语义边界（与 `docs/archive/remote/remote-development-plan.md` §5.2 line 261 一致）：
  * - 展开对象是**本机账号**的 HOME：这个文件是本地 OpenSSH 客户端要读的私钥引用，不是远端账号的文件。
  *   把它按远端 HOME 展开会把本机路径指向一个远端不存在的目录，语义也是错的。
  * - 只展开 `~` 与 `~/...`；`~user`（别的用户 home）与相对路径**拒绝**而不是猜：OpenSSH 对相对

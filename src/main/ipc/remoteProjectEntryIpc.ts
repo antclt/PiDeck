@@ -13,7 +13,7 @@ const PROJECT_ID = (value: unknown): value is string => typeof value === "string
 const SENDER = (sender: IpcMainInvokeEvent["sender"]): boolean => Number.isSafeInteger(sender.id) && sender.id >= 1 && !sender.isDestroyed();
 
 /**
- * 远端文件管理 IPC 边界（Phase 5 文件面；docs/remote-file-management-plan.md §3.2/§3.5）。
+ * 远端文件管理 IPC 边界（Phase 5 文件面；docs/archive/remote/remote-file-management-plan.md §3.2/§3.5）。
  *
  * 只做输入形状/值域/发送者/启用门禁与稳定码信封；locator、令牌、主机锁与固定 Node 命令全部在
  * RemoteProjectEntryService。renderer 永远不发送 hostId/绝对路径/摘要。

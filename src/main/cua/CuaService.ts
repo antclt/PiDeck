@@ -38,7 +38,7 @@ export type CuaServiceDeps = {
 	getAutoApprove?: () => boolean;
 	/**
 	 * 浏览器 Agent（可选）：与 CUA 共用同一个 MCP host 与 mcp.json 条目，
-	 * 但开关、gate 实例与 autoApprove 全部独立（docs/browser-agent-plan.md §7.2）。
+	 * 但开关、gate 实例与 autoApprove 全部独立（docs/archive/plans/browser-agent-plan.md §7.2）。
 	 */
 	browserAgent?: BrowserAgentService;
 };

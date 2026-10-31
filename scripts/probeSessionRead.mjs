@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 会话读取基线探针（`docs/session-data-plane-plan.md` 的 Wave 0）。
+ * 会话读取基线探针（`docs/archive/plans/session-data-plane-plan.md` 的 Wave 0）。
  *
  * 目的：给「会话数据面统一 sidecar」提供可复跑的现状数字——侧栏首屏扫描耗时、
  * 打开大会话（全量重建显示索引）耗时、主进程内存增量。只有量出这三项，才能判断

@@ -1,6 +1,6 @@
 /**
  * 浏览器 Agent 的结构化错误：工具层只把 code 回给模型，便于模型据此决定是否重试/重新快照。
- * 命名与 docs/browser-agent-plan.md §7.3 的错误码表一致。
+ * 命名与 docs/archive/plans/browser-agent-plan.md §7.3 的错误码表一致。
  */
 
 export const BROWSER_AGENT_ERROR_CODES = [

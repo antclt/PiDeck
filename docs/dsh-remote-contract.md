@@ -1,5 +1,8 @@
 # DSH Typert Remote 集成契约
 
+> **Status: Current（2026-10-31 核对；以代码与测试为准）**
+
+
 > 本文是**仍生效的集成契约**，原提取自 0.1.5 迁移文档（`dsh-0.1.5-typert-migration.md`，迁移叙事部分已删，需要考古看 git 历史）。
 > 0.2.0 的增量变化（PTC 后端、预设 registry、V3→V4 会话格式、事件投影 V4 等）见 `dsh-0.2.0-migration.md`；两文叠加 = 当前完整契约。
 

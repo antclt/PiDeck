@@ -9,7 +9,7 @@ Status: **Phase A 已落地（契约 + 两个 provider + 行为测试）**；未
 | 面板 | 本地 | 远端 |
 |---|---|---|
 | 文件抽屉 | `FileTree` 系列 | `RemoteProjectPanel`（402 行）+ 独立 hooks |
-| Git | `GitPanel`（1773 行，全量） | `RemoteGitPanel`（628 行，子集） |
+| Git | `GitPanel`（1811 行，全量） | `RemoteGitPanel`（628 行，子集） |
 | 会话/终端 | ✅ 同一套 `SessionView` / `TerminalDock` | 同左（靠 `SessionLocator` 分支） |
 
 后果不是“代码多”，而是**同一事实有两个读取点**：这轮修掉的侧栏 rootStatus badge（一个读取点按 Op 信封、一个按扁平）就是这类漂移；每加一个本地面板功能，远端要再实现一遍。

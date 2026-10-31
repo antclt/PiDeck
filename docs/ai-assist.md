@@ -1,5 +1,8 @@
 # AI 协助（issue / PR 自动应答与评审）
 
+> **Status: Current（2026-10-31 核对；以代码与测试为准）**
+
+
 > 落地文件：`.github/workflows/ai-assist.yml`（唯一入口，规则改动都在这里和本文）。
 > 定位：**只评论，不写代码、不开 PR、不合并**。合并仍走 branch protection + auto-merge。
 

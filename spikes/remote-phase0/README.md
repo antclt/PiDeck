@@ -67,4 +67,4 @@ node spikes/remote-phase0/pi-rpc-over-ssh.mjs --host serve --expected-fingerprin
 - 本地自测 7/7 只能证明脚本的基本帧定界、活动中取消、响应匹配和 EOF 路径。
 - 真机必须记录 Linux/macOS 发行版、`node --version`、`pi --version`、远端 cwd 与结果。若 stdout 被启动脚本/banner 污染，或断线后 PID 仍存在，应先修正 launcher 方案，不推进 Phase 1。
 - 当前只是有限时间内的一次 PID 回收观察，不是对子进程树、PID 复用或网络异常的形式化证明。完整安全/生命周期保证由后续 runner + lease 的集成测试承担。
-- 脚本修改仍在当前 worktree 未提交；真机结果需回填 [远程开发计划](../../docs/remote-development-plan.md) 的 Phase 0 状态。
+- 脚本修改仍在当前 worktree 未提交；真机结果需回填 [远程开发计划](../../docs/archive/remote/remote-development-plan.md) 的 Phase 0 状态。

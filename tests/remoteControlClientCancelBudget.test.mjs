@@ -3,7 +3,7 @@ import test from "node:test";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 /**
- * F2a：重复取消合并（docs/remote-functional-optimization-plan.md §3 F2）。
+ * F2a：重复取消合并（docs/archive/remote/remote-functional-optimization-plan.md §3 F2）。
  *
  * 修复前对同一个未回复请求连发 256 次 `cancel()` 会得到 257 个 pending、256 条 cancel 帧与 257 个
  * timer；这里把它固化成有界合并：一条在途 cancel 帧、一个共享结果，目标结算或断开时全部归零。

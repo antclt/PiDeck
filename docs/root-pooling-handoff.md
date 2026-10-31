@@ -1,5 +1,8 @@
 # 会话交接：root 池化生产实现（B0–B4）
 
+> **Status: Active plan（2026-10-31 核对；执行前以当前代码与 HEAD 为准）**
+
+
 > 用途：把「同主机多项目 root 池化」的生产实现交给新会话。设计权威是
 > `docs/remote-host-root-pooling-adr.md`（已含现状 file:line、方案对比、B0–B5 迁移、回滚、验证矩阵、真机测量）。
 > 本文件只补“开工须知”，不重复 ADR 内容。
@@ -7,8 +10,8 @@
 ## 0. 状态
 
 - 仓库：`F:\PiDeck`，主工作树在 `dev`。
-- 本任务起点：`dev` = `d8f5e3d0e`（“收尾轮最终全绿”之后）。
-- 远端：`origin` = github.com/ayuayue/PiDeck。**fetch 后 origin/dev 已比本分支多 48 个提交**（商业化 UI Wave 1–7、ACP/DSH/EasyTier、CI 门禁等），两边已分叉；**尚未 merge origin/dev**。
+- 本任务起点：`dev` = `f6f4eeaf6`（已合入 origin/dev 商业化 UI Wave 1–7、ACP/DSH/EasyTier 与工作区面板服务缝 Phase A）。
+- 远端：`origin` = github.com/ayuayue/PiDeck。origin/dev 已合入；若开工时 HEAD 已变化，以实际 `git log` 为准。
 - 本轮只交付了 ADR + 探针（`docs/remote-host-root-pooling-adr.md`、`tests/remoteRootSwitchProbe.mjs`），**生产代码零改动**。
 - 历史工作 worktree（w1–w4/v/ws1–ws4）已清理；只剩 `F:\PiDeck`、`F:\PiDeck-cloud-sync`、`F:\PiDeck-remote`（后两个属其他工作流，勿动）。
 

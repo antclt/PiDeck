@@ -1,5 +1,8 @@
 # 渲染层虚拟化审计
 
+> **Status: Historical（2026-10-31 归档；测试固定读取此路径，内容记录当时审计，不代表现状）**
+
+
 > 判据 + 现状登记。判定标准是长期资产，具体行数/接入点数量会变——变的东西不写死在这里，
 > 由 `tests/scrollContainerGuard.mjs` 现算（`node tests/scrollContainerGuard.mjs`）。
 
